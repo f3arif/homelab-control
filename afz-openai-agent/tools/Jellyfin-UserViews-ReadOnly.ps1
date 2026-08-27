@@ -63,13 +63,13 @@ $seen=New-Object 'System.Collections.Generic.HashSet[string]'
 $tables=@(Sql "select name from sqlite_master where type='table' order by name;")
 foreach($t in $tables){
   $safeT=$t.Replace('"','""')
-  $cols=@(Sql "pragma table_info(\"$safeT\");")
+  $cols=@(Sql ('pragma table_info("{0}");' -f $safeT))
   foreach($line in $cols){
     $p=$line -split '\|'
     if($p.Count -ge 3 -and $p[1] -match '(?i)token|accesskey|apikey'){
       $col=$p[1].Replace('"','""')
       try{
-        $vals=@(Sql "select \"$col\" from \"$safeT\" where \"$col\" is not null and length(\"$col\")>=12 limit 100;")
+        $vals=@(Sql ('select "{0}" from "{1}" where "{0}" is not null and length("{0}")>=12 limit 100;' -f $col,$safeT))
         foreach($v in $vals){if($v -and $seen.Add($v)){[void]$candidates.Add($v)}}
       }catch{}
     }
