@@ -22,12 +22,10 @@ $replacement='$AllowedClients = @('+(($vals|ForEach-Object {"'$_'"}) -join ',')+
 $patched=[regex]::Replace($text,'(?m)^\$AllowedClients\s*=\s*@\([^\r\n]*\)\s*$',[System.Text.RegularExpressions.MatchEvaluator]{param($m)$replacement},1)
 if($patched -eq $text){throw 'Could not inject AFZ client allowlist into runtime copy'}
 
-# Windows PowerShell command-mode can pass a bare [ordered]@{} function argument as
-# the literal token "[ordered]@" plus the hashtable in $args. Normalize this inside
-# Send-Json so /health and any future ordered responses serialize as real JSON.
-$needle='  param($Context,[int]$Status,$Object)'
-$fix="  param(`$Context,[int]`$Status,`$Object)`r`n  if (`$Object -eq '[ordered]@' -and `$args.Count -gt 0) { `$Object = `$args[0] }"
-if($patched.Contains($needle)){$patched=$patched.Replace($needle,$fix)}
+# PowerShell argument mode does not reliably pass a bare [ordered]@{} literal after
+# positional arguments. The agent has one direct health response using that form;
+# use a normal hashtable there. Ordered dictionaries returned through variables are fine.
+$patched=$patched.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
