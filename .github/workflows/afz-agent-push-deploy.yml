@@ -1,20 +1,11 @@
-name: AFZ Agent Push Deploy
+name: AFZ Agent Push Deploy (optional Tailscale OIDC)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'afz-openai-agent/**'
-      - '.github/workflows/afz-agent-push-deploy.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
-
-concurrency:
-  group: afz-agent-push-deploy
-  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -35,19 +26,9 @@ jobs:
         run: |
           set -euo pipefail
           payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
-          for attempt in $(seq 1 15); do
-            if curl --silent --show-error --fail-with-body \
-              --connect-timeout 3 --max-time 8 \
-              -H 'Content-Type: application/json' \
-              -X POST \
-              --data "$payload" \
-              http://100.70.25.8:8797/api/push-deploy; then
-              echo
-              echo "AFZ push deploy accepted for $AFZ_SHA"
-              exit 0
-            fi
-            echo "Windows-main not ready yet (attempt $attempt/15); retrying in 1 second..."
-            sleep 1
-          done
-          echo "AFZ push deploy endpoint did not accept the push." >&2
-          exit 1
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 15 \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy
