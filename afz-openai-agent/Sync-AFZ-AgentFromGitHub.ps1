@@ -68,6 +68,12 @@ try{
       $fixed=$fixed.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
       $fixed=$fixed.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
       $fixed=$fixed.Replace("Get-Content -LiteralPath `$file -Raw","Get-Content -LiteralPath `$file -Encoding UTF8 -Raw")
+      # PowerShell's automatic $args variable is case-insensitive. The canonical agent historically used
+      # $Args as a named tool parameter, causing JSON tool arguments such as root/path to arrive blank.
+      # Normalize only the agent runtime source so ordinary scripts that intentionally use $args are untouched.
+      if($ps1.Name -eq 'AFZ-OpenAI-Agent-v2.ps1'){
+        $fixed=$fixed.Replace('$Args','$ToolArgs')
+      }
       if($fixed -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $fixed -notmatch '(?im)^\s*Add-Type\s+-AssemblyName\s+System\.Security'){
         $load='Add-Type -AssemblyName System.Security -ErrorAction Stop'
         if($fixed -match '(?m)^\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*$'){
@@ -82,7 +88,7 @@ try{
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
   }
 
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal';refTransport=$refTransport}
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   # Only agent-tree file changes require a service restart. A branch-head-only signal commit must not restart services.
   Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot;refTransport=$refTransport})
