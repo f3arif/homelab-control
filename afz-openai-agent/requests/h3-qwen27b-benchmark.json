@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "project": "qwen38-27b-website-benchmark",
+  "job_id": "qwen27b-website-20260827-i02",
+  "start_iteration": 2,
+  "max_iterations": 5
+}
