@@ -7,13 +7,17 @@ New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 $statusFile=Join-Path $stateRoot 'last-update.json'
 $started=Get-Date
 
-$sync=Join-Path $InstallRoot 'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1'
-if(-not(Test-Path $sync)){
-  $tmp=Join-Path $env:TEMP 'Sync-AFZ-AgentFromGitHub.ps1'
-  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/f3arif/homelab-control/main/afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -OutFile $tmp -UseBasicParsing -TimeoutSec 60
-  $sync=$tmp
+# Always bootstrap the current sync helper so a stale local helper cannot pin us to an old main SHA.
+$nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$tmpSync=Join-Path $env:TEMP ('Sync-AFZ-AgentFromGitHub-'+[guid]::NewGuid().ToString('n')+'.ps1')
+$syncUri="https://raw.githubusercontent.com/f3arif/homelab-control/main/afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1?nocache=$nonce"
+$syncHeaders=@{'User-Agent'='AFZ-OpenAI-Agent-Updater';'Cache-Control'='no-cache';'Pragma'='no-cache'}
+Invoke-WebRequest -Uri $syncUri -Headers $syncHeaders -OutFile $tmpSync -UseBasicParsing -TimeoutSec 60
+try{
+  $syncResult=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmpSync -InstallRoot $InstallRoot | Select-Object -Last 1
+}finally{
+  Remove-Item -LiteralPath $tmpSync -Force -ErrorAction SilentlyContinue
 }
-$syncResult=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $sync -InstallRoot $InstallRoot | Select-Object -Last 1
 if(-not $syncResult){throw 'Agent source sync returned no result'}
 if($syncResult -is [string]){try{$syncResult=$syncResult|ConvertFrom-Json}catch{}}
 $changed=[bool]$syncResult.changed
@@ -67,5 +71,5 @@ function Ensure-Running([string]$taskName,[bool]$restart){
 Ensure-Running $agentTaskName $changed
 Ensure-Running $controlTaskName $changed
 
-$result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;changed=$changed;updaterCadenceSeconds=60;agentPort=8796;controlPort=8797;clients=$ips;transport='github-zip-no-git'}
+$result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;changed=$changed;updaterCadenceSeconds=60;agentPort=8796;controlPort=8797;clients=$ips;transport='github-ref-sha-pinned-no-git'}
 $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
