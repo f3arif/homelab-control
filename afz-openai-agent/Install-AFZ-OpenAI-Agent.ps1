@@ -29,7 +29,7 @@ if(Test-Path (Join-Path $InstallRoot '.git')){
   }else{New-Item -ItemType Directory -Force -Path (Split-Path $InstallRoot -Parent)|Out-Null}
   & $git clone $repo $InstallRoot
 }
-$agent=Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent.ps1'
+$agent=Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'
 if(-not(Test-Path $agent)){throw "Agent not found after pull: $agent"}
 
 if(-not(Test-Path $keyFile)){
@@ -38,11 +38,17 @@ if(-not(Test-Path $keyFile)){
   if(-not $existing){$existing=$env:OPENAI_API_KEY}
   if($existing){Save-Key $existing}
   else{
-    Write-Host 'One-time setup: enter the OpenAI API key. It will be encrypted with Windows DPAPI (LocalMachine) and the plaintext will not be written to disk.' -ForegroundColor Yellow
+    Write-Host 'One-time setup: enter the OpenAI API key. It will be encrypted with Windows DPAPI (LocalMachine); plaintext is not written to disk.' -ForegroundColor Yellow
     $sec=Read-Host 'OpenAI API key' -AsSecureString
     $bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-    try{$plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr);if(-not $plain){throw 'Empty API key'};Save-Key $plain}
-    finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr);$plain=$null}
+    try{
+      $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+      if(-not $plain){throw 'Empty API key'}
+      Save-Key $plain
+    }finally{
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+      $plain=$null
+    }
   }
 }
 
@@ -62,14 +68,20 @@ Register-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -Action $uAction -Tr
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress '100.71.26.69' -Profile Any | Out-Null
 
+$shortcutPath=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ OpenAI Agent.url'
+@("[InternetShortcut]","URL=http://127.0.0.1:$Port/","IconFile=%SystemRoot%\System32\shell32.dll","IconIndex=14") | Set-Content -LiteralPath $shortcutPath -Encoding ASCII
+
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep 3
 try{
   $h=Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 10
   Write-Host "AFZ OpenAI Agent installed and healthy: $($h.version) / $($h.mode)" -ForegroundColor Green
+  Write-Host "UI: http://127.0.0.1:$Port/"
   Write-Host "Local API: http://127.0.0.1:$Port/api/request"
-  Write-Host "Tailscale API: http://$BindHost`:$Port/api/request"
+  Write-Host "HP/Tailscale API: http://$BindHost`:$Port/api/request"
+  Write-Host 'Future code updates will pull from GitHub main automatically every 15 minutes.'
+  Start-Process "http://127.0.0.1:$Port/"
 }catch{
   Write-Warning "Task installed but health check failed: $($_.Exception.Message)"
-  Write-Host "Check C:\ProgramData\AFZ\OpenAIAgent\logs\agent.log"
+  Write-Host 'Check C:\ProgramData\AFZ\OpenAIAgent\logs\agent.log'
 }
