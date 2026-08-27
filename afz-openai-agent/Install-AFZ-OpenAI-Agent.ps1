@@ -30,8 +30,8 @@ if(Test-Path (Join-Path $InstallRoot '.git')){
   }else{New-Item -ItemType Directory -Force -Path (Split-Path $InstallRoot -Parent)|Out-Null}
   & $git clone $repo $InstallRoot
 }
-$agent=Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'
-if(-not(Test-Path $agent)){throw "Agent not found after pull: $agent"}
+$wrapper=Join-Path $InstallRoot 'afz-openai-agent\Start-AFZ-OpenAI-Agent.ps1'
+if(-not(Test-Path $wrapper)){throw "Agent wrapper not found after pull: $wrapper"}
 
 if(-not(Test-Path $keyFile)){
   $existing=[Environment]::GetEnvironmentVariable('OPENAI_API_KEY','Machine')
@@ -54,7 +54,7 @@ if(-not(Test-Path $keyFile)){
 }
 
 $taskName='AFZ OpenAI Agent'
-$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$agent`" -Port $Port -BindHost `"$BindHost`""
+$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper`" -InstallRoot `"$InstallRoot`" -Port $Port -BindHost `"$BindHost`""
 $trigger=New-ScheduledTaskTrigger -AtStartup
 $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -66,8 +66,12 @@ $uTrigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(5)) -Repetit
 $uSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 Register-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -Action $uAction -Trigger $uTrigger -Settings $uSettings -Principal $principal -Force | Out-Null
 
+$allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
+$ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
+if($ips.Count -eq 0){throw 'No Tailscale clients configured'}
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress '100.71.26.69' -Profile Any | Out-Null
+Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress $ips -Profile Any | Out-Null
 
 $shortcutPath=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ OpenAI Agent.url'
 @("[InternetShortcut]","URL=http://127.0.0.1:$Port/","IconFile=%SystemRoot%\System32\shell32.dll","IconIndex=14") | Set-Content -LiteralPath $shortcutPath -Encoding ASCII
@@ -78,9 +82,9 @@ try{
   $h=Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 10
   Write-Host "AFZ OpenAI Agent installed and healthy: $($h.version) / $($h.mode)" -ForegroundColor Green
   Write-Host "UI: http://127.0.0.1:$Port/"
-  Write-Host "Local API: http://127.0.0.1:$Port/api/request"
-  Write-Host "HP/Tailscale API: http://$BindHost`:$Port/api/request"
-  Write-Host 'Future code updates will pull from GitHub main automatically every 15 minutes.'
+  Write-Host "Tailscale UI/API: http://$BindHost`:$Port/"
+  Write-Host ('Allowed Tailscale peers: '+($ips -join ', '))
+  Write-Host 'Future code/access-policy updates will pull from GitHub main automatically every 15 minutes.'
   if($RunJellyfinDiagnosis){
     $diag=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Diagnosis.ps1'
     if(Test-Path $diag){
