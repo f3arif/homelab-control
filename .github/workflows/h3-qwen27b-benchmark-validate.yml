@@ -1,0 +1,92 @@
+name: Validate H3 Qwen27B Benchmark Fabric
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
+      - 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1'
+      - 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
+      - '.github/workflows/h3-qwen27b-website-benchmark.yml'
+      - '.github/workflows/h3-qwen27b-benchmark-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell with Windows PowerShell AST
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'afz-openai-agent/AFZ-Agent-Control.ps1',
+            'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1',
+            'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
+          )
+          $failed = $false
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "PARSE FAIL: $file" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+            }
+            else {
+              Write-Host "PARSE PASS: $file" -ForegroundColor Green
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Assert typed execution boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $control = Get-Content 'afz-openai-agent/AFZ-Agent-Control.ps1' -Raw
+          $relay = Get-Content 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
+          $runner = Get-Content 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
+          $workflow = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
+
+          $mustContain = @(
+            '/api/h3-qwen27b-benchmark',
+            'tag:afz-deploy',
+            'Faiz@100.106.186.118',
+            'qwen3.8:27b',
+            'Qwen38-27B-Website-Benchmark-20260826-174739',
+            'MaxIterations',
+            'Path]::IsPathRooted',
+            'path traversal'
+          )
+          $all = $control + "`n" + $relay + "`n" + $runner
+          foreach ($needle in $mustContain) {
+            if (-not $all.Contains($needle)) { throw "Required typed boundary missing: $needle" }
+          }
+
+          foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c')) {
+            if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden broad execution primitive found: $forbidden" }
+          }
+
+          if ($workflow -notmatch 'max_iterations') { throw 'Workflow iteration bound missing' }
+          if ($workflow -notmatch '100\.70\.25\.8:8797/api/h3-qwen27b-benchmark') { throw 'Workflow typed endpoint missing' }
+          if ($workflow -match 'OneDrive|SharePoint') { throw 'Legacy automation transport reference found' }
+
+      - name: Confirm workflow is request-scoped
+        shell: powershell
+        run: |
+          $w = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
+          if ($w -notmatch [regex]::Escape("afz-openai-agent/requests/h3-qwen27b-benchmark.json")) {
+            throw 'Benchmark workflow is not scoped to the typed request file.'
+          }
+          if ($w -notmatch 'cancel-in-progress: false') {
+            throw 'Benchmark concurrency protection missing.'
+          }
