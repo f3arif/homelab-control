@@ -8,10 +8,11 @@ param(
 )
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Add-Type -AssemblyName System.Security -ErrorAction Stop
 $state='C:\ProgramData\AFZ\OpenAIAgent'
 $keyFile=Join-Path $state 'openai-key.dpapi'
 New-Item -ItemType Directory -Force -Path $state | Out-Null
-function Save-Key([string]$key){$bytes=[Text.Encoding]::UTF8.GetBytes($key);$protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::LocalMachine);[IO.File]::WriteAllBytes($keyFile,$protected);& icacls.exe $keyFile /inheritance:r /grant:r 'SYSTEM:F' 'Administrators:F' | Out-Null}
+function Save-Key([string]$key){$bytes=[Text.Encoding]::UTF8.GetBytes($key);$protected=[System.Security.Cryptography.ProtectedData]::Protect($bytes,$null,[System.Security.Cryptography.DataProtectionScope]::LocalMachine);[IO.File]::WriteAllBytes($keyFile,$protected);& icacls.exe $keyFile /inheritance:r /grant:r 'SYSTEM:F' 'Administrators:F' | Out-Null}
 
 # Git-independent source bootstrap.
 $tmpSync=Join-Path $env:TEMP 'Sync-AFZ-AgentFromGitHub.ps1'
