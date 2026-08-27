@@ -1,0 +1,181 @@
+name: H3 Qwen27B Website Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/requests/h3-qwen27b-benchmark.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: h3-qwen27b-website-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact request commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate typed benchmark request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          f='afz-openai-agent/requests/h3-qwen27b-benchmark.json'
+          test -f "$f"
+          jq -e '.schema == 1 and .project == "qwen38-27b-website-benchmark"' "$f" >/dev/null
+          job_id=$(jq -r '.job_id' "$f")
+          start_iteration=$(jq -r '.start_iteration // 2' "$f")
+          max_iterations=$(jq -r '.max_iterations // 5' "$f")
+          [[ "$job_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$ ]]
+          [[ "$start_iteration" =~ ^[0-9]+$ ]]
+          [[ "$max_iterations" =~ ^[0-9]+$ ]]
+          (( start_iteration >= 1 && start_iteration <= 8 ))
+          (( max_iterations >= start_iteration && max_iterations <= 8 ))
+          echo "job_id=$job_id" >> "$GITHUB_OUTPUT"
+          echo "start_iteration=$start_iteration" >> "$GITHUB_OUTPUT"
+          echo "max_iterations=$max_iterations" >> "$GITHUB_OUTPUT"
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Start typed H3 benchmark
+        shell: bash
+        env:
+          JOB_ID: ${{ steps.request.outputs.job_id }}
+          START_ITERATION: ${{ steps.request.outputs.start_iteration }}
+          MAX_ITERATIONS: ${{ steps.request.outputs.max_iterations }}
+          AFZ_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -cn \
+            --arg job "$JOB_ID" \
+            --arg sha "$AFZ_SHA" \
+            --argjson start "$START_ITERATION" \
+            --argjson max "$MAX_ITERATIONS" \
+            '{action:"start",repository:"f3arif/homelab-control",ref:"refs/heads/main",sha:$sha,jobId:$job,startIteration:$start,maxIterations:$max}')
+          ok=0
+          for attempt in $(seq 1 36); do
+            code=$(curl -sS -o start.json -w '%{http_code}' \
+              --connect-timeout 4 --max-time 20 \
+              -H 'Content-Type: application/json' \
+              -X POST --data "$payload" \
+              http://100.70.25.8:8797/api/h3-qwen27b-benchmark || true)
+            if [[ "$code" == "200" || "$code" == "202" ]]; then
+              cat start.json
+              ok=1
+              break
+            fi
+            echo "Typed benchmark endpoint not ready yet (HTTP $code), attempt $attempt/36"
+            sleep 10
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo 'Could not start typed H3 benchmark.' >&2
+            test -f start.json && cat start.json >&2 || true
+            exit 20
+          fi
+
+      - name: Poll benchmark result
+        shell: bash
+        env:
+          JOB_ID: ${{ steps.request.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -cn --arg job "$JOB_ID" '{action:"status",jobId:$job}')
+          completed=0
+          for poll in $(seq 1 220); do
+            code=$(curl -sS -o status.json -w '%{http_code}' \
+              --connect-timeout 4 --max-time 20 \
+              -H 'Content-Type: application/json' \
+              -X POST --data "$payload" \
+              http://100.70.25.8:8797/api/h3-qwen27b-benchmark || true)
+            if [[ "$code" == "200" ]]; then
+              state=$(jq -r '.status // "unknown"' status.json)
+              phase=$(jq -r '.phase // .message // ""' status.json)
+              iter=$(jq -r '.iteration // .startIteration // ""' status.json)
+              echo "poll=$poll state=$state iteration=$iter phase=$phase"
+              if [[ "$state" == "completed" || "$state" == "failed" || "$state" == "error" ]]; then
+                completed=1
+                break
+              fi
+            else
+              echo "status HTTP $code; continuing"
+            fi
+            sleep 30
+          done
+          if [[ "$completed" != "1" ]]; then
+            echo 'Benchmark polling timed out.' >&2
+            exit 21
+          fi
+          cat status.json
+
+      - name: Publish sanitized durable result
+        if: always() && hashFiles('status.json') != ''
+        shell: bash
+        env:
+          JOB_ID: ${{ steps.request.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p afz-openai-agent/results
+          jq '{
+            schema:1,
+            project:"qwen38-27b-website-benchmark",
+            control_issue:"https://github.com/f3arif/faiz-homelab/issues/12",
+            job_id:(.jobId // env.JOB_ID),
+            status:(.status // "unknown"),
+            benchmark_status:(.result.benchmarkStatus // "UNKNOWN"),
+            model:(.result.model // .model // "qwen3.8:27b"),
+            host:(.result.host // .host // "DESKTOP-H3R6CQN"),
+            last_iteration:(.result.lastIteration // .iteration // null),
+            build_exit:(.result.buildExit // null),
+            build_seconds:(.result.buildSeconds // null),
+            routes_passing:(.result.routesPassing // null),
+            routes_total:(.result.routesTotal // 5),
+            reason:(.result.reason // .message // ""),
+            completed_at:(.result.completedAt // .updatedAt // null),
+            source_commit:"${{ github.sha }}",
+            workflow_run:"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }' status.json > afz-openai-agent/results/h3-qwen27b-benchmark-latest.json
+
+          cat afz-openai-agent/results/h3-qwen27b-benchmark-latest.json >> "$GITHUB_STEP_SUMMARY"
+
+          cp afz-openai-agent/results/h3-qwen27b-benchmark-latest.json /tmp/h3-qwen-result.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+          mkdir -p afz-openai-agent/results
+          cp /tmp/h3-qwen-result.json afz-openai-agent/results/h3-qwen27b-benchmark-latest.json
+          git add afz-openai-agent/results/h3-qwen27b-benchmark-latest.json
+          if git diff --cached --quiet; then
+            echo 'Result already current.'
+          else
+            git commit -m "Record H3 Qwen27B benchmark result $JOB_ID"
+            git push origin main
+          fi
+
+      - name: Enforce benchmark outcome
+        if: always() && hashFiles('status.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=$(jq -r '.result.benchmarkStatus // "ERROR"' status.json)
+          routes=$(jq -r '.result.routesPassing // 0' status.json)
+          echo "benchmark_status=$result routes=$routes/5"
+          if [[ "$result" != "PASS" || "$routes" != "5" ]]; then
+            exit 30
+          fi
