@@ -48,13 +48,15 @@ try{
     if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
   }
 
-  # Compatibility normalization for Windows PowerShell 5.1.
+  # Compatibility normalization for Windows PowerShell 5.1 and current Responses API schemas.
   foreach($ps1 in @(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter '*.ps1' -ErrorAction SilentlyContinue)){
     try{
       $text=Get-Content -LiteralPath $ps1.FullName -Raw
       $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
       # In PowerShell argument mode, a bare [ordered]@{} after positional arguments can be tokenized incorrectly.
       $fixed=$fixed.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
+      # Current Responses API rejects required: [] for zero-argument strict function schemas.
+      $fixed=$fixed.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
       if($fixed -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $fixed -notmatch '(?im)^\s*Add-Type\s+-AssemblyName\s+System\.Security'){
         $load='Add-Type -AssemblyName System.Security -ErrorAction Stop'
         if($fixed -match '(?m)^\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*$'){
@@ -71,7 +73,7 @@ try{
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
   }
 
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json';refTransport='git-ref-no-cache+sha-pinned-codeload'}
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg';refTransport='git-ref-no-cache+sha-pinned-codeload'}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0 -or $localSha -ne $remoteSha);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
