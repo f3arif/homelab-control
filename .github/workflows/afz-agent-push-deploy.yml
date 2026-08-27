@@ -6,6 +6,7 @@ on:
     paths:
       - 'afz-openai-agent/**'
       - '.github/workflows/afz-agent-push-deploy.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,7 +27,6 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
-          log-mode: quiet
 
       - name: Trigger exact-SHA deploy on Windows-main
         env:
