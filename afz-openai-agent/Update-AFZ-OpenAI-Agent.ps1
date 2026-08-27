@@ -4,6 +4,9 @@ $ErrorActionPreference='Stop'
 $git=(Get-Command git.exe -ErrorAction Stop).Source
 if(-not(Test-Path (Join-Path $InstallRoot '.git'))){throw 'AFZ homelab-control checkout missing'}
 
+# The original updater briefly patched this tracked file in-place. Restore only that known generated change
+# before pulling so future upstream agent changes cannot be blocked by a dirty working tree.
+& $git -C $InstallRoot checkout -- 'afz-openai-agent/AFZ-OpenAI-Agent-v2.ps1' 2>$null
 $before=(& $git -C $InstallRoot rev-parse HEAD).Trim()
 & $git -C $InstallRoot fetch origin main | Out-Null
 & $git -C $InstallRoot checkout main | Out-Null
@@ -19,12 +22,10 @@ if(Test-Path $allowFile){
 }
 if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}
 
-# Keep Windows Firewall closed except for explicitly allowlisted Tailscale peers.
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8796 -RemoteAddress $ips -Profile Any | Out-Null
 
-# Ensure the service task always launches the runtime wrapper, which injects the current allowlist into a disposable copy.
 $taskName='AFZ OpenAI Agent'
 $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper`" -InstallRoot `"$InstallRoot`" -Port 8796 -BindHost `"100.70.25.8`""
 $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
