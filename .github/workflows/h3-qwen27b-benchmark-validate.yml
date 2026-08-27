@@ -5,6 +5,8 @@ on:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1'
+      - 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
       - '.github/workflows/h3-qwen27b-website-benchmark.yml'
       - '.github/workflows/h3-qwen27b-benchmark-validate.yml'
@@ -26,6 +28,8 @@ jobs:
           $files = @(
             'afz-openai-agent/AFZ-Agent-Control.ps1',
             'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1',
+            'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1',
+            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
             'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
           )
           $failed = $false
@@ -54,21 +58,22 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $control = Get-Content 'afz-openai-agent/AFZ-Agent-Control.ps1' -Raw
           $relay = Get-Content 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
+          $watcher = Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
+          $updater = Get-Content 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
           $runner = Get-Content 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
           $workflow = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
 
-          $mustContain = @(
-            '/api/h3-qwen27b-benchmark',
-            'tag:afz-deploy',
+          $all = $control + "`n" + $relay + "`n" + $watcher + "`n" + $updater + "`n" + $runner
+          foreach ($needle in @(
             'Faiz@100.106.186.118',
             'qwen3.8:27b',
             'Qwen38-27B-Website-Benchmark-20260826-174739',
+            'h3-qwen27b-benchmark.json',
             'MaxIterations',
             'Path]::IsPathRooted',
-            'path traversal'
-          )
-          $all = $control + "`n" + $relay + "`n" + $runner
-          foreach ($needle in $mustContain) {
+            'path traversal',
+            'AFZ H3 Qwen27B Request Watcher'
+          )) {
             if (-not $all.Contains($needle)) { throw "Required typed boundary missing: $needle" }
           }
 
@@ -77,16 +82,21 @@ jobs:
           }
 
           if ($workflow -notmatch 'max_iterations') { throw 'Workflow iteration bound missing' }
-          if ($workflow -notmatch '100\.70\.25\.8:8797/api/h3-qwen27b-benchmark') { throw 'Workflow typed endpoint missing' }
+          if ($workflow -match 'tailscale/github-action|TS_OAUTH|TS_AUDIENCE|100\.70\.25\.8:8797') {
+            throw 'Benchmark request workflow must remain secretless and must not directly enter the private execution plane.'
+          }
           if ($workflow -match 'OneDrive|SharePoint') { throw 'Legacy automation transport reference found' }
 
       - name: Confirm workflow is request-scoped
         shell: powershell
         run: |
           $w = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
-          if ($w -notmatch [regex]::Escape("afz-openai-agent/requests/h3-qwen27b-benchmark.json")) {
+          if ($w -notmatch [regex]::Escape('afz-openai-agent/requests/h3-qwen27b-benchmark.json')) {
             throw 'Benchmark workflow is not scoped to the typed request file.'
           }
           if ($w -notmatch 'cancel-in-progress: false') {
             throw 'Benchmark concurrency protection missing.'
+          }
+          if ($w -notmatch 'secretless GitHub exact-SHA sync') {
+            throw 'Secretless worker-consumer transport declaration missing.'
           }
