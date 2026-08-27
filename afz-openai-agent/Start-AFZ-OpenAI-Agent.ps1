@@ -27,12 +27,32 @@ $replacement='$AllowedClients = @('+(($vals|ForEach-Object {"'$_'"}) -join ',')+
 $patched=[regex]::Replace($text,'(?m)^\$AllowedClients\s*=\s*@\([^\r\n]*\)\s*$',[System.Text.RegularExpressions.MatchEvaluator]{param($m)$replacement},1)
 if($patched -eq $text){throw 'Could not inject AFZ client allowlist into runtime copy'}
 
-# PowerShell argument mode does not reliably pass a bare [ordered]@{} literal after
-# positional arguments. Use a normal hashtable for direct Send-Json health responses.
+# Windows PowerShell 5.1 compatibility and current Responses API normalization.
 $patched=$patched.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
+$patched=$patched.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
+$patched=$patched.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]')
+$patched=$patched.Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
+if($patched -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $patched -notmatch '(?im)^\s*Add-Type\s+-AssemblyName\s+System\.Security'){
+  $patched=$patched.Replace("`$ErrorActionPreference = 'Stop'","`$ErrorActionPreference = 'Stop'`r`nAdd-Type -AssemblyName System.Security -ErrorAction Stop")
+}
+
+# $args is an automatic PowerShell variable. Using Args as a normal tool parameter or
+# local call-argument variable can silently erase structured function-call arguments.
+$patched=$patched.Replace('param($Args)','param($ToolArgs)')
+$patched=$patched.Replace('param([string]$Name,$Args)','param([string]$Name,$ToolArgs)')
+$patched=$patched.Replace('$Args.','$ToolArgs.')
+$patched=$patched.Replace('Tool-ReadFile $Args','Tool-ReadFile $ToolArgs')
+$patched=$patched.Replace('Tool-ListFiles $Args','Tool-ListFiles $ToolArgs')
+$patched=$patched.Replace('Tool-FileSearch $Args','Tool-FileSearch $ToolArgs')
+$patched=$patched.Replace('Tool-JellyfinUserViews $Args','Tool-JellyfinUserViews $ToolArgs')
+$patched=$patched.Replace('$args = [pscustomobject]@{}','$callArgs = [pscustomobject]@{}')
+$patched=$patched.Replace('$args = $call.arguments | ConvertFrom-Json','$callArgs = $call.arguments | ConvertFrom-Json')
+$patched=$patched.Replace('Invoke-Tool ([string]$call.name) $args','Invoke-Tool ([string]$call.name) $callArgs')
+
+# PowerShell 5.1 defaults can mojibake UTF-8 without BOM; read the staged HTML explicitly as UTF-8.
+$patched=$patched.Replace('Get-Content -LiteralPath $file -Raw','Get-Content -LiteralPath $file -Raw -Encoding UTF8')
 
 # The runtime script resolves the UI and typed tool scripts relative to its own path.
-# Stage those read-only assets beside the generated runtime so remote UI and tools work.
 Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI.html') -Force
 $runtimeTools=Join-Path $runtimeRoot 'tools'
 if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
