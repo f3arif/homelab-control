@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
-  [switch]$Force
+  [switch]$Force,
+  [string]$ExpectedSha=''
 )
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -17,14 +18,25 @@ $headers=@{
   'Pragma'='no-cache'
   'Accept'='application/vnd.github+json'
 }
-$nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$remote=Invoke-RestMethod -Uri ($repoRef+'?nocache='+$nonce) -Headers $headers -TimeoutSec 30
-$remoteSha=[string]$remote.object.sha
-if([string]::IsNullOrWhiteSpace($remoteSha)){throw 'GitHub main branch SHA unavailable'}
+
+if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
+  $ExpectedSha=$ExpectedSha.Trim().ToLowerInvariant()
+  if($ExpectedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
+  $remoteSha=$ExpectedSha
+  $refTransport='push-exact-sha+codeload'
+}else{
+  $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $remote=Invoke-RestMethod -Uri ($repoRef+'?nocache='+$nonce) -Headers $headers -TimeoutSec 30
+  $remoteSha=[string]$remote.object.sha
+  if([string]::IsNullOrWhiteSpace($remoteSha)){throw 'GitHub main branch SHA unavailable'}
+  $remoteSha=$remoteSha.ToLowerInvariant()
+  $refTransport='git-ref-no-cache+sha-pinned-codeload'
+}
+
 $repoZip="https://codeload.github.com/f3arif/homelab-control/zip/$remoteSha"
 $localSha=$null
 if(Test-Path $stateFile){try{$localSha=[string]((Get-Content $stateFile -Raw|ConvertFrom-Json).remoteSha)}catch{}}
-if((-not $Force) -and $localSha -eq $remoteSha -and (Test-Path (Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'))){Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;installRoot=$InstallRoot})}
+if((-not $Force) -and $localSha -eq $remoteSha -and (Test-Path (Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'))){Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;installRoot=$InstallRoot;refTransport=$refTransport})}
 $temp=Join-Path $env:TEMP ('AFZ-AgentSync-'+[guid]::NewGuid().ToString('n'))
 $zip=Join-Path $temp 'source.zip'
 $extract=Join-Path $temp 'extract'
@@ -53,20 +65,14 @@ try{
     try{
       $text=Get-Content -LiteralPath $ps1.FullName -Raw
       $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
-      # In PowerShell argument mode, a bare [ordered]@{} after positional arguments can be tokenized incorrectly.
       $fixed=$fixed.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
-      # Current Responses API rejects required: [] for zero-argument strict function schemas.
       $fixed=$fixed.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
-      # Windows PowerShell 5.1 defaults to the active ANSI code page for BOM-less text files.
-      # Force UTF-8 when reading the staged UI so characters such as the middle dot render correctly.
       $fixed=$fixed.Replace("Get-Content -LiteralPath `$file -Raw","Get-Content -LiteralPath `$file -Encoding UTF8 -Raw")
       if($fixed -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $fixed -notmatch '(?im)^\s*Add-Type\s+-AssemblyName\s+System\.Security'){
         $load='Add-Type -AssemblyName System.Security -ErrorAction Stop'
         if($fixed -match '(?m)^\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*$'){
           $fixed=[regex]::Replace($fixed,'(?m)^(\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*)$',('$1'+"`r`n"+$load),1)
-        }else{
-          $fixed=$load+"`r`n"+$fixed
-        }
+        }else{$fixed=$load+"`r`n"+$fixed}
       }
       if($fixed -ne $text){
         Set-Content -LiteralPath $ps1.FullName -Value $fixed -Encoding UTF8
@@ -76,7 +82,7 @@ try{
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
   }
 
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui';refTransport='git-ref-no-cache+sha-pinned-codeload'}
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui';refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0 -or $localSha -ne $remoteSha);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot})
+  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0 -or $localSha -ne $remoteSha);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
