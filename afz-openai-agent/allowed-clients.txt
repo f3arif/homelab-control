@@ -1,0 +1,7 @@
+# AFZ OpenAI Agent client allowlist (Tailscale IPs only)
+# One IPv4 address per line. Comments/blank lines ignored.
+100.70.25.8
+100.71.26.69
+100.106.186.118
+100.99.242.89
+100.91.50.9
