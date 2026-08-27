@@ -13,6 +13,13 @@ $state='C:\ProgramData\AFZ\OpenAIAgent'
 $keyFile=Join-Path $state 'openai-key.dpapi'
 New-Item -ItemType Directory -Force -Path $state | Out-Null
 function Save-Key([string]$key){$bytes=[Text.Encoding]::UTF8.GetBytes($key);$protected=[System.Security.Cryptography.ProtectedData]::Protect($bytes,$null,[System.Security.Cryptography.DataProtectionScope]::LocalMachine);[IO.File]::WriteAllBytes($keyFile,$protected);& icacls.exe $keyFile /inheritance:r /grant:r 'SYSTEM:F' 'Administrators:F' | Out-Null}
+function Wait-Health([string]$Uri,[int]$Seconds=45){
+  $deadline=(Get-Date).AddSeconds($Seconds);$last=$null
+  do{
+    try{return Invoke-RestMethod -Uri $Uri -TimeoutSec 5}catch{$last=$_.Exception.Message;Start-Sleep -Seconds 2}
+  }while((Get-Date) -lt $deadline)
+  throw "Health endpoint did not become ready within $Seconds seconds: $Uri; last error: $last"
+}
 
 # Git-independent source bootstrap.
 $tmpSync=Join-Path $env:TEMP 'Sync-AFZ-AgentFromGitHub.ps1'
@@ -51,7 +58,8 @@ New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -Direction
 New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8797 -RemoteAddress $ips -Profile Any|Out-Null
 $shortcutPath=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ OpenAI Agent.url';@('[InternetShortcut]',"URL=http://127.0.0.1:$Port/",'IconFile=%SystemRoot%\System32\shell32.dll','IconIndex=14')|Set-Content -LiteralPath $shortcutPath -Encoding ASCII
 $controlShortcut=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ Agent Update.url';@('[InternetShortcut]','URL=http://127.0.0.1:8797/','IconFile=%SystemRoot%\System32\shell32.dll','IconIndex=238')|Set-Content -LiteralPath $controlShortcut -Encoding ASCII
-Start-ScheduledTask -TaskName $agentTask;Start-ScheduledTask -TaskName $controlTask;Start-Sleep 3
-$h=Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 10;$c=Invoke-RestMethod -Uri 'http://127.0.0.1:8797/health' -TimeoutSec 10
+Start-ScheduledTask -TaskName $agentTask;Start-ScheduledTask -TaskName $controlTask
+$h=Wait-Health "http://127.0.0.1:$Port/health" 45
+$c=Wait-Health 'http://127.0.0.1:8797/health' 45
 Write-Host "AFZ OpenAI Agent healthy: $($h.version) / $($h.mode)" -ForegroundColor Green;Write-Host "Agent UI: http://127.0.0.1:$Port/";Write-Host 'Update control: http://127.0.0.1:8797/';Write-Host "Tailnet agent: http://$BindHost`:$Port/";Write-Host "Tailnet update control: http://$BindHost`:8797/";Write-Host 'Updater: GitHub HTTPS ZIP sync every 1 minute; Git is not required.'
 if($RunJellyfinDiagnosis){$diag=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Diagnosis.ps1';if(Test-Path $diag){& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $diag -Port $Port}}
