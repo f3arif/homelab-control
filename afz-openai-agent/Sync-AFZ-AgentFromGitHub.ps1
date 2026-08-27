@@ -46,9 +46,9 @@ try{
       $text=Get-Content -LiteralPath $ps1.FullName -Raw
       $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
       if($fixed -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $fixed -notmatch '(?im)^\s*Add-Type\s+-AssemblyName\s+System\.Security'){
-        $load="try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { throw \"Unable to load System.Security required for DPAPI: $($_.Exception.Message)\" }"
-        if($fixed -match '(?m)^\$ErrorActionPreference\s*=\s*[\'\"]Stop[\'\"]\s*$'){
-          $fixed=[regex]::Replace($fixed,'(?m)^(\$ErrorActionPreference\s*=\s*[\'\"]Stop[\'\"]\s*)$',('$1'+"`r`n"+$load),1)
+        $load='Add-Type -AssemblyName System.Security -ErrorAction Stop'
+        if($fixed -match '(?m)^\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*$'){
+          $fixed=[regex]::Replace($fixed,'(?m)^(\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*)$',('$1'+"`r`n"+$load),1)
         }else{
           $fixed=$load+"`r`n"+$fixed
         }
