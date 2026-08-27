@@ -21,6 +21,14 @@ $text=Get-Content -LiteralPath $src -Raw
 $replacement='$AllowedClients = @('+(($vals|ForEach-Object {"'$_'"}) -join ',')+')'
 $patched=[regex]::Replace($text,'(?m)^\$AllowedClients\s*=\s*@\([^\r\n]*\)\s*$',[System.Text.RegularExpressions.MatchEvaluator]{param($m)$replacement},1)
 if($patched -eq $text){throw 'Could not inject AFZ client allowlist into runtime copy'}
+
+# Windows PowerShell command-mode can pass a bare [ordered]@{} function argument as
+# the literal token "[ordered]@" plus the hashtable in $args. Normalize this inside
+# Send-Json so /health and any future ordered responses serialize as real JSON.
+$needle='  param($Context,[int]$Status,$Object)'
+$fix="  param(`$Context,[int]`$Status,`$Object)`r`n  if (`$Object -eq '[ordered]@' -and `$args.Count -gt 0) { `$Object = `$args[0] }"
+if($patched.Contains($needle)){$patched=$patched.Replace($needle,$fix)}
+
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
 exit $LASTEXITCODE
