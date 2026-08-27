@@ -6,11 +6,16 @@ param(
   [string]$BindHost='100.70.25.8'
 )
 $ErrorActionPreference='Stop'
-$src=Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'
-$allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
+$sourceRoot=Join-Path $InstallRoot 'afz-openai-agent'
+$src=Join-Path $sourceRoot 'AFZ-OpenAI-Agent-v2.ps1'
+$allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
+$uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
+$toolsSrc=Join-Path $sourceRoot 'tools'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
+if(-not(Test-Path $uiSrc)){throw "Agent UI missing: $uiSrc"}
+if(-not(Test-Path $toolsSrc)){throw "Agent tools directory missing: $toolsSrc"}
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $ips=@()
 if(Test-Path $allowFile){
@@ -23,9 +28,15 @@ $patched=[regex]::Replace($text,'(?m)^\$AllowedClients\s*=\s*@\([^\r\n]*\)\s*$',
 if($patched -eq $text){throw 'Could not inject AFZ client allowlist into runtime copy'}
 
 # PowerShell argument mode does not reliably pass a bare [ordered]@{} literal after
-# positional arguments. The agent has one direct health response using that form;
-# use a normal hashtable there. Ordered dictionaries returned through variables are fine.
+# positional arguments. Use a normal hashtable for direct Send-Json health responses.
 $patched=$patched.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
+
+# The runtime script resolves the UI and typed tool scripts relative to its own path.
+# Stage those read-only assets beside the generated runtime so remote UI and tools work.
+Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI.html') -Force
+$runtimeTools=Join-Path $runtimeRoot 'tools'
+if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
+Copy-Item -LiteralPath $toolsSrc -Destination $runtimeTools -Recurse -Force
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
