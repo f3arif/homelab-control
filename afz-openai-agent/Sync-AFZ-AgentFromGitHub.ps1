@@ -39,7 +39,21 @@ try{
     if(Test-Path $target){try{$needs=((Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)}catch{$needs=$true}}
     if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
   }
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied}
+
+  # Compatibility normalization for Windows PowerShell 5.1 DPAPI type resolution.
+  foreach($ps1 in @(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter '*.ps1' -ErrorAction SilentlyContinue)){
+    try{
+      $text=Get-Content -LiteralPath $ps1.FullName -Raw
+      $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
+      if($fixed -ne $text){
+        Set-Content -LiteralPath $ps1.FullName -Value $fixed -Encoding UTF8
+        $relFixed=$ps1.FullName.Substring($dst.Length).TrimStart('\')
+        if($copied -notcontains $relFixed){$copied+=$relFixed}
+      }
+    }catch{}
+  }
+
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi'}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0 -or $localSha -ne $remoteSha);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
