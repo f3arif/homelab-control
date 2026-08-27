@@ -11,6 +11,7 @@ $src=Join-Path $sourceRoot 'AFZ-OpenAI-Agent-v2.ps1'
 $allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
 $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
+$watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -57,6 +58,12 @@ Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI
 $runtimeTools=Join-Path $runtimeRoot 'tools'
 if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
 Copy-Item -LiteralPath $toolsSrc -Destination $runtimeTools -Recurse -Force
+
+# Start the secretless fast GitHub deploy watcher. Its global mutex prevents duplicates.
+if(Test-Path $watcherSrc){
+  $watchArgs="-NoProfile -ExecutionPolicy Bypass -File `"$watcherSrc`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 3"
+  Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
+}
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
