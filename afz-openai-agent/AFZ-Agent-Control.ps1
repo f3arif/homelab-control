@@ -10,6 +10,7 @@ $allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
 $logRoot='C:\ProgramData\AFZ\OpenAIAgent\logs'
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $updateState='C:\ProgramData\AFZ\OpenAIAgent\last-update.json'
+$watchState='C:\ProgramData\AFZ\OpenAIAgent\push-watcher.json'
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath (Join-Path $logRoot 'control.log') -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Get-AllowedClients{$ips=@('127.0.0.1','::1');if(Test-Path $allowFile){$ips+=@(Get-Content -LiteralPath $allowFile|ForEach-Object {$_.Trim()}|Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'})};return @($ips|Sort-Object -Unique)}
@@ -27,6 +28,7 @@ function Start-ExactShaUpdate([string]$sha){
 }
 function Get-Commit{if(Test-Path $sourceState){try{return [string]((Get-Content $sourceState -Raw|ConvertFrom-Json).remoteSha)}catch{}};return $null}
 function Get-LastUpdate{if(Test-Path $updateState){try{return Get-Content $updateState -Raw|ConvertFrom-Json}catch{}};return $null}
+function Get-WatcherState{if(Test-Path $watchState){try{return Get-Content $watchState -Raw|ConvertFrom-Json}catch{}};return $null}
 function Get-TailscaleCli{
   $c=Get-Command tailscale.exe -ErrorAction SilentlyContinue | Select-Object -First 1
   if($c){if($c.Source){return [string]$c.Source};if($c.Path){return [string]$c.Path}}
@@ -38,25 +40,28 @@ function Test-DeployPeer([string]$ip){
   $ts=Get-TailscaleCli;if(-not $ts){return $false}
   try{$raw=(& $ts whois --json $ip 2>$null|Out-String);if($LASTEXITCODE -ne 0){return $false};return [bool]($raw -match '"tag:afz-deploy"')}catch{return $false}
 }
-$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.3.0 port=$Port bind=$BindHost deploy=push-triggered fallback=300s"
+$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.4.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s fallback=60s"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
 
-    # Dedicated CI route: only localhost or a Tailscale peer carrying tag:afz-deploy may use it.
+    # Optional future CI route. Normal deploys use the secretless GitHub signal watcher.
     if($path -eq '/api/push-deploy' -and $ctx.Request.HttpMethod -eq 'POST'){
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='deploy peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx;$repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant()
       if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}$'){Send-Json $ctx 400 @{ok=$false;error='invalid push deploy payload'};continue}
-      $r=Start-ExactShaUpdate $sha;Log "push deploy sha=$sha requested by $ip";Send-Json $ctx 202 $r;continue
+      $r=Start-ExactShaUpdate $sha;Log "optional push deploy sha=$sha requested by $ip";Send-Json $ctx 202 $r;continue
     }
 
     if(-not ((Get-AllowedClients) -contains $ip)){Send-Json $ctx 403 @{ok=$false;error='client not allowlisted';client=$ip};continue}
     if($ctx.Request.HttpMethod -eq 'OPTIONS'){Send-Json $ctx 200 @{ok=$true};continue}
     if($path -eq ''){$html=@'
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">PUSH DEPLOY ENABLED</span> · GitHub pushes trigger an exact-SHA pull immediately.</p><p class="muted">A five-minute scheduled check remains only as a recovery fallback. No update button is required.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,5000)</script></body></html>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">No update button and no Tailscale CI credential are required. A one-minute branch poll remains only as recovery.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
 '@;Send-Html $ctx $html;continue}
-    if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){$u=Get-LastUpdate;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue;Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.3.0';commit=(Get-Commit);transport='github-push-exact-sha+fallback';pushDeployEnabled=$true;deployIdentity='tailscale-tag:afz-deploy';fallbackCadenceSeconds=300;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});time=(Get-Date -Format o)};continue}
+    if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){
+      $u=Get-LastUpdate;$w=Get-WatcherState;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
+      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.4.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});time=(Get-Date -Format o)};continue
+    }
     if($path -eq '/api/update-now' -and $ctx.Request.HttpMethod -eq 'POST'){$r=Start-Update;Log "fallback update requested by $ip";Send-Json $ctx 202 $r;continue}
     if($path -eq '/api/control' -and $ctx.Request.HttpMethod -eq 'POST'){$req=Read-Json $ctx;$action=[string]$req.action;if($action -notin @('update-agent','update-openai-agent','pull-agent-now')){Send-Json $ctx 400 @{ok=$false;error='unsupported action'};continue};$r=Start-Update;Log "control action=$action requested by $ip";Send-Json $ctx 202 $r;continue}
     Send-Json $ctx 404 @{ok=$false;error='not found'}
