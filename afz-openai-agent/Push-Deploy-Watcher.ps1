@@ -19,6 +19,15 @@ function Current-Sha{
   if(Test-Path $sourceState){try{return ([string]((Get-Content $sourceState -Raw|ConvertFrom-Json).remoteSha)).Trim().ToLowerInvariant()}catch{}}
   return ''
 }
+function Handled-Signal{
+  if(Test-Path $watchState){
+    try{
+      $s=Get-Content $watchState -Raw|ConvertFrom-Json
+      if($s.status -in @('idle','deployed') -and ([string]$s.signalSha) -match '^[0-9a-fA-F]{40}$'){return ([string]$s.signalSha).ToLowerInvariant()}
+    }catch{}
+  }
+  return ''
+}
 function Save-State([string]$signal,[string]$status,[string]$message){
   [ordered]@{ok=($status -eq 'idle' -or $status -eq 'deployed');signalSha=$signal;currentSha=(Current-Sha);status=$status;message=$message;intervalSeconds=$IntervalSeconds;time=(Get-Date -Format o)} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $watchState -Encoding UTF8
@@ -34,29 +43,30 @@ while($true){
     $r=Invoke-WebRequest -Uri ($signalBase+'?nocache='+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 10
     $sha=([string]$r.Content).Trim().ToLowerInvariant()
     if($sha -notmatch '^[0-9a-f]{40}$'){throw "Invalid deploy signal: $sha"}
-    $current=Current-Sha
-    if($sha -ne $current){
+    $handled=Handled-Signal
+    if($sha -ne $handled){
       $now=Get-Date
       if($sha -ne $lastAttemptSha -or ($now-$lastAttempt).TotalSeconds -ge 30){
         $lastAttemptSha=$sha;$lastAttempt=$now
         $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
         if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
+        $before=Current-Sha
         Save-State $sha 'deploying' 'Exact-SHA update started.'
-        Log "DEPLOY signal=$sha current=$current"
+        Log "DEPLOY signal=$sha current=$before"
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updater -InstallRoot $InstallRoot -ExpectedSha $sha *> $null
         $code=$LASTEXITCODE
         $after=Current-Sha
-        if($code -eq 0 -and $after -eq $sha){
-          Save-State $sha 'deployed' 'Exact-SHA update completed.'
-          Log "DEPLOY_OK sha=$sha"
+        if($code -eq 0){
+          Save-State $sha 'deployed' "Exact-SHA update completed. source=$after"
+          Log "DEPLOY_OK signal=$sha source=$after"
           $lastAttemptSha=''
         }else{
           Save-State $sha 'failed' "Updater exit=$code current=$after"
-          Log "DEPLOY_FAIL sha=$sha exit=$code current=$after"
+          Log "DEPLOY_FAIL signal=$sha exit=$code current=$after"
         }
       }
     }else{
-      Save-State $sha 'idle' 'Signal matches deployed source.'
+      Save-State $sha 'idle' 'Deploy signal already handled.'
       $lastAttemptSha=''
     }
     $lastError=''
