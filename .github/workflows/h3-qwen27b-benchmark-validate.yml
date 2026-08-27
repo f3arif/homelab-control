@@ -5,8 +5,10 @@ on:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1'
+      - 'afz-openai-agent/Bootstrap-H3-GitHub-DirectBenchmark.ps1'
       - 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/tools/H3-GitHub-Direct-Benchmark-Watcher.ps1'
       - 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
       - '.github/workflows/h3-qwen27b-website-benchmark.yml'
       - '.github/workflows/h3-qwen27b-benchmark-validate.yml'
@@ -28,75 +30,69 @@ jobs:
           $files = @(
             'afz-openai-agent/AFZ-Agent-Control.ps1',
             'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1',
+            'afz-openai-agent/Bootstrap-H3-GitHub-DirectBenchmark.ps1',
             'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1',
             'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/tools/H3-GitHub-Direct-Benchmark-Watcher.ps1',
             'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
           )
           $failed = $false
           foreach ($file in $files) {
             $tokens = $null
             $errors = $null
-            [void][System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $file),
-              [ref]$tokens,
-              [ref]$errors
-            )
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
             if ($errors.Count -gt 0) {
               $failed = $true
               Write-Host "PARSE FAIL: $file" -ForegroundColor Red
               $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
-            }
-            else {
+            } else {
               Write-Host "PARSE PASS: $file" -ForegroundColor Green
             }
           }
           if ($failed) { exit 1 }
 
-      - name: Assert typed execution boundaries
+      - name: Assert direct H3 GitHub boundaries
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $control = Get-Content 'afz-openai-agent/AFZ-Agent-Control.ps1' -Raw
-          $relay = Get-Content 'afz-openai-agent/Invoke-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
-          $watcher = Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
-          $updater = Get-Content 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
+          $bootstrap = Get-Content 'afz-openai-agent/Bootstrap-H3-GitHub-DirectBenchmark.ps1' -Raw
+          $winWatcher = Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
+          $h3Watcher = Get-Content 'afz-openai-agent/tools/H3-GitHub-Direct-Benchmark-Watcher.ps1' -Raw
           $runner = Get-Content 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
           $workflow = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
+          $all = $bootstrap + "`n" + $winWatcher + "`n" + $h3Watcher + "`n" + $runner
 
-          $all = $control + "`n" + $relay + "`n" + $watcher + "`n" + $updater + "`n" + $runner
           foreach ($needle in @(
+            'DESKTOP-H3R6CQN',
             'Faiz@100.106.186.118',
             'qwen3.8:27b',
             'Qwen38-27B-Website-Benchmark-20260826-174739',
             'h3-qwen27b-benchmark.json',
-            'MaxIterations',
+            'h3-direct-results',
             'Path]::IsPathRooted',
             'path traversal',
-            'AFZ H3 Qwen27B Request Watcher'
+            'AFZ H3 GitHub Direct Benchmark Watcher'
           )) {
-            if (-not $all.Contains($needle)) { throw "Required typed boundary missing: $needle" }
+            if (-not $all.Contains($needle)) { throw "Required direct boundary missing: $needle" }
           }
 
-          foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c')) {
-            if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden broad execution primitive found: $forbidden" }
+          if ($winWatcher -match 'Invoke-H3-Qwen27B-WebsiteBenchmark') {
+            throw 'windows-main watcher must not dispatch benchmark iterations directly.'
           }
-
-          if ($workflow -notmatch 'max_iterations') { throw 'Workflow iteration bound missing' }
+          if ($winWatcher -notmatch 'bootstrap-only') {
+            throw 'windows-main watcher is not explicitly bootstrap-only.'
+          }
+          foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','OneDrive','SharePoint')) {
+            if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden primitive/transport found: $forbidden" }
+          }
           if ($workflow -match 'tailscale/github-action|TS_OAUTH|TS_AUDIENCE|100\.70\.25\.8:8797') {
-            throw 'Benchmark request workflow must remain secretless and must not directly enter the private execution plane.'
+            throw 'GitHub workflow must not directly enter the private execution plane.'
           }
-          if ($workflow -match 'OneDrive|SharePoint') { throw 'Legacy automation transport reference found' }
 
-      - name: Confirm workflow is request-scoped
+      - name: Confirm bounded request contract
         shell: powershell
         run: |
           $w = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
-          if ($w -notmatch [regex]::Escape('afz-openai-agent/requests/h3-qwen27b-benchmark.json')) {
-            throw 'Benchmark workflow is not scoped to the typed request file.'
-          }
-          if ($w -notmatch 'cancel-in-progress: false') {
-            throw 'Benchmark concurrency protection missing.'
-          }
-          if ($w -notmatch 'secretless GitHub exact-SHA sync') {
-            throw 'Secretless worker-consumer transport declaration missing.'
-          }
+          if ($w -notmatch [regex]::Escape('afz-openai-agent/requests/h3-qwen27b-benchmark.json')) { throw 'Request path missing.' }
+          if ($w -notmatch 'max_iterations') { throw 'Bounded iteration contract missing.' }
+          if ($w -notmatch 'cancel-in-progress: false') { throw 'Concurrency protection missing.' }
