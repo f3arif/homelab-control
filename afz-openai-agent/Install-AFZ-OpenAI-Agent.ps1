@@ -3,7 +3,8 @@
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
   [int]$Port=8796,
-  [string]$BindHost='100.70.25.8'
+  [string]$BindHost='100.70.25.8',
+  [switch]$RunJellyfinDiagnosis
 )
 $ErrorActionPreference='Stop'
 $repo='https://github.com/f3arif/homelab-control.git'
@@ -80,6 +81,14 @@ try{
   Write-Host "Local API: http://127.0.0.1:$Port/api/request"
   Write-Host "HP/Tailscale API: http://$BindHost`:$Port/api/request"
   Write-Host 'Future code updates will pull from GitHub main automatically every 15 minutes.'
+  if($RunJellyfinDiagnosis){
+    $diag=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Diagnosis.ps1'
+    if(Test-Path $diag){
+      Write-Host ''
+      Write-Host 'Running the Jellyfin/TorBox diagnosis through the new OpenAI typed-tool loop...' -ForegroundColor Cyan
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $diag -Port $Port
+    }else{Write-Warning "Diagnosis launcher missing: $diag"}
+  }
   Start-Process "http://127.0.0.1:$Port/"
 }catch{
   Write-Warning "Task installed but health check failed: $($_.Exception.Message)"
