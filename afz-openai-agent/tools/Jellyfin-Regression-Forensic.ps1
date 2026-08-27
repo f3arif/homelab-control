@@ -5,7 +5,49 @@ $goodRoot='C:\AFZ\MediaCatalog\Backups\JellyfinNativeLibrariesV3-20260824-151412
 $overlayRoot='C:\AFZ\MediaCatalog\Backups\JellyfinOverlayIsolation-20260825-160957'
 $coolyo='2D994DBA-B8C7-44C8-8D34-7D85716B2EBC'
 $movies='64F6DF5C-78B5-4DFE-B0FF-7295CBFB3A5A'
-$sqlite=(Get-Command sqlite3.exe -ErrorAction Stop).Source
+
+function Find-CommandPath([string[]]$Names){
+  foreach($n in $Names){
+    $c=Get-Command $n -ErrorAction SilentlyContinue | Select-Object -First 1
+    if($c){
+      if($c.Source){return [string]$c.Source}
+      if($c.Path){return [string]$c.Path}
+    }
+  }
+  return $null
+}
+
+$sqlite=Find-CommandPath @('sqlite3.exe','sqlite3')
+$python=Find-CommandPath @('python.exe','python','py.exe','py')
+$pythonLauncher=$false
+if($python){$pythonLauncher=([IO.Path]::GetFileName($python) -match '^py(\.exe)?$')}
+$sqlBackend=[ordered]@{
+  available=[bool]($sqlite -or $python)
+  mode=$(if($sqlite){'sqlite3-cli'}elseif($python){'python-stdlib-sqlite3'}else{'none'})
+  executable=$(if($sqlite){$sqlite}elseif($python){$python}else{$null})
+  readOnly=$true
+}
+
+$pythonSql=@'
+import sqlite3, sys
+from pathlib import Path
+p = Path(sys.argv[1]).resolve()
+q = sys.argv[2]
+uri = p.as_uri() + '?mode=ro'
+con = sqlite3.connect(uri, uri=True, timeout=5)
+try:
+    cur = con.execute(q)
+    for row in cur:
+        vals=[]
+        for v in row:
+            if v is None:
+                vals.append('')
+            else:
+                vals.append(str(v).replace('\r',' ').replace('\n',' '))
+        print('|'.join(vals))
+finally:
+    con.close()
+'@
 
 function BackupDb([string]$root){
   if(-not(Test-Path $root)){return $null}
@@ -15,12 +57,18 @@ function BackupDb([string]$root){
 }
 function Sql([string]$db,[string]$q){
   if(-not $db -or -not(Test-Path $db)){return @()}
-  @(& $sqlite -readonly -noheader -separator '|' $db $q 2>$null)
+  if($sqlite){return @(& $sqlite -readonly -noheader -separator '|' $db $q 2>$null)}
+  if($python){
+    if($pythonLauncher){return @(& $python -3 -c $pythonSql $db $q 2>$null)}
+    return @(& $python -c $pythonSql $db $q 2>$null)
+  }
+  return @()
 }
 function Snap([string]$db){
-  if(-not $db -or -not(Test-Path $db)){return [ordered]@{exists=$false}}
+  if(-not $db -or -not(Test-Path $db)){return [ordered]@{exists=$false;databaseQueriesAvailable=$sqlBackend.available}}
   [ordered]@{
     exists=$true
+    databaseQueriesAvailable=$sqlBackend.available
     db=$db
     collectionFolders=@(Sql $db "select Id||'|'||coalesce(ParentId,'')||'|'||coalesce(TopParentId,'')||'|'||coalesce(Name,'')||'|'||coalesce(Path,'')||'|'||coalesce(PresentationUniqueKey,'') from BaseItems where Type='MediaBrowser.Controller.Entities.CollectionFolder' order by Name;")
     roots=@(Sql $db "select Id||'|'||coalesce(ParentId,'')||'|'||coalesce(TopParentId,'')||'|'||coalesce(Name,'')||'|'||coalesce(Path,'')||'|'||Type from BaseItems where Type in ('MediaBrowser.Controller.Entities.UserRootFolder','MediaBrowser.Controller.Entities.AggregateFolder') order by Type,Name;")
@@ -77,6 +125,7 @@ $result=[ordered]@{
   onedriveUsed=$false
   timestamp=(Get-Date -Format o)
   public=$public
+  sqliteBackend=$sqlBackend
   paths=[ordered]@{currentDb=$current;knownGoodDb=$good;overlayDb=$overlay}
   current=$cur
   knownGood=$g
