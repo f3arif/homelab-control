@@ -1,0 +1,101 @@
+name: AFZ Site Public Cutover Verify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-site-public-cutover-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-public-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SITE_SHA: c38576741ce2d379723fde038300363429845656
+      JOB_ID: afz-site-git-cutover-20260827T2105
+      BASE_URL: https://afzeng.ca
+    steps:
+      - name: Fetch exact Git-authoritative production snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q /tmp/afz-engineering
+          git -C /tmp/afz-engineering remote add origin https://github.com/f3arif/afz-engineering.git
+          git -C /tmp/afz-engineering fetch -q --depth 1 origin "$SITE_SHA"
+          git -C /tmp/afz-engineering checkout -q --detach FETCH_HEAD
+          test "$(git -C /tmp/afz-engineering rev-parse HEAD)" = "$SITE_SHA"
+          node /tmp/afz-engineering/scripts/afz-production-deploy-guard.mjs
+
+      - name: Wait for verified Git deployment marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker=/tmp/afz-git-deploy.json
+          ok=0
+          for attempt in $(seq 1 36); do
+            if curl -fsS --max-time 8 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+              "$BASE_URL/afz-git-deploy.json?verify=${GITHUB_RUN_ID}-${attempt}" -o "$marker"; then
+              if python - "$marker" "$SITE_SHA" "$JOB_ID" <<'PY'
+          import json, sys
+          p, sha, job = sys.argv[1:]
+          try:
+              d=json.load(open(p, encoding='utf-8'))
+          except Exception:
+              raise SystemExit(1)
+          assert d.get('ok') is True
+          assert d.get('source') == 'github'
+          assert d.get('repository') == 'f3arif/afz-engineering'
+          assert d.get('commit') == sha
+          assert d.get('job_id') == job
+          print('DEPLOYMENT MARKER PASS', d.get('deployed_at',''))
+          PY
+              then ok=1; break; fi
+            fi
+            sleep 5
+          done
+          test "$ok" = 1
+
+      - name: Verify all managed public files match Git byte-for-byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > /tmp/managed.tsv
+          import json
+          m=json.load(open('/tmp/afz-engineering/production-site/manifest.json'))
+          for rel, meta in m['files'].items():
+              print(meta['sha256'], rel, sep='\t')
+          PY
+          mkdir -p /tmp/public-site
+          while IFS=$'\t' read -r expected rel; do
+            mkdir -p "/tmp/public-site/$(dirname "$rel")"
+            url="$BASE_URL/$rel?verify=$GITHUB_RUN_ID"
+            curl -fsS --max-time 15 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" -o "/tmp/public-site/$rel"
+            actual=$(sha256sum "/tmp/public-site/$rel" | awk '{print $1}')
+            printf '%s %s\n' "$actual" "$rel"
+            test "$actual" = "$expected"
+          done < /tmp/managed.tsv
+
+      - name: Verify public WebChat markers and API response
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'AFZ CHAT SESSION PERSISTENCE' /tmp/public-site/afz-ai-widget.js
+          grep -q '/api/ai-chat' /tmp/public-site/afz-ai-widget.js
+          grep -q 'AFZ AI PROJECT QUESTION PREFILL' /tmp/public-site/contact.html
+          response=/tmp/chat-response.json
+          code=$(curl -sS --max-time 30 -o "$response" -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'Cache-Control: no-cache' \
+            --data '{"message":"Do you provide HVAC design?"}' \
+            "$BASE_URL/api/ai-chat")
+          test "$code" = 200
+          python - "$response" <<'PY'
+          import json, sys
+          d=json.load(open(sys.argv[1], encoding='utf-8'))
+          answer=d.get('answer')
+          assert isinstance(answer, str) and answer.strip()
+          print('PUBLIC WEBCHAT PASS:', answer[:160])
+          PY
