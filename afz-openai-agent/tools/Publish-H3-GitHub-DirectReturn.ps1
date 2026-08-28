@@ -24,11 +24,23 @@ function Get-Gh{
   foreach($p in @('C:\Program Files\GitHub CLI\gh.exe','C:\Program Files (x86)\GitHub CLI\gh.exe')){if(Test-Path $p){return $p}}
   return $null
 }
+function Quote-Arg([string]$Value){
+  if($null -eq $Value){return '""'}
+  if($Value -notmatch '[\s"]'){return $Value}
+  return '"'+($Value -replace '(\\*)"','$1$1\"' -replace '(\\+)$','$1$1')+'"'
+}
 function Invoke-Gh([string[]]$Arguments){
-  $old=$ErrorActionPreference
-  try{$ErrorActionPreference='Continue';$out=@(& $script:gh @Arguments 2>&1);$code=$LASTEXITCODE}
-  finally{$ErrorActionPreference=$old}
-  [pscustomobject]@{ExitCode=$code;Output=$out;Text=([string]($out -join "`n"))}
+  $stdout=Join-Path $env:TEMP ("afz-gh-out-"+[guid]::NewGuid().ToString('N')+'.txt')
+  $stderr=Join-Path $env:TEMP ("afz-gh-err-"+[guid]::NewGuid().ToString('N')+'.txt')
+  try{
+    $argLine=($Arguments|ForEach-Object {Quote-Arg ([string]$_)}) -join ' '
+    $p=Start-Process -FilePath $script:gh -ArgumentList $argLine -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru -NoNewWindow
+    $out=if(Test-Path $stdout){Get-Content $stdout -Raw}else{''}
+    $err=if(Test-Path $stderr){Get-Content $stderr -Raw}else{''}
+    $text=([string]$out).Trim()
+    if($err){$text=($text+$(if($text){"`n"}else{''})+[string]$err).Trim()}
+    return [pscustomobject]@{ExitCode=[int]$p.ExitCode;Text=$text}
+  }finally{Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue}
 }
 function Write-LocalJson([string]$Path,$Object){[IO.File]::WriteAllText($Path,($Object|ConvertTo-Json -Depth 30 -Compress),$utf8)}
 function Get-Fingerprint([string]$Text){
@@ -54,21 +66,24 @@ function Put-JsonFile([string]$Path,$Object,[string]$Message){
   }finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
 }
 function Try-Comment([string]$Body){
-  $ok=$true
-  foreach($target in @(@{Repo=$Repo;Issue=$alertIssue},@{Repo=$controlRepo;Issue=$controlIssue})){
-    $r=Invoke-Gh @('issue','comment',[string]$target.Issue,'--repo',[string]$target.Repo,'--body',$Body)
-    if($r.ExitCode -ne 0){$ok=$false}
-  }
-  return $ok
+  $bodyFile=Join-Path $env:TEMP ("afz-gh-comment-"+[guid]::NewGuid().ToString('N')+'.txt')
+  [IO.File]::WriteAllText($bodyFile,$Body,$utf8)
+  try{
+    $ok=$true
+    foreach($target in @(@{Repo=$Repo;Issue=$alertIssue},@{Repo=$controlRepo;Issue=$controlIssue})){
+      $r=Invoke-Gh @('issue','comment',[string]$target.Issue,'--repo',[string]$target.Repo,'--body-file',$bodyFile)
+      if($r.ExitCode -ne 0){$ok=$false}
+    }
+    return $ok
+  }finally{Remove-Item $bodyFile -Force -ErrorAction SilentlyContinue}
 }
 
 $gh=Get-Gh
 if(-not $gh){throw 'GitHub CLI is not installed on H3.'}
 $script:gh=$gh
-$auth=Invoke-Gh @('auth','status','--hostname','github.com')
-if($auth.ExitCode -ne 0){throw 'GitHub CLI is not authenticated in the H3 return-publisher context.'}
 $perm=Invoke-Gh @('api',"repos/$Repo",'--jq','.permissions.push')
-if($perm.ExitCode -ne 0 -or $perm.Text.Trim().ToLowerInvariant() -ne 'true'){throw 'Authenticated H3 GitHub identity lacks push permission.'}
+if($perm.ExitCode -ne 0){throw "GitHub API authentication failed in H3 publisher context: $($perm.Text)"}
+if($perm.Text.Trim().ToLowerInvariant() -ne 'true'){throw 'Authenticated H3 GitHub identity lacks push permission.'}
 if(-not(Test-Path $StateFile)){throw "Benchmark state file missing: $StateFile"}
 $raw=Get-Content -LiteralPath $StateFile -Raw
 $state=$raw|ConvertFrom-Json
