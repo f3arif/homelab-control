@@ -12,6 +12,7 @@ $allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
 $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
+$familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -65,9 +66,22 @@ if(Test-Path $watcherSrc){
   Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 }
 
-# FamilyPTT transport audit is owned by its dedicated scheduled task, installed by
-# Update-AFZ-OpenAI-Agent.ps1. Keeping it out of the agent child-process tree gives
-# the lane independent restart/health semantics while the global mutex prevents overlap.
+# FamilyPTT reverse-pull audit gets an independent SYSTEM scheduled task so its state
+# is visible/restartable without changing the shared AFZ updater or touching other lanes.
+if(Test-Path $familyPttAuditWatcher){
+  $familyPttTaskName='AFZ FamilyPTT Transport Audit Watcher'
+  $familyPttTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttAuditWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $familyPttTask=Get-ScheduledTask -TaskName $familyPttTaskName -ErrorAction SilentlyContinue
+  if($familyPttTask){
+    Set-ScheduledTask -TaskName $familyPttTaskName -Action $familyPttTaskAction | Out-Null
+  }else{
+    $familyPttPrincipal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $familyPttSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName $familyPttTaskName -Action $familyPttTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $familyPttSettings -Principal $familyPttPrincipal -Force | Out-Null
+  }
+  $familyPttTask=Get-ScheduledTask -TaskName $familyPttTaskName -ErrorAction Stop
+  if($familyPttTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttTaskName}
+}
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
