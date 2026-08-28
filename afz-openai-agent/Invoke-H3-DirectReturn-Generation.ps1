@@ -18,6 +18,10 @@ $diagFile=Join-Path $diagRoot 'H3-DIRECT-RETURN-GENERATION-LATEST.json'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Write-State($Object){[IO.File]::WriteAllText($stateFile,($Object|ConvertTo-Json -Depth 12 -Compress),$utf8)}
+function Read-LogTail{
+  if(-not(Test-Path -LiteralPath $logFile -PathType Leaf)){return @()}
+  try{return @(Get-Content -LiteralPath $logFile -Tail 80 -ErrorAction Stop|ForEach-Object {[string]$_})}catch{return @('LOG_READ_FAILED: '+$_.Exception.Message)}
+}
 function Publish-Diagnostic($Object){
   try{
     if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
@@ -42,7 +46,7 @@ try{
 
   $prior=Read-Json $stateFile
   if($prior -and [int]$prior.generation -ge $generation){
-    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior})
+    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior;bootstrapLogTail=(Read-LogTail)})
   }
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){throw "Return bootstrap missing: $bootstrap"}
   $text=Get-Content -LiteralPath $bootstrap -Raw
@@ -66,12 +70,13 @@ try{
     bootstrapExit=$code
     bootstrapStatus=$(if($bs){[string]$bs.status}else{$null})
     bootstrapMessage=$(if($bs){[string]$bs.message}else{$null})
+    bootstrapLogTail=(Read-LogTail)
     finishedAt=(Get-Date -Format o)
   }
   Write-State $terminal
   Emit $terminal
 }catch{
-  $failed=[ordered]@{ok=$false;status='failed';generation=$generation;syncedSha=$SyncedSha;mode='return-only-v4';error=$_.Exception.Message;finishedAt=(Get-Date -Format o)}
+  $failed=[ordered]@{ok=$false;status='failed';generation=$generation;syncedSha=$SyncedSha;mode='return-only-v4';error=$_.Exception.Message;bootstrapLogTail=(Read-LogTail);finishedAt=(Get-Date -Format o)}
   if($generation -gt 0){try{Write-State $failed}catch{}}
   Emit $failed
 }
