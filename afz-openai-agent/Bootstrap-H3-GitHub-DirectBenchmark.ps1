@@ -54,7 +54,7 @@ Start-Sleep -Seconds 3
 `$t=Get-ScheduledTask -TaskName `$task
 `$preflight='C:\ProgramData\AFZ\H3GitHubDirect\github-preflight.json'
 `$pf=`$null;if(Test-Path `$preflight){try{`$pf=Get-Content -LiteralPath `$preflight -Raw|ConvertFrom-Json}catch{}}
-[pscustomobject]@{host=`$env:COMPUTERNAME;task=`$task;taskState=[string]`$t.State;watcher='$remoteWatcher';launcher='$remoteLauncher';authHelper='$remoteAuthHelper';githubPreflightStatus=$(if(`$pf){[string]`$pf.status}else{'pending'})}|ConvertTo-Json -Compress
+[pscustomobject]@{host=`$env:COMPUTERNAME;task=`$task;taskState=[string]`$t.State;watcher='$remoteWatcher';launcher='$remoteLauncher';authHelper='$remoteAuthHelper';githubPreflightStatus=`$(if(`$pf){[string]`$pf.status}else{'pending'})}|ConvertTo-Json -Compress
 "@
   $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
   $out=& $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known" $h3 powershell.exe -NoProfile -EncodedCommand $encoded 2>&1
