@@ -14,6 +14,7 @@ $toolsSrc=Join-Path $sourceRoot 'tools'
 $prospectSrc=Join-Path $sourceRoot 'prospect-engine'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
+$familyPttEdgeWatcher=Join-Path $sourceRoot 'FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -90,6 +91,24 @@ if(Test-Path $familyPttAuditWatcher){
   }
   $familyPttTask=Get-ScheduledTask -TaskName $familyPttTaskName -ErrorAction Stop
   if($familyPttTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttTaskName}
+}
+
+# FamilyPTT production-edge preflight is isolated from the website lane. The SYSTEM
+# watcher borrows the already-proven AFZ Edge Backup user-context task only while the
+# carrier is idle, restores its action afterwards, and performs read-only checks only.
+if(Test-Path $familyPttEdgeWatcher){
+  $familyPttEdgeTaskName='AFZ FamilyPTT Edge Preflight Watcher R12'
+  $familyPttEdgeTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttEdgeWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction SilentlyContinue
+  if($familyPttEdgeTask){
+    Set-ScheduledTask -TaskName $familyPttEdgeTaskName -Action $familyPttEdgeTaskAction | Out-Null
+  }else{
+    $familyPttEdgePrincipal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $familyPttEdgeSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName $familyPttEdgeTaskName -Action $familyPttEdgeTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $familyPttEdgeSettings -Principal $familyPttEdgePrincipal -Force | Out-Null
+  }
+  $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction Stop
+  if($familyPttEdgeTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttEdgeTaskName}
 }
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
