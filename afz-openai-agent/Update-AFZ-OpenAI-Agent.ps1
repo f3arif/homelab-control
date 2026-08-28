@@ -44,7 +44,8 @@ try{
   $benchmarkRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\H3-Qwen27B-Request-Watcher.ps1'
   $siteDeployRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Site-Deploy-Request-Watcher.ps1'
   $siteDeployExecutor=Join-Path $InstallRoot 'afz-openai-agent\Deploy-AFZ-WebsiteToPi.ps1'
-  foreach($p in @($allowFile,$wrapper,$control,$updater,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
+  $familyPttAuditWatcher=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Transport-Audit-Watcher.ps1'
+  foreach($p in @($allowFile,$wrapper,$control,$updater,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$familyPttAuditWatcher)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
   $ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
   if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}
@@ -88,6 +89,15 @@ try{
   $siteWatcherTask=Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue
   if($siteWatcherTask){Set-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
+  # FamilyPTT transport audit is a dedicated reverse-pull lane. It runs locally on
+  # Windows-main (already inside the AFZ tailnet), performs read-only transport checks,
+  # and publishes only sanitized durable evidence to GitHub. A separate task makes the
+  # lane observable and independent of the long-running OpenAI agent process tree.
+  $familyPttWatcherTaskName='AFZ FamilyPTT Transport Audit Watcher'
+  $familyPttWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttAuditWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $familyPttWatcherTask=Get-ScheduledTask -TaskName $familyPttWatcherTaskName -ErrorAction SilentlyContinue
+  if($familyPttWatcherTask){Set-ScheduledTask -TaskName $familyPttWatcherTaskName -Action $familyPttWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $familyPttWatcherTaskName -Action $familyPttWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
+
   # The 3-second fast signal watcher is primary. This one-minute task is recovery-only.
   $updaterTaskName='AFZ OpenAI Agent Updater'
   $updaterAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updater`" -InstallRoot `"$InstallRoot`""
@@ -106,9 +116,10 @@ try{
   Ensure-Running $controlTaskName $changed
   Ensure-Running $benchmarkWatcherTaskName $changed
   Ensure-Running $siteWatcherTaskName $changed
+  Ensure-Running $familyPttWatcherTaskName $changed
 
   $trigger=$(if($ExpectedSha){'fast-signal-exact-sha'}else{'fallback-poll'})
-  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;clients=$ips;transport=[string]$syncResult.refTransport}
+  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;familyPttTransportAuditWatcherTask=$familyPttWatcherTaskName;clients=$ips;transport=[string]$syncResult.refTransport}
   $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
 } catch {
   $result=[ordered]@{ok=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});error=$_.Exception.Message}
