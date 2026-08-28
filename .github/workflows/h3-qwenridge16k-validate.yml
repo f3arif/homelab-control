@@ -5,6 +5,8 @@ on:
     paths:
       - 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1'
       - 'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - 'afz-openai-agent/tools/Run-WindowsMain-H3-QwenRidge16K-Carrier.ps1'
       - 'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1'
       - 'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1'
       - 'afz-openai-agent/requests/h3-qwenridge16k-website-test.json'
@@ -27,6 +29,8 @@ jobs:
           $files=@(
             'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1',
             'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1',
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1',
+            'afz-openai-agent/tools/Run-WindowsMain-H3-QwenRidge16K-Carrier.ps1',
             'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1',
             'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1'
           )
@@ -39,17 +43,19 @@ jobs:
             }
           }
 
-      - name: Assert typed request contract and boundaries
+      - name: Assert typed request contract and recovery boundaries
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $request=Get-Content 'afz-openai-agent/requests/h3-qwenridge16k-website-test.json' -Raw|ConvertFrom-Json
           if([int]$request.schema -ne 1){throw 'schema must be 1'}
           if([string]$request.project -ne 'qwen38-ridge16k-website-direct-test'){throw 'unexpected project'}
+          if([string]$request.job_id -ne 'qwenridge16k-website-20260828-r1'){throw 'transport recovery must preserve the model job id'}
           if([string]$request.model -ne 'qwen3.8-ridge:27b-16k'){throw 'unexpected model'}
           if([int]$request.context -ne 16384){throw 'context must be 16384'}
           if(-not [bool]$request.no_think){throw 'no_think must be true'}
           if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
+          if([int]$request.recovery_generation -ne 1){throw 'recovery_generation must be exactly 1'}
           $expected=@('/','/services','/projects','/about','/contact')
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
@@ -57,9 +63,11 @@ jobs:
 
           $watcher=Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
           $bootstrap=Get-Content 'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
+          $sync=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
+          $carrier=Get-Content 'afz-openai-agent/tools/Run-WindowsMain-H3-QwenRidge16K-Carrier.ps1' -Raw
           $launcher=Get-Content 'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
           $runner=Get-Content 'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
-          $all=$watcher+"`n"+$bootstrap+"`n"+$launcher+"`n"+$runner
+          $all=$watcher+"`n"+$bootstrap+"`n"+$sync+"`n"+$carrier+"`n"+$launcher+"`n"+$runner
 
           foreach($needle in @(
             'DESKTOP-10SKF0M',
@@ -72,15 +80,24 @@ jobs:
             '[STATUS][H3-RIDGE16K]',
             'Path]::IsPathRooted',
             'think=$false',
-            '/no_think'
+            '/no_think',
+            'AFZ Edge Backup',
+            'StrictHostKeyChecking=yes',
+            'transport-recovery-g'
           )){if(-not $all.Contains($needle)){throw "Required boundary missing: $needle"}}
 
           if($runner -notmatch 'max_model_calls' -or $runner -notmatch 'num_ctx=\$context' -or $runner -notmatch 'num_predict=11000'){
             throw 'Runner missing bounded one-call/context generation contract.'
           }
-          if($launcher -notmatch 'Start-Process' -or $launcher -notmatch 'RedirectStandardOutput' -or $bootstrap -notmatch 'StrictHostKeyChecking=yes'){
-            throw 'Detached H3 launch or strict SSH boundary missing.'
+          if($launcher -notmatch 'Start-Process' -or $launcher -notmatch 'RedirectStandardOutput'){
+            throw 'Detached H3 launch boundary missing.'
           }
-          foreach($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','OneDrive','SharePoint')){
+          if($bootstrap -notmatch 'Set-ScheduledTask' -or $bootstrap -notmatch 'New-RestoredAction' -or $carrier -notmatch 'StrictHostKeyChecking=yes'){
+            throw 'Interactive carrier swap/restore or strict SSH boundary missing.'
+          }
+          if($sync -notmatch "status -in @\('failed','error'\)" -or $sync -notmatch 'transport-recovery-g'){
+            throw 'One-shot pre-launch transport recovery migration missing.'
+          }
+          foreach($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','SharePoint')){
             if($all -match [regex]::Escape($forbidden)){throw "Forbidden primitive/transport found: $forbidden"}
           }
