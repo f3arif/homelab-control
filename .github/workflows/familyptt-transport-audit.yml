@@ -1,0 +1,59 @@
+name: FamilyPTT Transport Audit Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/familyptt-transport-audit.yml'
+      - 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/requests/familyptt-transport-audit.json'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Validate worker-pull safety contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $req=Get-Content 'afz-openai-agent/requests/familyptt-transport-audit.json' -Raw|ConvertFrom-Json
+          if($req.schema -ne 1 -or $req.project -ne 'familyptt' -or $req.action -ne 'audit-secure-transport'){throw 'Typed request contract invalid'}
+          if($req.backend_host -ne '100.71.26.69' -or $req.token_port -ne 7883 -or $req.livekit_port -ne 7880){throw 'Private endpoint contract changed unexpectedly'}
+          if($req.job_id -ne 'familyptt-transport-audit-17-r2'){throw 'Unexpected job id'}
+          $watcher=Get-Content 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1' -Raw
+          $starter=Get-Content 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1' -Raw
+          foreach($marker in @(
+            'Global\AFZFamilyPTTTransportAuditWatcher',
+            'audit-secure-transport',
+            'jwtLogged=$false',
+            'backendMutation=$false',
+            'dnsMutation=$false',
+            'proxyMutation=$false',
+            'firewallMutation=$false',
+            'Publish-GitHubIssue',
+            'Publish-GitBranch'
+          )){if(-not $watcher.Contains($marker)){throw "Missing watcher safety marker: $marker"}}
+          if(-not $starter.Contains('FamilyPTT-Transport-Audit-Watcher.ps1')){throw 'Starter does not launch FamilyPTT watcher'}
+          if($watcher -match 'Remove-NetFirewallRule|New-NetFirewallRule|Set-NetFirewallRule|Restart-Service|Stop-Service|Start-Service|Set-DnsClientServerAddress'){throw 'Forbidden system mutation primitive present'}
+          Write-Host 'FAMILYPTT WORKER-PULL AUDIT CONTRACT PASS'

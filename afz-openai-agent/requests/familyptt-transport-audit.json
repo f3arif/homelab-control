@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "project": "familyptt",
+  "action": "audit-secure-transport",
+  "issue": 17,
+  "backend_host": "100.71.26.69",
+  "token_port": 7883,
+  "livekit_port": 7880,
+  "api_hostname": "ptt-api.afzeng.ca",
+  "livekit_hostname": "ptt-livekit.afzeng.ca",
+  "job_id": "familyptt-transport-audit-17-r2"
+}
