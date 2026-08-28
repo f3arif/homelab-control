@@ -32,13 +32,22 @@ try{
     exit 43
   }
 
-  $existingCore=@(
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-      Where-Object {
-        [int]$_.ProcessId -ne $PID -and
-        ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core\.ps1'
-      }
-  )
+  $isWindowsHost=([string]$env:OS -eq 'Windows_NT')
+  $cim=Get-Command Get-CimInstance -ErrorAction SilentlyContinue
+  if($isWindowsHost -and -not $cim){
+    Write-Error 'AFZ_SITE_DEPLOY_PROCESS_GUARD_UNAVAILABLE: Get-CimInstance is unavailable on Windows.'
+    exit 45
+  }
+  $existingCore=@()
+  if($cim){
+    $existingCore=@(
+      Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object {
+          [int]$_.ProcessId -ne $PID -and
+          ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core\.ps1'
+        }
+    )
+  }
   if($existingCore.Count -gt 0){
     $pids=($existingCore | ForEach-Object {[string]$_.ProcessId}) -join ','
     Write-Error "AFZ_SITE_DEPLOY_ORPHAN_CORE_PRESENT: refusing new deploy while core PID(s) $pids remain alive."
