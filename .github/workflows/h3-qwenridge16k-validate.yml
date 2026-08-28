@@ -1,0 +1,86 @@
+name: Validate H3 Qwen Ridge16K Lane
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1'
+      - 'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1'
+      - 'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1'
+      - 'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1'
+      - 'afz-openai-agent/requests/h3-qwenridge16k-website-test.json'
+      - '.github/workflows/h3-qwenridge16k-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell with Windows PowerShell AST
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1',
+            'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1',
+            'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1',
+            'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){
+              $errors|ForEach-Object {Write-Host $_.Message -ForegroundColor Red}
+              throw "PowerShell parse failure: $file"
+            }
+          }
+
+      - name: Assert typed request contract and boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $request=Get-Content 'afz-openai-agent/requests/h3-qwenridge16k-website-test.json' -Raw|ConvertFrom-Json
+          if([int]$request.schema -ne 1){throw 'schema must be 1'}
+          if([string]$request.project -ne 'qwen38-ridge16k-website-direct-test'){throw 'unexpected project'}
+          if([string]$request.model -ne 'qwen3.8-ridge:27b-16k'){throw 'unexpected model'}
+          if([int]$request.context -ne 16384){throw 'context must be 16384'}
+          if(-not [bool]$request.no_think){throw 'no_think must be true'}
+          if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
+          $expected=@('/','/services','/projects','/about','/contact')
+          $routes=@($request.required_routes|ForEach-Object {[string]$_})
+          if($routes.Count -ne 5){throw 'five routes required'}
+          foreach($route in $expected){if($routes -notcontains $route){throw "missing route $route"}}
+
+          $watcher=Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
+          $bootstrap=Get-Content 'afz-openai-agent/Bootstrap-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
+          $launcher=Get-Content 'afz-openai-agent/tools/Launch-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
+          $runner=Get-Content 'afz-openai-agent/tools/Start-H3-QwenRidge16K-WebsiteTest.ps1' -Raw
+          $all=$watcher+"`n"+$bootstrap+"`n"+$launcher+"`n"+$runner
+
+          foreach($needle in @(
+            'DESKTOP-10SKF0M',
+            'DESKTOP-H3R6CQN',
+            'Faiz@100.106.186.118',
+            'qwen3.8-ridge:27b-16k',
+            '16384',
+            'h3-qwenridge16k-website-test.json',
+            'h3-direct-results',
+            '[STATUS][H3-RIDGE16K]',
+            'Path]::IsPathRooted',
+            'think=$false',
+            '/no_think'
+          )){if(-not $all.Contains($needle)){throw "Required boundary missing: $needle"}}
+
+          if($runner -notmatch 'max_model_calls' -or $runner -notmatch 'num_ctx=\$context' -or $runner -notmatch 'num_predict=11000'){
+            throw 'Runner missing bounded one-call/context generation contract.'
+          }
+          if($launcher -notmatch 'Start-Process' -or $launcher -notmatch 'RedirectStandardOutput' -or $bootstrap -notmatch 'StrictHostKeyChecking=yes'){
+            throw 'Detached H3 launch or strict SSH boundary missing.'
+          }
+          foreach($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','OneDrive','SharePoint')){
+            if($all -match [regex]::Escape($forbidden)){throw "Forbidden primitive/transport found: $forbidden"}
+          }
