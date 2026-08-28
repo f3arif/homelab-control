@@ -44,7 +44,7 @@ jobs:
       - name: Validate typed request and fixed safety contract
         shell: python
         run: |
-          import json, re
+          import json
           from pathlib import Path
           req=json.loads(Path('afz-openai-agent/requests/afz-site-deploy.json').read_text())
           assert req == {
@@ -53,7 +53,7 @@ jobs:
             'action':'deploy-pi-static-site',
             'job_id':'afz-site-git-cutover-20260827T2105',
             'source_repository':'f3arif/afz-engineering',
-            'expected_sha':'8c02e1f8cf695ed55be25cb229627c1d77362656'
+            'expected_sha':'c38576741ce2d379723fde038300363429845656'
           }
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           watcher=Path('afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1').read_text()
@@ -86,9 +86,9 @@ jobs:
           text=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           m=re.search(r"\$bash=@'\n(.*?)\n'@",text,re.S)
           assert m, 'literal Bash template not found'
-          bash=m.group(1).replace('__JOB_ID__','validate-job').replace('__EXPECTED_SHA__','8c02e1f8cf695ed55be25cb229627c1d77362656').replace('__REMOTE_ARCHIVE__','/tmp/site.tar.gz').replace('__REMOTE_SCRIPT__','/tmp/site.sh')
+          bash=m.group(1).replace('__JOB_ID__','validate-job').replace('__EXPECTED_SHA__','c38576741ce2d379723fde038300363429845656').replace('__REMOTE_ARCHIVE__','/tmp/site.tar.gz').replace('__REMOTE_SCRIPT__','/tmp/site.sh')
           Path('/tmp/afz-site-deploy.sh').write_text(bash)
-        
+
       - name: Bash parser
         shell: bash
         run: bash -n /tmp/afz-site-deploy.sh
