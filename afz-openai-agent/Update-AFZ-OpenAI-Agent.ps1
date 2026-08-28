@@ -42,7 +42,9 @@ try{
   $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
   $benchmarkRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen27B-WebsiteBenchmark.ps1'
   $benchmarkRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\H3-Qwen27B-Request-Watcher.ps1'
-  foreach($p in @($allowFile,$wrapper,$control,$updater,$benchmarkRelay,$benchmarkRequestWatcher)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
+  $siteDeployRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Site-Deploy-Request-Watcher.ps1'
+  $siteDeployExecutor=Join-Path $InstallRoot 'afz-openai-agent\Deploy-AFZ-WebsiteToPi.ps1'
+  foreach($p in @($allowFile,$wrapper,$control,$updater,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
   $ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
   if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}
@@ -70,12 +72,21 @@ try{
   $controlTask=Get-ScheduledTask -TaskName $controlTaskName -ErrorAction SilentlyContinue
   if($controlTask){Set-ScheduledTask -TaskName $controlTaskName -Action $controlAction | Out-Null}else{Register-ScheduledTask -TaskName $controlTaskName -Action $controlAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # Secretless GitHub request consumer. It only reads the fixed typed request file
-  # from the exact-SHA synced source and can launch only the fixed H3 benchmark relay.
+  # Secretless GitHub request consumer. It only reads fixed typed request files
+  # from the exact-SHA synced source and can launch only fixed allowlisted relays.
   $benchmarkWatcherTaskName='AFZ H3 Qwen27B Request Watcher'
   $benchmarkWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$benchmarkRequestWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $benchmarkWatcherTask=Get-ScheduledTask -TaskName $benchmarkWatcherTaskName -ErrorAction SilentlyContinue
   if($benchmarkWatcherTask){Set-ScheduledTask -TaskName $benchmarkWatcherTaskName -Action $benchmarkWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $benchmarkWatcherTaskName -Action $benchmarkWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
+
+  # Fixed AFZ website Git->Pi cutover lane. The SYSTEM watcher never reads or moves
+  # the Pi private key. It temporarily reuses the existing website-sync task's user
+  # execution identity, restores that task's original action, and disables the old
+  # OneDrive sync only after the Git deployment reports full success.
+  $siteWatcherTaskName='AFZ Website Git Deploy Request Watcher'
+  $siteWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$siteDeployRequestWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $siteWatcherTask=Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue
+  if($siteWatcherTask){Set-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
   # The 3-second fast signal watcher is primary. This one-minute task is recovery-only.
   $updaterTaskName='AFZ OpenAI Agent Updater'
@@ -94,9 +105,10 @@ try{
   Ensure-Running $agentTaskName $changed
   Ensure-Running $controlTaskName $changed
   Ensure-Running $benchmarkWatcherTaskName $changed
+  Ensure-Running $siteWatcherTaskName $changed
 
   $trigger=$(if($ExpectedSha){'fast-signal-exact-sha'}else{'fallback-poll'})
-  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;clients=$ips;transport=[string]$syncResult.refTransport}
+  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;clients=$ips;transport=[string]$syncResult.refTransport}
   $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
 } catch {
   $result=[ordered]@{ok=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});error=$_.Exception.Message}
