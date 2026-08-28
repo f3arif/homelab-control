@@ -1,0 +1,39 @@
+name: R5 Hung SSH Abort Parse
+
+on:
+  push:
+    branches:
+      - test/afz-r5-hung-ssh-abort-parse
+    paths:
+      - 'tmp/r5-abort-action.ps1'
+      - '.github/workflows/r5-abort-action-parse.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse bounded abort action under Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=(Resolve-Path 'tmp/r5-abort-action.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'R5 abort action parse failed'}
+          $text=Get-Content -LiteralPath $path -Raw
+          foreach($marker in @(
+            'afz-site-git-cutover-r5-20260828T1151',
+            'Deploy-AFZ-WebsiteToPi-Core',
+            'mkdir -p',
+            '/opt/edge/afz-site/git-deploy/stage',
+            'Stop-Process',
+            'bounded abort requires at least 120s',
+            'Parent deploy process         : NOT directly stopped'
+          )){if(-not $text.Contains($marker)){throw "Missing safety marker: $marker"}}
+          if($text -match 'Stop-ScheduledTask'){throw 'Abort action must not stop scheduled tasks directly'}
+          Write-Host 'R5 BOUNDED SSH ABORT PARSE PASS'
