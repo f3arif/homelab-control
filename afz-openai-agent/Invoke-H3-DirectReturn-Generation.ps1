@@ -18,9 +18,49 @@ $diagFile=Join-Path $diagRoot 'H3-DIRECT-RETURN-GENERATION-LATEST.json'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Write-State($Object){[IO.File]::WriteAllText($stateFile,($Object|ConvertTo-Json -Depth 12 -Compress),$utf8)}
+function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $null}}
 function Read-LogTail{
   if(-not(Test-Path -LiteralPath $logFile -PathType Leaf)){return @()}
   try{return @(Get-Content -LiteralPath $logFile -Tail 80 -ErrorAction Stop|ForEach-Object {[string]$_})}catch{return @('LOG_READ_FAILED: '+$_.Exception.Message)}
+}
+function Invoke-OneShotSshDiagnostic([int]$Generation){
+  $diagState=Join-Path $stateRoot ("ssh-diagnostic-g$Generation.json")
+  $existing=Read-Json $diagState
+  if($existing){return $existing}
+  $key='C:\Users\Faiz\.ssh\afz_h3_worker'
+  $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
+  $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+  $target='Faiz@100.106.186.118'
+  $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+  $aclOwner=$null;$aclProtected=$null;$aclPrincipals=@()
+  try{
+    $acl=Get-Acl -LiteralPath $key -ErrorAction Stop
+    $aclOwner=[string]$acl.Owner
+    $aclProtected=[bool]$acl.AreAccessRulesProtected
+    $aclPrincipals=@($acl.Access|ForEach-Object {([string]$_.IdentityReference)+'|'+([string]$_.FileSystemRights)+'|'+([string]$_.AccessControlType)})
+  }catch{$aclPrincipals=@('ACL_READ_FAILED: '+$_.Exception.Message)}
+  $stdout=Join-Path $env:TEMP ('afz-h3-sshdiag-out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stderr=Join-Path $env:TEMP ('afz-h3-sshdiag-err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $exit=$null;$timedOut=$false;$out='';$err=''
+  try{
+    if(-not(Test-Path -LiteralPath $ssh -PathType Leaf)){throw "ssh.exe missing: $ssh"}
+    if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "H3 key missing: $key"}
+    if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts missing: $known"}
+    $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),'-o','ConnectTimeout=8',$target,'hostname')
+    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -NoNewWindow
+    if(-not $p.WaitForExit(15000)){$timedOut=$true;try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
+    if(-not $timedOut){$exit=[int]$p.ExitCode}
+    if(Test-Path -LiteralPath $stdout){$out=(Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue).Trim()}
+    if(Test-Path -LiteralPath $stderr){$err=(Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()}
+  }catch{$err=('DIAGNOSTIC_EXCEPTION: '+$_.Exception.Message)}
+  finally{Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue}
+  $o=[ordered]@{
+    schema=1;generation=$Generation;readOnly=$true;remoteCommand='hostname';identityName=[string]$identity.Name;identitySid=[string]$identity.User.Value;
+    keyPath=$key;aclOwner=$aclOwner;aclProtected=$aclProtected;aclPrincipals=$aclPrincipals;strictHostKeyChecking=$true;target=$target;
+    exitCode=$exit;timedOut=$timedOut;stdout=$out;stderr=$err;capturedAt=(Get-Date -Format o)
+  }
+  [IO.File]::WriteAllText($diagState,($o|ConvertTo-Json -Depth 12 -Compress),$utf8)
+  return $o
 }
 function Publish-Diagnostic($Object){
   try{
@@ -29,8 +69,7 @@ function Publish-Diagnostic($Object){
     [IO.File]::WriteAllText($diagFile,($d|ConvertTo-Json -Depth 20 -Compress),$utf8)
   }catch{}
 }
-function Emit($Object){Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 12 -Compress);exit 0}
-function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $null}}
+function Emit($Object){Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 20 -Compress);exit 0}
 
 $generation=0
 try{
@@ -46,7 +85,7 @@ try{
 
   $prior=Read-Json $stateFile
   if($prior -and [int]$prior.generation -ge $generation){
-    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior;bootstrapLogTail=(Read-LogTail)})
+    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior;bootstrapLogTail=(Read-LogTail);sshDiagnostic=(Invoke-OneShotSshDiagnostic $generation)})
   }
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){throw "Return bootstrap missing: $bootstrap"}
   $text=Get-Content -LiteralPath $bootstrap -Raw
