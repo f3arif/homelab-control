@@ -1,154 +1,59 @@
-name: FamilyPTT Transport Audit
+name: FamilyPTT Transport Audit Contract
 
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/familyptt-transport-audit.yml'
+      - 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/requests/familyptt-transport-audit.json'
-  workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
-  id-token: write
-
-concurrency:
-  group: familyptt-transport-audit
-  cancel-in-progress: true
 
 jobs:
-  audit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate typed request
-        shell: bash
+      - name: Parse PowerShell sources
+        shell: pwsh
         run: |
-          set -euo pipefail
-          req='afz-openai-agent/requests/familyptt-transport-audit.json'
-          test -f "$req"
-          test "$(jq -r '.schema' "$req")" = '1'
-          test "$(jq -r '.project' "$req")" = 'familyptt'
-          test "$(jq -r '.action' "$req")" = 'audit-secure-transport'
-          test "$(jq -r '.backend_host' "$req")" = '100.71.26.69'
-          test "$(jq -r '.token_port' "$req")" = '7883'
-          test "$(jq -r '.livekit_port' "$req")" = '7880'
-          jq -e '.job_id | test("^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$")' "$req" >/dev/null
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
 
-      - name: Join AFZ tailnet
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
-          tags: tag:afz-deploy
-
-      - name: Audit private backend and candidate TLS names
-        id: audit
-        shell: bash
+      - name: Validate worker-pull safety contract
+        shell: pwsh
         run: |
-          set -euo pipefail
-          set +x
-          req='afz-openai-agent/requests/familyptt-transport-audit.json'
-          host=$(jq -r '.backend_host' "$req")
-          api_port=$(jq -r '.token_port' "$req")
-          lk_port=$(jq -r '.livekit_port' "$req")
-          api_name=$(jq -r '.api_hostname' "$req")
-          lk_name=$(jq -r '.livekit_hostname' "$req")
-          job_id=$(jq -r '.job_id' "$req")
-
-          api_tcp=false
-          lk_tcp=false
-          if timeout 4 bash -c "</dev/tcp/$host/$api_port" 2>/dev/null; then api_tcp=true; fi
-          if timeout 4 bash -c "</dev/tcp/$host/$lk_port" 2>/dev/null; then lk_tcp=true; fi
-
-          health_code=$(curl --silent --show-error --output /tmp/fptt-health --write-out '%{http_code}' \
-            --connect-timeout 3 --max-time 8 "http://$host:$api_port/health" 2>/dev/null || true)
-
-          token_code=$(curl --silent --show-error --output /tmp/fptt-token --write-out '%{http_code}' \
-            --connect-timeout 3 --max-time 10 \
-            "http://$host:$api_port/token?identity=afz-transport-audit&name=AFZ%20Transport%20Audit&room=family-main" 2>/dev/null || true)
-          server_url=''
-          token_present=false
-          token_room=''
-          if [ -s /tmp/fptt-token ]; then
-            server_url=$(jq -r '.serverUrl // ""' /tmp/fptt-token 2>/dev/null || true)
-            token_room=$(jq -r '.room // ""' /tmp/fptt-token 2>/dev/null || true)
-            if jq -e '(.participantToken // "") | length > 20' /tmp/fptt-token >/dev/null 2>&1; then token_present=true; fi
-          fi
-          rm -f /tmp/fptt-token /tmp/fptt-health
-
-          floor_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            --connect-timeout 3 --max-time 8 \
-            "http://$host:$api_port/floor/status?room=family-main" 2>/dev/null || true)
-
-          api_dns=false
-          lk_dns=false
-          api_ips='none'
-          lk_ips='none'
-          if getent ahostsv4 "$api_name" >/tmp/fptt-api-dns 2>/dev/null; then
-            api_dns=true
-            api_ips=$(awk '{print $1}' /tmp/fptt-api-dns | sort -u | paste -sd, -)
-          fi
-          if getent ahostsv4 "$lk_name" >/tmp/fptt-lk-dns 2>/dev/null; then
-            lk_dns=true
-            lk_ips=$(awk '{print $1}' /tmp/fptt-lk-dns | sort -u | paste -sd, -)
-          fi
-          rm -f /tmp/fptt-api-dns /tmp/fptt-lk-dns
-
-          server_scheme='none'
-          case "$server_url" in
-            wss://*) server_scheme='wss' ;;
-            ws://*) server_scheme='ws' ;;
-            https://*) server_scheme='https' ;;
-            http://*) server_scheme='http' ;;
-            '') server_scheme='none' ;;
-            *) server_scheme='other' ;;
-          esac
-
-          classification='NEEDS_BACKEND_REVIEW'
-          if [ "$api_tcp" = true ] && [ "$lk_tcp" = true ] && [ "$token_code" = '200' ] && [ "$token_present" = true ]; then
-            classification='PRIVATE_BACKEND_READY_FOR_TLS_EDGE'
-          fi
-
-          cat > /tmp/familyptt-transport-audit.md <<EOF
-          ## FamilyPTT transport audit — $job_id
-
-          Read-only audit completed from a GitHub Actions runner joined to the AFZ tailnet. No backend, DNS, proxy, firewall, LiveKit, or application configuration was changed.
-
-          | Check | Result |
-          |---|---|
-          | Backend API TCP $host:$api_port | $api_tcp |
-          | LiveKit TCP $host:$lk_port | $lk_tcp |
-          | API `/health` HTTP status | ${health_code:-none} |
-          | `/token` HTTP status | ${token_code:-none} |
-          | Token present (value not logged) | $token_present |
-          | Returned room | ${token_room:-none} |
-          | Returned LiveKit URL scheme | $server_scheme |
-          | Floor status HTTP code | ${floor_code:-none} |
-          | Candidate API DNS `$api_name` | $api_dns ($api_ips) |
-          | Candidate LiveKit DNS `$lk_name` | $lk_dns ($lk_ips) |
-
-          **Classification:** `$classification`
-
-          Secrets/JWT contents were intentionally discarded before reporting. The next mutation phase must not begin until the TLS edge/DNS target and rollback path are explicit.
-          EOF
-
-          echo "classification=$classification" >> "$GITHUB_OUTPUT"
-
-      - name: Publish durable audit result to infrastructure issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const req = JSON.parse(fs.readFileSync('afz-openai-agent/requests/familyptt-transport-audit.json', 'utf8'));
-            const body = fs.readFileSync('/tmp/familyptt-transport-audit.md', 'utf8');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: req.issue,
-              body
-            });
+          $ErrorActionPreference='Stop'
+          $req=Get-Content 'afz-openai-agent/requests/familyptt-transport-audit.json' -Raw|ConvertFrom-Json
+          if($req.schema -ne 1 -or $req.project -ne 'familyptt' -or $req.action -ne 'audit-secure-transport'){throw 'Typed request contract invalid'}
+          if($req.backend_host -ne '100.71.26.69' -or $req.token_port -ne 7883 -or $req.livekit_port -ne 7880){throw 'Private endpoint contract changed unexpectedly'}
+          if($req.job_id -ne 'familyptt-transport-audit-17-r2'){throw 'Unexpected job id'}
+          $watcher=Get-Content 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1' -Raw
+          $starter=Get-Content 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1' -Raw
+          foreach($marker in @(
+            'Global\AFZFamilyPTTTransportAuditWatcher',
+            'audit-secure-transport',
+            'jwtLogged=$false',
+            'backendMutation=$false',
+            'dnsMutation=$false',
+            'proxyMutation=$false',
+            'firewallMutation=$false',
+            'Publish-GitHubIssue',
+            'Publish-GitBranch'
+          )){if(-not $watcher.Contains($marker)){throw "Missing watcher safety marker: $marker"}}
+          if(-not $starter.Contains('FamilyPTT-Transport-Audit-Watcher.ps1')){throw 'Starter does not launch FamilyPTT watcher'}
+          if($watcher -match 'Remove-NetFirewallRule|New-NetFirewallRule|Set-NetFirewallRule|Restart-Service|Stop-Service|Start-Service|Set-DnsClientServerAddress'){throw 'Forbidden system mutation primitive present'}
+          Write-Host 'FAMILYPTT WORKER-PULL AUDIT CONTRACT PASS'
