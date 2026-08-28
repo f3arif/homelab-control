@@ -69,6 +69,7 @@ jobs:
             'Qwen38-27B-Website-Benchmark-20260826-174739',
             'h3-qwen27b-benchmark.json',
             'h3-direct-results',
+            'h3-qwen27b-benchmark-status.json',
             'Path]::IsPathRooted',
             'path traversal',
             'AFZ H3 GitHub Direct Benchmark Watcher'
@@ -79,8 +80,8 @@ jobs:
           if ($winWatcher -match 'Invoke-H3-Qwen27B-WebsiteBenchmark') {
             throw 'windows-main watcher must not dispatch benchmark iterations directly.'
           }
-          if ($winWatcher -notmatch 'bootstrap-only') {
-            throw 'windows-main watcher is not explicitly bootstrap-only.'
+          if ($winWatcher -notmatch 'Handle-BenchmarkRequest' -or $winWatcher -notmatch 'benchmark-bootstrap') {
+            throw 'windows-main watcher must expose benchmark bootstrap handling without owning benchmark execution.'
           }
           foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','OneDrive','SharePoint')) {
             if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden primitive/transport found: $forbidden" }
