@@ -1,0 +1,117 @@
+name: AFZ Website Pi Deploy R1 Validate
+
+on:
+  push:
+    branches:
+      - feature/afz-site-pi-deploy-r1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi*.ps1'
+      - 'afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/requests/afz-site-deploy.json'
+      - '.github/workflows/afz-site-pi-deploy-r1-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1',
+            'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1',
+            'afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1',
+            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Validate typed request and fixed safety contract
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          req=json.loads(Path('afz-openai-agent/requests/afz-site-deploy.json').read_text())
+          assert req == {
+            'schema':1,
+            'project':'afz-website',
+            'action':'deploy-pi-static-site',
+            'job_id':'afz-site-git-cutover-20260827T2105',
+            'source_repository':'f3arif/afz-engineering',
+            'expected_sha':'c38576741ce2d379723fde038300363429845656'
+          }
+          core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
+          watcher=Path('afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1').read_text()
+          updater=Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1').read_text()
+          required_core=[
+            "https://github.com/f3arif/afz-engineering.git",
+            "coolyo@192.168.50.68",
+            "/opt/edge/afz-site/html",
+            "afz_pi_sync",
+            "deleteExtraneousFiles",
+            "hpenvy",
+            "/api/ai-chat",
+            "rollback.sh",
+            "afz-git-deploy.json"
+          ]
+          for marker in required_core: assert marker in core, marker
+          assert "source_repository -ne 'f3arif/afz-engineering'" in watcher
+          assert "legacyTaskName='AFZ Website Sync to Pi'" in watcher
+          assert "AFZ Website Git Deploy Request Watcher" in updater
+          assert "AFZ-Site-Deploy-Request-Watcher.ps1" in updater
+          assert "AFZ CHAT SESSION PERSISTENCE" in core
+          assert "Do you provide HVAC design?" in core
+          print('FIXED CONTRACT PASS')
+
+      - name: Syntax-check embedded Pi Bash
+        shell: python
+        run: |
+          import re
+          from pathlib import Path
+          text=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
+          m=re.search(r"\$bash=@'\n(.*?)\n'@",text,re.S)
+          assert m, 'literal Bash template not found'
+          bash=m.group(1).replace('__JOB_ID__','validate-job').replace('__EXPECTED_SHA__','c38576741ce2d379723fde038300363429845656').replace('__REMOTE_ARCHIVE__','/tmp/site.tar.gz').replace('__REMOTE_SCRIPT__','/tmp/site.sh')
+          Path('/tmp/afz-site-deploy.sh').write_text(bash)
+
+      - name: Bash parser
+        shell: bash
+        run: bash -n /tmp/afz-site-deploy.sh
+
+      - name: Verify requested AFZ production commit and guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(python -c "import json;print(json.load(open('afz-openai-agent/requests/afz-site-deploy.json'))['expected_sha'])")
+          git init -q /tmp/afz-engineering
+          git -C /tmp/afz-engineering remote add origin https://github.com/f3arif/afz-engineering.git
+          git -C /tmp/afz-engineering fetch -q --depth 1 origin "$sha"
+          git -C /tmp/afz-engineering checkout -q --detach FETCH_HEAD
+          test "$(git -C /tmp/afz-engineering rev-parse HEAD)" = "$sha"
+          node /tmp/afz-engineering/scripts/afz-production-deploy-guard.mjs
+          python - <<'PY'
+          import json
+          m=json.load(open('/tmp/afz-engineering/production-site/manifest.json'))
+          assert m['reconciled'] is True
+          assert m['deployment']['target']=='/opt/edge/afz-site/html'
+          assert m['deployment']['deleteExtraneousFiles'] is False
+          assert m['webchat']['backendOwner']=='hpenvy'
+          assert m['webchat']['endpoint']=='/api/ai-chat'
+          assert len(m['files']) >= 8
+          print('SITE COMMIT CONTRACT PASS')
+          PY
