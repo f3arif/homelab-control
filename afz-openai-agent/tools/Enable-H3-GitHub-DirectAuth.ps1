@@ -34,7 +34,7 @@ if(-not $gh){
   $gh=Find-Gh
   if(-not $gh){throw 'GitHub CLI installation completed but gh.exe was not found.'}
 }
-$auth=Invoke-GhQuiet @('auth','status','--hostname','github.com')
+$auth=Invoke-GhQuiet -Arguments @('auth','status','--hostname','github.com')
 if($auth.ExitCode -ne 0){
   Write-Host 'GitHub CLI is installed but not authenticated. A browser/device authorization will now start.'
   Write-Host 'Authenticate the GitHub account that owns f3arif/homelab-control. Do not paste a token into chat.'
@@ -45,10 +45,12 @@ if($auth.ExitCode -ne 0){
     $loginExit=$LASTEXITCODE
   }finally{$ErrorActionPreference=$old}
   if($loginExit -ne 0){throw "gh auth login failed exit=$loginExit"}
+  $auth=Invoke-GhQuiet -Arguments @('auth','status','--hostname','github.com')
+  if($auth.ExitCode -ne 0){throw 'GitHub CLI login returned success but auth status still failed.'}
 }
-$setup=Invoke-GhQuiet @('auth','setup-git')
+$setup=Invoke-GhQuiet -Arguments @('auth','setup-git')
 if($setup.ExitCode -ne 0){throw "gh auth setup-git failed exit=$($setup.ExitCode)"}
-$perm=Invoke-GhQuiet @('api',"repos/$repo",'--jq','.permissions.push')
+$perm=Invoke-GhQuiet -Arguments @('api',"repos/$repo",'--jq','.permissions.push')
 $permText=([string]($perm.Output -join "`n")).Trim().ToLowerInvariant()
 if($perm.ExitCode -ne 0 -or $permText -ne 'true'){throw 'Authenticated GitHub identity does not have push permission to f3arif/homelab-control.'}
 $t=Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
