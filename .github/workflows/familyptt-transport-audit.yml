@@ -47,12 +47,6 @@ jobs:
           foreach($marker in @(
             'Global\AFZFamilyPTTTransportAuditWatcherR3',
             'familyptt-transport-audit-r3.json',
-            'jwtLogged=$false',
-            'credentialsLogged=$false',
-            'backendMutation=$false',
-            'dnsMutation=$false',
-            'proxyMutation=$false',
-            'firewallMutation=$false',
             'Publish-GitHubIssue',
             'Publish-FamilyPttResultBranch',
             'C:\Projects\FamilyPTT',
@@ -60,11 +54,19 @@ jobs:
             'awaiting-publication',
             'WATCHER_RUNTIME_ERROR'
           )){if(-not $watcher.Contains($marker)){throw "Missing watcher safety/observability marker: $marker"}}
+          foreach($pattern in @(
+            'jwtLogged\s*=\s*\$false',
+            'credentialsLogged\s*=\s*\$false',
+            'backendMutation\s*=\s*\$false',
+            'dnsMutation\s*=\s*\$false',
+            'proxyMutation\s*=\s*\$false',
+            'firewallMutation\s*=\s*\$false'
+          )){if($watcher -notmatch $pattern){throw "Missing watcher safety pattern: $pattern"}}
           if($watcher -match 'Remove-NetFirewallRule|New-NetFirewallRule|Set-NetFirewallRule|Restart-Service|Stop-Service|Start-Service|Set-DnsClientServerAddress'){throw 'Forbidden system mutation primitive present in FamilyPTT watcher'}
 
           foreach($marker in @(
             'FamilyPTT-Transport-Audit-Watcher-R3.ps1',
-            "AFZ FamilyPTT Transport Audit Watcher R3",
+            'AFZ FamilyPTT Transport Audit Watcher R3',
             'Register-ScheduledTask -TaskName $familyPttTaskName',
             'Start-ScheduledTask -TaskName $familyPttTaskName'
           )){if(-not $starter.Contains($marker)){throw "Starter missing isolated FamilyPTT task marker: $marker"}}
