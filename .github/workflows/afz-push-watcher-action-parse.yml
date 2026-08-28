@@ -1,0 +1,31 @@
+name: AFZ Push Watcher Recovery Parse
+
+on:
+  push:
+    branches:
+      - test/afz-push-watcher-action-parse
+    paths:
+      - 'validation/afz-push-watcher-recover-safe.ps1'
+      - '.github/workflows/afz-push-watcher-action-parse.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: windows-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse recovery action under Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $tokens=$null
+          $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/afz-push-watcher-recover-safe.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){
+            $errors | Format-List | Out-String | Write-Error
+            throw 'Recovery action PowerShell parse failed.'
+          }
+          Write-Host 'AFZ PUSH WATCHER RECOVERY PARSE PASS'
