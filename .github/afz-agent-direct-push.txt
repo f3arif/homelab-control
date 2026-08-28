@@ -1,4 +1,4 @@
 AFZ direct agent source recovery
-reason=h3-request-watcher-one-shot-replay-fix
-target_parent=6972ef50b8c37ca9b4572c434c1bdc6779e717c1
-requested_at=2026-08-28T13:31:00-04:00
+reason=afz-prospect-engine-exact-sha-deploy-verify
+target_parent=182642108e1f06c09a4d5c2281cd59993a609001
+requested_at=2026-08-28T15:32:00-04:00
