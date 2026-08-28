@@ -23,14 +23,24 @@ try{
   if(-not(Test-Path $Watcher)){throw "Watcher missing: $Watcher"}
   $gh=Get-Gh
   if(-not $gh){Save-State 'blocked-github-auth' 'GitHub CLI is not installed on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 20}
-  & $gh auth status --hostname github.com *> $null
-  if($LASTEXITCODE -ne 0){Save-State 'blocked-github-auth' 'GitHub CLI is not authenticated on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 21}
-  $perm=& $gh api "repos/$repo" --jq '.permissions.push' 2>$null
-  if($LASTEXITCODE -ne 0 -or ([string]$perm).Trim().ToLowerInvariant() -ne 'true'){Save-State 'blocked-github-write' 'H3 GitHub identity does not have push permission to homelab-control.';exit 22}
-  & $gh auth setup-git *> $null
-  if($LASTEXITCODE -ne 0){Save-State 'blocked-github-write' 'gh auth setup-git failed on H3.';exit 23}
+  function Invoke-GhQuiet([string[]]$Arguments){
+    $old=$ErrorActionPreference
+    try{
+      $ErrorActionPreference='Continue'
+      $output=@(& $gh @Arguments 2>$null)
+      $code=$LASTEXITCODE
+    }finally{$ErrorActionPreference=$old}
+    return [pscustomobject]@{ExitCode=$code;Output=$output}
+  }
+  $auth=Invoke-GhQuiet @('auth','status','--hostname','github.com')
+  if($auth.ExitCode -ne 0){Save-State 'blocked-github-auth' 'GitHub CLI is installed but not authenticated on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 21}
+  $perm=Invoke-GhQuiet @('api',"repos/$repo",'--jq','.permissions.push')
+  $permText=([string]($perm.Output -join "`n")).Trim().ToLowerInvariant()
+  if($perm.ExitCode -ne 0 -or $permText -ne 'true'){Save-State 'blocked-github-write' 'H3 GitHub identity does not have push permission to homelab-control.';exit 22}
+  $setup=Invoke-GhQuiet @('auth','setup-git')
+  if($setup.ExitCode -ne 0){Save-State 'blocked-github-write' 'gh auth setup-git failed on H3.';exit 23}
   Save-State 'ready' 'GitHub authentication and repository push permission verified; starting direct H3 benchmark watcher.'
-  try{& $gh issue comment $alertIssue --repo $repo --body "[H3-DIRECT PREFLIGHT] GitHub write channel verified on H3. Direct benchmark watcher is starting; AFZ queue/claims are bypassed." *> $null}catch{}
+  [void](Invoke-GhQuiet @('issue','comment',[string]$alertIssue,'--repo',$repo,'--body','[H3-DIRECT PREFLIGHT] GitHub write channel verified on H3. Direct benchmark watcher is starting; AFZ queue/claims are bypassed.'))
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Watcher -IntervalSeconds $IntervalSeconds
   exit $LASTEXITCODE
 }catch{
