@@ -1,0 +1,34 @@
+name: AFZ Pi GitHub Deploy Probe
+
+on:
+  push:
+    branches:
+      - probe/pi-github-deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Pi reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping -c 2 --timeout 5s 100.91.50.9
+
+      - name: Probe Pi Tailscale SSH read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ssh coolyo@100.91.50.9 'set -eu; id -un; test -d /opt/edge/afz-site/html; test -f /opt/edge/afz-site/html/index.html; printf "AFZ_PI_GITHUB_SSH_PROBE=PASS\n"'
