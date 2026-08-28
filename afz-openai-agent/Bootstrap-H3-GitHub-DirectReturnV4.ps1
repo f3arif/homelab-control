@@ -1,0 +1,132 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+  [string]$ExpectedSha,
+  [string]$InstallRoot='C:\AFZ\homelab-control'
+)
+$ErrorActionPreference='Stop'
+if($ExpectedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSha required'}
+$ExpectedSha=$ExpectedSha.ToLowerInvariant()
+
+$key='C:\Users\Faiz\.ssh\afz_h3_worker'
+$known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
+$h3='Faiz@100.106.186.118'
+$publisherName='Publish-H3-GitHub-DirectReturn-V3.ps1'
+$publisherRemote='C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1'
+$publisherUrl="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/tools/$publisherName"
+$stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-github-direct-bootstrap'
+$stateFile=Join-Path $stateRoot 'latest.json'
+$utf8=New-Object Text.UTF8Encoding($false)
+New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+
+function Save-State([string]$Status,[string]$Message,$Extra=$null){
+  $o=[ordered]@{
+    ok=($Status -eq 'completed')
+    status=$Status
+    message=$Message
+    target='DESKTOP-H3R6CQN'
+    transport='one-time-ssh-bootstrap-stdin'
+    mode='return-only-v4'
+    expectedSha=$ExpectedSha
+    updatedAt=(Get-Date -Format o)
+  }
+  if($Extra){foreach($p in $Extra.PSObject.Properties){$o[$p.Name]=$p.Value}}
+  [IO.File]::WriteAllText($stateFile,($o|ConvertTo-Json -Depth 12 -Compress),$utf8)
+}
+
+try{
+  if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "H3 SSH key missing: $key"}
+  if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts file missing: $known"}
+  $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
+
+  Save-State 'running' 'Installing H3 return publisher through stdin transport; Qwen is not launched.'
+
+  $remote=@"
+`$ErrorActionPreference='Stop'
+if(`$env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: `$env:COMPUTERNAME"}
+`$dir='C:\AFZ\GitHubDirect'
+`$stateRoot='C:\ProgramData\AFZ\H3GitHubDirect'
+New-Item -ItemType Directory -Force -Path `$dir,`$stateRoot | Out-Null
+Invoke-WebRequest -Uri '$publisherUrl' -OutFile '$publisherRemote' -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-Return-V4-Bootstrap'} -TimeoutSec 60
+`$tokens=`$null
+`$errors=`$null
+[void][System.Management.Automation.Language.Parser]::ParseFile('$publisherRemote',[ref]`$tokens,[ref]`$errors)
+if(`$errors.Count -gt 0){throw ('Publisher parse failure: '+(`$errors.Message -join '; '))}
+
+`$controllerRunning=`$false
+try{
+  foreach(`$p in Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"){
+    `$cmd=[string]`$p.CommandLine
+    if(`$cmd -and `$cmd.Contains('Run-H3-Qwen27B-WebsiteBenchmark.ps1') -and `$cmd.Contains('Qwen38-27B-Website-Benchmark-20260826-174739')){
+      `$controllerRunning=`$true
+      break
+    }
+  }
+}catch{}
+
+`$legacyTask='AFZ H3 GitHub Direct Benchmark Watcher'
+try{Disable-ScheduledTask -TaskName `$legacyTask -ErrorAction SilentlyContinue | Out-Null}catch{}
+try{Stop-ScheduledTask -TaskName `$legacyTask -ErrorAction SilentlyContinue}catch{}
+
+`$stopped=@()
+try{
+  foreach(`$p in Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"){
+    if(`$p.ProcessId -eq `$PID){continue}
+    `$cmd=[string]`$p.CommandLine
+    if(`$cmd -and (`$cmd.Contains('H3-GitHub-Direct-Benchmark-Watcher.ps1') -or `$cmd.Contains('Start-H3-GitHub-Direct-Benchmark.ps1'))){
+      try{Stop-Process -Id `$p.ProcessId -Force -ErrorAction Stop; `$stopped+=`$p.ProcessId}catch{}
+    }
+  }
+}catch{}
+
+`$task='AFZ H3 GitHub Direct Return Publisher'
+`$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File ```"$publisherRemote```""
+`$trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(15) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
+`$principal=New-ScheduledTaskPrincipal -UserId "`$env:USERDOMAIN\`$env:USERNAME" -LogonType Interactive -RunLevel Highest
+`$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+Register-ScheduledTask -TaskName `$task -Action `$action -Trigger `$trigger -Principal `$principal -Settings `$settings -Force | Out-Null
+Start-ScheduledTask -TaskName `$task
+Start-Sleep -Seconds 5
+
+`$t=Get-ScheduledTask -TaskName `$task
+`$i=Get-ScheduledTaskInfo -TaskName `$task -ErrorAction SilentlyContinue
+`$pubState=`$null
+`$pubStatePath=Join-Path `$stateRoot 'return-publisher-v3.json'
+if(Test-Path -LiteralPath `$pubStatePath){
+  try{`$pubState=Get-Content -LiteralPath `$pubStatePath -Raw | ConvertFrom-Json}catch{}
+}
+[pscustomobject]@{
+  host=`$env:COMPUTERNAME
+  controllerRunning=`$controllerRunning
+  legacyWatcherDisabled=`$true
+  stoppedLegacyPids=`$stopped
+  publisher='$publisherRemote'
+  publisherSha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '$publisherRemote').Hash.ToLowerInvariant()
+  task=`$task
+  taskState=[string]`$t.State
+  taskLastResult=`$(if(`$i){`$i.LastTaskResult}else{`$null})
+  publisherOk=`$(if(`$pubState){[bool]`$pubState.ok}else{`$false})
+  publisherStatus=`$(if(`$pubState){[string]`$pubState.status}else{'pending'})
+  publisherError=`$(if(`$pubState -and `$pubState.error){[string]`$pubState.error}else{`$null})
+} | ConvertTo-Json -Compress
+"@
+
+  # Stream the remote script over stdin. This avoids Windows/OpenSSH command-line
+  # length limits while keeping the remote command itself fixed and non-interactive.
+  $out=@($remote | & $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known" $h3 powershell.exe -NoProfile -NonInteractive -Command - 2>&1)
+  $exit=$LASTEXITCODE
+  if($exit -ne 0){throw "H3 return bootstrap SSH stdin failed exit=$exit output=$($out|Out-String)"}
+
+  $line=@($out | Where-Object {$_ -match '^\{.*\}$'} | Select-Object -Last 1)
+  $extra=$null
+  if($line){try{$extra=$line | ConvertFrom-Json}catch{}}
+
+  Save-State 'completed' 'H3 return-only V4 installed through stdin transport; no benchmark/Qwen launch performed.' $extra
+  $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+  Write-Output ('AFZ_BOOTSTRAP_JSON='+($state|ConvertTo-Json -Depth 12 -Compress))
+}catch{
+  $msg=$_.Exception.Message
+  Save-State 'failed' $msg
+  Write-Error $msg
+  exit 1
+}
