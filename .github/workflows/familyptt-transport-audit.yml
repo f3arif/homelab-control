@@ -5,10 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/familyptt-transport-audit.yml'
-      - 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1'
+      - 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher-R3.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
-      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
-      - 'afz-openai-agent/requests/familyptt-transport-audit.json'
+      - 'afz-openai-agent/requests/familyptt-transport-audit-r3.json'
 
 permissions:
   contents: read
@@ -25,9 +24,8 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           foreach($file in @(
-            'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1',
-            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1',
-            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+            'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher-R3.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
           )){
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
@@ -35,22 +33,20 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate worker-pull safety and observability contract
+      - name: Validate isolated worker-pull safety and observability contract
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $req=Get-Content 'afz-openai-agent/requests/familyptt-transport-audit.json' -Raw|ConvertFrom-Json
+          $req=Get-Content 'afz-openai-agent/requests/familyptt-transport-audit-r3.json' -Raw|ConvertFrom-Json
           if($req.schema -ne 1 -or $req.project -ne 'familyptt' -or $req.action -ne 'audit-secure-transport'){throw 'Typed request contract invalid'}
           if($req.backend_host -ne '100.71.26.69' -or $req.token_port -ne 7883 -or $req.livekit_port -ne 7880){throw 'Private endpoint contract changed unexpectedly'}
           if($req.job_id -ne 'familyptt-transport-audit-17-r3'){throw 'Unexpected job id'}
 
-          $watcher=Get-Content 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher.ps1' -Raw
+          $watcher=Get-Content 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher-R3.ps1' -Raw
           $starter=Get-Content 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1' -Raw
-          $updater=Get-Content 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
-
           foreach($marker in @(
-            'Global\AFZFamilyPTTTransportAuditWatcher',
-            'audit-secure-transport',
+            'Global\AFZFamilyPTTTransportAuditWatcherR3',
+            'familyptt-transport-audit-r3.json',
             'jwtLogged=$false',
             'credentialsLogged=$false',
             'backendMutation=$false',
@@ -64,13 +60,13 @@ jobs:
             'awaiting-publication',
             'WATCHER_RUNTIME_ERROR'
           )){if(-not $watcher.Contains($marker)){throw "Missing watcher safety/observability marker: $marker"}}
-
           if($watcher -match 'Remove-NetFirewallRule|New-NetFirewallRule|Set-NetFirewallRule|Restart-Service|Stop-Service|Start-Service|Set-DnsClientServerAddress'){throw 'Forbidden system mutation primitive present in FamilyPTT watcher'}
-          if($starter.Contains('FamilyPTT-Transport-Audit-Watcher.ps1')){throw 'FamilyPTT watcher must not be launched as an agent child process'}
+
           foreach($marker in @(
-            "AFZ FamilyPTT Transport Audit Watcher",
-            'FamilyPTT-Transport-Audit-Watcher.ps1',
-            'familyPttTransportAuditWatcherTask=$familyPttWatcherTaskName',
-            'Ensure-Running $familyPttWatcherTaskName $changed'
-          )){if(-not $updater.Contains($marker)){throw "Updater missing FamilyPTT task marker: $marker"}}
-          Write-Host 'FAMILYPTT WORKER-PULL AUDIT R3 CONTRACT PASS'
+            'FamilyPTT-Transport-Audit-Watcher-R3.ps1',
+            "AFZ FamilyPTT Transport Audit Watcher R3",
+            'Register-ScheduledTask -TaskName $familyPttTaskName',
+            'Start-ScheduledTask -TaskName $familyPttTaskName'
+          )){if(-not $starter.Contains($marker)){throw "Starter missing isolated FamilyPTT task marker: $marker"}}
+          if($starter -match 'Start-Process[^\r\n]+FamilyPTT-Transport-Audit-Watcher-R3'){throw 'R3 watcher must not be a detached child process'}
+          Write-Host 'FAMILYPTT ISOLATED WORKER-PULL AUDIT R3 CONTRACT PASS'
