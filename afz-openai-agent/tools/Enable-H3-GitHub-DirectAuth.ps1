@@ -12,28 +12,49 @@ function Find-Gh{
   return $null
 }
 $gh=Find-Gh
+function Invoke-GhQuiet([string[]]$Arguments){
+  $old=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    $output=@(& $gh @Arguments 2>$null)
+    $code=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$old}
+  return [pscustomobject]@{ExitCode=$code;Output=$output}
+}
 if(-not $gh){
   $winget=Get-Command winget.exe -ErrorAction SilentlyContinue
   if(-not $winget){throw 'GitHub CLI is not installed and winget is unavailable.'}
-  & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements
-  if($LASTEXITCODE -ne 0){throw "GitHub CLI installation failed exit=$LASTEXITCODE"}
+  $old=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements
+    $installExit=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$old}
+  if($installExit -ne 0){throw "GitHub CLI installation failed exit=$installExit"}
   $gh=Find-Gh
   if(-not $gh){throw 'GitHub CLI installation completed but gh.exe was not found.'}
 }
-& $gh auth status --hostname github.com *> $null
-if($LASTEXITCODE -ne 0){
-  Write-Host 'A browser/device authorization will open for GitHub. Authenticate the GitHub account that owns homelab-control.'
-  & $gh auth login --hostname github.com --git-protocol https --web
-  if($LASTEXITCODE -ne 0){throw "gh auth login failed exit=$LASTEXITCODE"}
+$auth=Invoke-GhQuiet @('auth','status','--hostname','github.com')
+if($auth.ExitCode -ne 0){
+  Write-Host 'GitHub CLI is installed but not authenticated. A browser/device authorization will now start.'
+  Write-Host 'Authenticate the GitHub account that owns f3arif/homelab-control. Do not paste a token into chat.'
+  $old=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    & $gh auth login --hostname github.com --git-protocol https --web
+    $loginExit=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$old}
+  if($loginExit -ne 0){throw "gh auth login failed exit=$loginExit"}
 }
-& $gh auth setup-git
-if($LASTEXITCODE -ne 0){throw "gh auth setup-git failed exit=$LASTEXITCODE"}
-$perm=& $gh api "repos/$repo" --jq '.permissions.push'
-if($LASTEXITCODE -ne 0 -or ([string]$perm).Trim().ToLowerInvariant() -ne 'true'){throw 'Authenticated GitHub identity does not have push permission to f3arif/homelab-control.'}
+$setup=Invoke-GhQuiet @('auth','setup-git')
+if($setup.ExitCode -ne 0){throw "gh auth setup-git failed exit=$($setup.ExitCode)"}
+$perm=Invoke-GhQuiet @('api',"repos/$repo",'--jq','.permissions.push')
+$permText=([string]($perm.Output -join "`n")).Trim().ToLowerInvariant()
+if($perm.ExitCode -ne 0 -or $permText -ne 'true'){throw 'Authenticated GitHub identity does not have push permission to f3arif/homelab-control.'}
 $t=Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
 if(-not $t){throw "Scheduled task not found: $task"}
 try{Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue}catch{}
 Start-ScheduledTask -TaskName $task
 Start-Sleep -Seconds 3
 $t=Get-ScheduledTask -TaskName $task
-[pscustomobject]@{ok=$true;host=$env:COMPUTERNAME;github='authenticated';repoPush=$true;task=$task;taskState=[string]$t.State}|ConvertTo-Json -Compress
+[pscustomobject]@{ok=$true;host=$env:COMPUTERNAME;github='authenticated';repoPush=$true;ghPath=$gh;task=$task;taskState=[string]$t.State}|ConvertTo-Json -Compress
