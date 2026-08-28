@@ -32,6 +32,13 @@ function Save-State([string]$signal,[string]$status,[string]$message){
   [ordered]@{ok=($status -eq 'idle' -or $status -eq 'deployed');signalSha=$signal;currentSha=(Current-Sha);status=$status;message=$message;intervalSeconds=$IntervalSeconds;time=(Get-Date -Format o)} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $watchState -Encoding UTF8
 }
+function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
+  Log "UPDATER_PASS_START pass=$Pass signal=$Sha"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Updater -InstallRoot $InstallRoot -ExpectedSha $Sha *> $null
+  $code=$LASTEXITCODE
+  Log "UPDATER_PASS_DONE pass=$Pass signal=$Sha exit=$code source=$(Current-Sha)"
+  return $code
+}
 $mutex=New-Object Threading.Mutex($false,'Global\AFZOpenAIAgentPushWatcher')
 $locked=$false
 try{
@@ -40,7 +47,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass"
   while($true){
     try{
       $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -56,18 +63,25 @@ try{
           $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
           if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
           $before=Current-Sha
-          Save-State $sha 'deploying' 'Exact-SHA update started.'
+          Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
           Log "DEPLOY signal=$sha current=$before"
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updater -InstallRoot $InstallRoot -ExpectedSha $sha *> $null
-          $code=$LASTEXITCODE
+
+          # Pass 1 synchronizes the exact GitHub source. If that synchronization
+          # replaces the updater itself, the already-running PowerShell process
+          # still has the old updater AST in memory. Pass 2 starts a fresh process
+          # from the newly synchronized updater so new task/registration logic is
+          # applied on the same signal instead of waiting for a later commit.
+          $code=Invoke-UpdaterPass $updater $sha 1
+          if($code -eq 0){$code=Invoke-UpdaterPass $updater $sha 2}
+
           $after=Current-Sha
-          if($code -eq 0){
-            Save-State $sha 'deployed' "Exact-SHA update completed. source=$after"
-            Log "DEPLOY_OK signal=$sha source=$after"
+          if($code -eq 0 -and $after -eq $sha){
+            Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
+            Log "DEPLOY_OK signal=$sha source=$after passes=2"
             $lastAttemptSha=''
           }else{
-            Save-State $sha 'failed' "Updater exit=$code current=$after"
-            Log "DEPLOY_FAIL signal=$sha exit=$code current=$after"
+            Save-State $sha 'failed' "Updater exit=$code current=$after expected=$sha"
+            Log "DEPLOY_FAIL signal=$sha exit=$code current=$after expected=$sha"
           }
         }
       }else{
