@@ -1,0 +1,101 @@
+name: Alert H3 Qwen27B Result
+
+on:
+  push:
+    branches:
+      - h3-direct-results
+    paths:
+      - 'afz-openai-agent/results/h3-qwen27b-benchmark-latest.json'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: h3-qwen27b-result-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout published result
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate and summarize result
+        id: result
+        shell: bash
+        run: |
+          set -euo pipefail
+          f='afz-openai-agent/results/h3-qwen27b-benchmark-latest.json'
+          test -f "$f"
+          jq -e '.schema == 1 and .transport == "h3-direct-github"' "$f" >/dev/null
+
+          job_id=$(jq -r '.job_id // "unknown"' "$f")
+          status=$(jq -r '.result.benchmarkStatus // "UNKNOWN"' "$f")
+          iteration=$(jq -r '.result.lastIteration // "unknown"' "$f")
+          build_exit=$(jq -r '.result.buildExit // "unknown"' "$f")
+          routes=$(jq -r '.result.routesPassing // 0' "$f")
+          routes_total=$(jq -r '.result.routesTotal // 5' "$f")
+          reason=$(jq -r '.result.reason // ""' "$f")
+          published_at=$(jq -r '.published_at // "unknown"' "$f")
+
+          {
+            echo "job_id=$job_id"
+            echo "status=$status"
+            echo "iteration=$iteration"
+            echo "build_exit=$build_exit"
+            echo "routes=$routes"
+            echo "routes_total=$routes_total"
+            echo "published_at=$published_at"
+            echo 'reason<<EOF'
+            echo "$reason"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify AFZ alert issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ steps.result.outputs.job_id }}
+          STATUS: ${{ steps.result.outputs.status }}
+          ITERATION: ${{ steps.result.outputs.iteration }}
+          BUILD_EXIT: ${{ steps.result.outputs.build_exit }}
+          ROUTES: ${{ steps.result.outputs.routes }}
+          ROUTES_TOTAL: ${{ steps.result.outputs.routes_total }}
+          REASON: ${{ steps.result.outputs.reason }}
+          PUBLISHED_AT: ${{ steps.result.outputs.published_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(cat <<EOF
+          @f3arif **H3 direct Qwen27B result published to GitHub**
+
+          - Job: \`$JOB_ID\`
+          - Benchmark status: **$STATUS**
+          - Last iteration: **$ITERATION**
+          - Build exit: **$BUILD_EXIT**
+          - Routes: **$ROUTES/$ROUTES_TOTAL**
+          - Published: \`$PUBLISHED_AT\`
+          - Result commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          - Result file: ${{ github.server_url }}/${{ github.repository }}/blob/h3-direct-results/afz-openai-agent/results/h3-qwen27b-benchmark-latest.json
+
+          Reason: $REASON
+
+          Canonical benchmark control: https://github.com/f3arif/faiz-homelab/issues/12
+          EOF
+          )
+          gh issue comment 7 --repo "$GITHUB_REPOSITORY" --body "$body"
+
+      - name: Alert summary
+        shell: bash
+        run: |
+          {
+            echo '### H3 Qwen27B GitHub alert sent'
+            echo
+            echo '- Alert issue: https://github.com/f3arif/homelab-control/issues/7'
+            echo '- Result branch: `h3-direct-results`'
+            echo '- No OneDrive/SharePoint alert transport used.'
+          } >> "$GITHUB_STEP_SUMMARY"
