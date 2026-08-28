@@ -19,10 +19,12 @@ $RemoteRoot='/opt/edge/afz-site/git-deploy'
 # This is the same dedicated key used by the established AFZ edge/site sync path.
 # Do not derive it from the scheduled-task environment's USERPROFILE.
 $KeyPath='C:\Users\Faiz\.ssh\afz_pi_sync'
-# Keep the result path fixed so the SYSTEM watcher can read the user-context task result.
+# Keep result + temp paths fixed/short so the SYSTEM watcher can read the result and
+# archive creation does not depend on a long scheduled-task TEMP path.
 $ResultRoot='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy'
 $ResultFile=Join-Path $ResultRoot 'latest.json'
-$TempRoot=Join-Path $env:TEMP ('afz-site-git-deploy-'+$JobId+'-'+[guid]::NewGuid().ToString('n'))
+$TempBase=Join-Path $ResultRoot 'temp'
+$TempRoot=Join-Path $TempBase ([guid]::NewGuid().ToString('n'))
 $ZipFile=Join-Path $TempRoot 'site-source.zip'
 $ExtractRoot=Join-Path $TempRoot 'source'
 $Archive=Join-Path $TempRoot 'production-site.tar.gz'
@@ -30,9 +32,10 @@ $RemoteArchive="/tmp/afz-site-$JobId.tar.gz"
 $RemoteScript="/tmp/afz-site-$JobId.sh"
 $RemoteBackup="$RemoteRoot/backups/$JobId"
 $remotePromoted=$false
+$archiveAttempts=0
 $started=Get-Date
 
-New-Item -ItemType Directory -Force -Path $ResultRoot,$TempRoot,$ExtractRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $ResultRoot,$TempBase,$TempRoot,$ExtractRoot | Out-Null
 
 function Save-Result([bool]$Ok,[string]$Status,[string]$Message,[hashtable]$Extra=@{}){
   $o=[ordered]@{
@@ -48,7 +51,45 @@ function Invoke-External([string]$Exe,[string[]]$Args,[string]$Failure){
   if($LASTEXITCODE -ne 0){throw "$Failure Exit code: $LASTEXITCODE"}
 }
 function Invoke-Ssh([string]$Command,[string]$Failure){
-  Invoke-External 'ssh.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new',$Pi,$Command) $Failure
+  Invoke-External 'ssh.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new',$Pi,$Command) $Failure
+}
+function Invoke-Tar([string[]]$Args){
+  # Windows tar can emit benign stderr. Capture it explicitly so PowerShell 5.1
+  # does not convert native stderr into a terminating NativeCommandError before
+  # we can inspect the real process exit code.
+  $stderr=Join-Path $TempRoot ('tar-'+[guid]::NewGuid().ToString('n')+'.err')
+  $stdout=Join-Path $TempRoot ('tar-'+[guid]::NewGuid().ToString('n')+'.out')
+  $old=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    & tar.exe @Args 1>$stdout 2>$stderr
+    $code=$LASTEXITCODE
+  }finally{
+    $ErrorActionPreference=$old
+  }
+  $err=$(if(Test-Path -LiteralPath $stderr){(Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue)}else{''})
+  $out=$(if(Test-Path -LiteralPath $stdout){(Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue)}else{''})
+  Remove-Item -LiteralPath $stderr,$stdout -Force -ErrorAction SilentlyContinue
+  return [pscustomobject]@{ExitCode=$code;StdErr=$err;StdOut=$out}
+}
+function New-VerifiedProductionArchive([string]$RepoRoot,[string]$ArchivePath){
+  $last=''
+  foreach($attempt in 1..2){
+    $script:archiveAttempts=$attempt
+    Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
+    $r=Invoke-Tar @('-czf',$ArchivePath,'-C',$RepoRoot,'production-site')
+    if($r.ExitCode -eq 0 -and (Test-Path -LiteralPath $ArchivePath -PathType Leaf) -and (Get-Item -LiteralPath $ArchivePath).Length -gt 0){
+      $v=Invoke-Tar @('-tzf',$ArchivePath)
+      if($v.ExitCode -eq 0 -and $v.StdOut -match '(?m)^production-site/managed\.sha256\r?$'){
+        return
+      }
+      $last="archive verify exit=$($v.ExitCode) stderr=$($v.StdErr.Trim())"
+    }else{
+      $last="archive create exit=$($r.ExitCode) stderr=$($r.StdErr.Trim())"
+    }
+    if($attempt -lt 2){Start-Sleep -Seconds 2}
+  }
+  throw "Production archive creation/verification failed after $archiveAttempts attempts. $last"
 }
 function Rollback-Remote {
   if(-not $remotePromoted){return}
@@ -107,7 +148,7 @@ try{
   }
   if($managed.Count -lt 8){throw "Unexpectedly small managed production set: $($managed.Count)"}
   [IO.File]::WriteAllLines((Join-Path $siteRoot 'managed.sha256'),$checksumLines,(New-Object Text.UTF8Encoding($false)))
-  Invoke-External 'tar.exe' @('-czf',$Archive,'-C',$repoRoot.FullName,'production-site') 'Production archive creation failed.'
+  New-VerifiedProductionArchive $repoRoot.FullName $Archive
 
   $bash=@'
 #!/usr/bin/env bash
@@ -179,9 +220,11 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
   $localRemoteScript=Join-Path $TempRoot 'deploy-on-pi.sh'
   [IO.File]::WriteAllText($localRemoteScript,$bash,(New-Object Text.UTF8Encoding($false)))
 
+  # Pi contact begins only after local archive creation + integrity verification passes.
   Invoke-Ssh "mkdir -p '$RemoteRoot/stage' '$RemoteRoot/backups'" 'Failed to prepare Pi deployment root.'
-  Invoke-External 'scp.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new',$Archive,"${Pi}:$RemoteArchive") 'Failed to upload production archive.'
-  Invoke-External 'scp.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new',$localRemoteScript,"${Pi}:$RemoteScript") 'Failed to upload Pi deployment script.'
+  $scpOptions=@('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new')
+  Invoke-External 'scp.exe' @($scpOptions+$Archive+"${Pi}:$RemoteArchive") 'Failed to upload production archive.'
+  Invoke-External 'scp.exe' @($scpOptions+$localRemoteScript+"${Pi}:$RemoteScript") 'Failed to upload Pi deployment script.'
   Invoke-Ssh "chmod 700 '$RemoteScript' && bash '$RemoteScript'" 'Pi deployment failed.'
   $remotePromoted=$true
 
@@ -200,13 +243,13 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
 
   $remotePromoted=$false
   Save-Result $true 'completed' 'Git-authoritative AFZ website deployed to Pi and public WebChat verified.' @{
-    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup;sourceTransport='github-codeload-exact-sha'
+    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup;sourceTransport='github-codeload-exact-sha';archiveAttempts=$archiveAttempts;archiveVerified=$true
   }
   exit 0
 }catch{
   $err=$_.Exception.Message
   if($remotePromoted){try{Rollback-Remote}catch{$err=$err+' | rollback failed: '+$_.Exception.Message}}
-  Save-Result $false 'failed' $err
+  Save-Result $false 'failed' $err @{archiveAttempts=$archiveAttempts}
   throw
 }finally{
   Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
