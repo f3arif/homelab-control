@@ -1,0 +1,65 @@
+name: AFZ Site Windows Archive R4
+
+on:
+  push:
+    branches:
+      - fix/afz-site-windows-archive-r4
+    paths:
+      - '.github/workflows/afz-site-windows-archive-r4.yml'
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-archive:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      SITE_SHA: c38576741ce2d379723fde038300363429845656
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reproduce exact Windows codeload and tar command
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $root=Join-Path $env:RUNNER_TEMP ('afz-site-archive-'+[guid]::NewGuid().ToString('n'))
+          $zip=Join-Path $root 'site-source.zip'
+          $extract=Join-Path $root 'source'
+          $archive=Join-Path $root 'production-site.tar.gz'
+          New-Item -ItemType Directory -Force -Path $root,$extract|Out-Null
+          $uri="https://codeload.github.com/f3arif/afz-engineering/zip/$env:SITE_SHA"
+          Invoke-WebRequest -Uri $uri -Headers @{'User-Agent'='AFZ-Archive-CI';'Cache-Control'='no-cache'} -OutFile $zip -UseBasicParsing -TimeoutSec 120
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $repoRoot=Get-ChildItem -LiteralPath $extract -Directory|Select-Object -First 1
+          if(-not $repoRoot){throw 'No extracted repository root'}
+          $siteRoot=Join-Path $repoRoot.FullName 'production-site'
+          if(-not(Test-Path -LiteralPath (Join-Path $siteRoot 'manifest.json'))){throw 'manifest missing'}
+          Write-Host "TAR_EXE=$((Get-Command tar.exe).Source)"
+          & tar.exe -czvf $archive -C $repoRoot.FullName production-site 2>&1 | Tee-Object -Variable tarOutput
+          $code=$LASTEXITCODE
+          Write-Host "TAR_EXIT=$code"
+          Write-Host "ARCHIVE_EXISTS=$(Test-Path -LiteralPath $archive)"
+          if(Test-Path -LiteralPath $archive){Write-Host "ARCHIVE_BYTES=$((Get-Item $archive).Length)"}
+          if($code -ne 0){throw "Exact production archive command failed with exit $code"}
+          & tar.exe -tzf $archive | Select-Object -First 20
+          if($LASTEXITCODE -ne 0){throw 'Archive verification failed'}
+
+      - name: Compare bsdtar no-v variant used by production
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP ('afz-site-archive2-'+[guid]::NewGuid().ToString('n'))
+          $zip=Join-Path $root 'site-source.zip'
+          $extract=Join-Path $root 'source'
+          $archive=Join-Path $root 'production-site.tar.gz'
+          New-Item -ItemType Directory -Force -Path $root,$extract|Out-Null
+          Invoke-WebRequest -Uri "https://codeload.github.com/f3arif/afz-engineering/zip/$env:SITE_SHA" -OutFile $zip -UseBasicParsing -TimeoutSec 120
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $repoRoot=Get-ChildItem -LiteralPath $extract -Directory|Select-Object -First 1
+          & tar.exe -czf $archive -C $repoRoot.FullName production-site
+          $code=$LASTEXITCODE
+          Write-Host "PRODUCTION_STYLE_TAR_EXIT=$code"
+          if($code -ne 0){throw "Production-style tar failed with exit $code"}
