@@ -25,8 +25,8 @@ function Save-State([string]$Status,[string]$Message,$Extra=$null){
     status=$Status
     message=$Message
     target='DESKTOP-H3R6CQN'
-    transport='one-time-ssh-bootstrap-stdin'
-    mode='return-only-v4'
+    transport='one-time-ssh-bootstrap-stdin-v4'
+    mode='return-only-v3'
     expectedSha=$ExpectedSha
     updatedAt=(Get-Date -Format o)
   }
