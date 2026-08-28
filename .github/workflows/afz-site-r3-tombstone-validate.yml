@@ -1,0 +1,84 @@
+name: AFZ Website R3 Tombstone Validate
+
+on:
+  push:
+    branches:
+      - fix/afz-site-r3-tombstone
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1'
+      - '.github/workflows/afz-site-r3-tombstone-validate.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1'
+      - '.github/workflows/afz-site-r3-tombstone-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  tombstone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse wrapper
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          Write-Host 'PARSE PASS'
+
+      - name: Prove exact retired R3 exits before deploy core
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1 "$tmp/Deploy-AFZ-WebsiteToPi.ps1"
+          set +e
+          output=$(pwsh -NoProfile -File "$tmp/Deploy-AFZ-WebsiteToPi.ps1" \
+            -ExpectedSiteSha c38576741ce2d379723fde038300363429845656 \
+            -JobId afz-site-git-cutover-r3-20260827T2138 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$rc" -eq 42
+          grep -Fq 'AFZ_SITE_DEPLOY_RETIRED_R3: blocked before deploy core.' <<<"$output"
+          test ! -e "$tmp/Deploy-AFZ-WebsiteToPi-Core.ps1"
+          echo 'R3 TOMBSTONE PASS'
+
+      - name: Prove other jobs still reach normal core gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1 "$tmp/Deploy-AFZ-WebsiteToPi.ps1"
+          set +e
+          output=$(pwsh -NoProfile -File "$tmp/Deploy-AFZ-WebsiteToPi.ps1" \
+            -ExpectedSiteSha c38576741ce2d379723fde038300363429845656 \
+            -JobId afz-site-git-cutover-r4-validation 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$rc" -ne 0
+          test "$rc" -ne 42
+          grep -Fq 'AFZ website deployment core missing' <<<"$output"
+          echo 'NON-R3 FORWARD PATH PASS'
+
+      - name: Verify tombstone is exact and non-mutating
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1').read_text()
+          assert "afz-site-git-cutover-r3-20260827T2138" in p
+          assert "c38576741ce2d379723fde038300363429845656" in p
+          assert "exit 42" in p
+          assert "latest.json" in p
+          assert "Set-Content" not in p
+          assert "Remove-Item" not in p
+          assert "ssh.exe" not in p
+          assert "scp.exe" not in p
+          print('EXACT NON-MUTATING TOMBSTONE PASS')
