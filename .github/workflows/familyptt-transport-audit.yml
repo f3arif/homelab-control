@@ -40,7 +40,7 @@ jobs:
           $req=Get-Content 'afz-openai-agent/requests/familyptt-transport-audit-r3.json' -Raw|ConvertFrom-Json
           if($req.schema -ne 1 -or $req.project -ne 'familyptt' -or $req.action -ne 'audit-secure-transport'){throw 'Typed request contract invalid'}
           if($req.backend_host -ne '100.71.26.69' -or $req.token_port -ne 7883 -or $req.livekit_port -ne 7880){throw 'Private endpoint contract changed unexpectedly'}
-          if($req.job_id -ne 'familyptt-transport-audit-17-r3'){throw 'Unexpected job id'}
+          if($req.job_id -ne 'familyptt-transport-audit-17-r4'){throw 'Unexpected job id'}
 
           $watcher=Get-Content 'afz-openai-agent/FamilyPTT-Transport-Audit-Watcher-R3.ps1' -Raw
           $starter=Get-Content 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1' -Raw
@@ -64,6 +64,12 @@ jobs:
           )){if($watcher -notmatch $pattern){throw "Missing watcher safety pattern: $pattern"}}
           if($watcher -match 'Remove-NetFirewallRule|New-NetFirewallRule|Set-NetFirewallRule|Restart-Service|Stop-Service|Start-Service|Set-DnsClientServerAddress'){throw 'Forbidden system mutation primitive present in FamilyPTT watcher'}
 
+          $issuePrimary='$issuePublish = Publish-GitHubIssue'
+          $branchFallback='$branchPublish = Publish-FamilyPttResultBranch'
+          $issueIndex=$watcher.IndexOf($issuePrimary)
+          $branchIndex=$watcher.IndexOf($branchFallback)
+          if($issueIndex -lt 0 -or $branchIndex -lt 0 -or $issueIndex -ge $branchIndex){throw 'GitHub issue-comment API must remain the primary return channel before result-branch fallback'}
+
           foreach($marker in @(
             'FamilyPTT-Transport-Audit-Watcher-R3.ps1',
             'AFZ FamilyPTT Transport Audit Watcher R3',
@@ -71,4 +77,4 @@ jobs:
             'Start-ScheduledTask -TaskName $familyPttTaskName'
           )){if(-not $starter.Contains($marker)){throw "Starter missing isolated FamilyPTT task marker: $marker"}}
           if($starter -match 'Start-Process[^\r\n]+FamilyPTT-Transport-Audit-Watcher-R3'){throw 'R3 watcher must not be a detached child process'}
-          Write-Host 'FAMILYPTT ISOLATED WORKER-PULL AUDIT R3 CONTRACT PASS'
+          Write-Host 'FAMILYPTT ISOLATED WORKER-PULL AUDIT R4 REQUEST CONTRACT PASS'
