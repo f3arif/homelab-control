@@ -14,6 +14,7 @@ $requestPath = 'afz-openai-agent/requests/h3-qwen27b-benchmark.json'
 $controllerPath = 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
 $resultBranch = 'h3-direct-results'
 $resultPath = 'afz-openai-agent/results/h3-qwen27b-benchmark-latest.json'
+$statusPath = 'afz-openai-agent/results/h3-qwen27b-benchmark-status.json'
 $controlRepo = 'f3arif/faiz-homelab'
 $controlIssue = 12
 $stateRoot = 'C:\ProgramData\AFZ\H3GitHubDirect'
@@ -69,25 +70,46 @@ function Try-GhComment([string]$Kind,[string]$Body){
     return $true
   }catch{Log ("GITHUB_COMMENT_FAIL "+$_.Exception.Message);return $false}
 }
+function Prepare-ResultRepo{
+  $git=(Get-Command git.exe -ErrorAction Stop).Source
+  $gh=Get-Gh
+  if($gh){try{& $gh auth setup-git *> $null}catch{}}
+  if(-not(Test-Path (Join-Path $gitRoot '.git'))){
+    if(Test-Path $gitRoot){Remove-Item -LiteralPath $gitRoot -Recurse -Force}
+    & $git clone --quiet "https://github.com/$repo.git" $gitRoot
+    if($LASTEXITCODE -ne 0){throw 'git clone failed'}
+  }
+  & $git -C $gitRoot fetch origin $resultBranch --quiet
+  if($LASTEXITCODE -ne 0){throw 'git fetch result branch failed'}
+  & $git -C $gitRoot checkout -B $resultBranch "origin/$resultBranch" --quiet
+  if($LASTEXITCODE -ne 0){throw 'git checkout result branch failed'}
+  & $git -C $gitRoot config user.name 'AFZ H3 Direct Worker'
+  & $git -C $gitRoot config user.email 'h3-direct@afz.local'
+  return $git
+}
+function Try-PushStatus([string]$Status,[string]$JobId,[string]$SourceSha,[string]$Message){
+  try{
+    $git=Prepare-ResultRepo
+    $dest=Join-Path $gitRoot ($statusPath.Replace('/','\'))
+    $summary=[ordered]@{schema=1;transport='h3-direct-github';kind='status';job_id=$JobId;source_sha=$SourceSha;worker='H3';host=$env:COMPUTERNAME;status=$Status;message=$Message;published_at=(Get-Date -Format o)}
+    Write-Json $dest $summary
+    & $git -C $gitRoot add $statusPath
+    & $git -C $gitRoot diff --cached --quiet
+    if($LASTEXITCODE -eq 0){Log "GIT_STATUS_ALREADY_CURRENT status=$Status job=$JobId";return $true}
+    & $git -C $gitRoot commit -m "H3 direct benchmark status $Status $JobId" --quiet
+    if($LASTEXITCODE -ne 0){throw 'git status commit failed'}
+    & $git -C $gitRoot push origin $resultBranch --quiet
+    if($LASTEXITCODE -ne 0){throw 'git status push failed'}
+    Log "GIT_STATUS_PUSH_OK status=$Status job=$JobId"
+    return $true
+  }catch{Log ("GIT_STATUS_PUSH_FAIL "+$_.Exception.Message);return $false}
+}
 function Try-PushResult($Result,[string]$JobId,[string]$SourceSha){
   try{
-    $git=(Get-Command git.exe -ErrorAction Stop).Source
-    $gh=Get-Gh
-    if($gh){try{& $gh auth setup-git *> $null}catch{}}
-    if(-not(Test-Path (Join-Path $gitRoot '.git'))){
-      if(Test-Path $gitRoot){Remove-Item -LiteralPath $gitRoot -Recurse -Force}
-      & $git clone --quiet "https://github.com/$repo.git" $gitRoot
-      if($LASTEXITCODE -ne 0){throw 'git clone failed'}
-    }
-    & $git -C $gitRoot fetch origin $resultBranch --quiet
-    if($LASTEXITCODE -ne 0){throw 'git fetch result branch failed'}
-    & $git -C $gitRoot checkout -B $resultBranch "origin/$resultBranch" --quiet
-    if($LASTEXITCODE -ne 0){throw 'git checkout result branch failed'}
+    $git=Prepare-ResultRepo
     $dest=Join-Path $gitRoot ($resultPath.Replace('/','\'))
     $summary=[ordered]@{schema=1;transport='h3-direct-github';job_id=$JobId;source_sha=$SourceSha;worker='H3';host=$env:COMPUTERNAME;result=$Result;published_at=(Get-Date -Format o)}
     Write-Json $dest $summary
-    & $git -C $gitRoot config user.name 'AFZ H3 Direct Worker'
-    & $git -C $gitRoot config user.email 'h3-direct@afz.local'
     & $git -C $gitRoot add $resultPath
     & $git -C $gitRoot diff --cached --quiet
     if($LASTEXITCODE -eq 0){Log 'GIT_RESULT_ALREADY_CURRENT';return $true}
@@ -98,6 +120,16 @@ function Try-PushResult($Result,[string]$JobId,[string]$SourceSha){
     Log "GIT_RESULT_PUSH_OK job=$JobId"
     return $true
   }catch{Log ("GIT_RESULT_PUSH_FAIL "+$_.Exception.Message);return $false}
+}
+function Test-ControllerRunning{
+  try{
+    $procs=Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop
+    foreach($proc in $procs){
+      $cmd=[string]$proc.CommandLine
+      if($cmd -and $cmd.Contains($controllerFile) -and $cmd.Contains($ProjectRoot)){return $true}
+    }
+  }catch{Log ("CONTROLLER_PROCESS_CHECK_FAIL "+$_.Exception.Message)}
+  return $false
 }
 
 $mutex=New-Object Threading.Mutex($false,'Global\AFZH3GitHubDirectBenchmarkWatcher')
@@ -113,10 +145,33 @@ try{
       $req=Get-Request $sha
       $job=[string]$req.job_id
       $state=Read-Json $stateFile
-      if($state -and [string]$state.job_id -eq $job -and [string]$state.status -in @('completed','failed')){Start-Sleep -Seconds $IntervalSeconds;continue}
+
+      if($state -and [string]$state.job_id -eq $job -and [string]$state.status -in @('completed','failed')){
+        $stateSha=[string]$state.source_sha
+        if($stateSha -notmatch '^[0-9a-f]{40}$'){$stateSha=$sha}
+        if($state.result){
+          $pushed=Try-PushResult $state.result $job $stateSha
+          [void](Try-PushStatus ([string]$state.status) $job $stateSha 'Recovered terminal local benchmark state and republished it without rerunning Qwen.')
+          [void](Try-GhComment 'RESULT' "Recovered terminal local state for job $job without rerunning Qwen. ResultBranchPush=$pushed")
+        }else{
+          $errText=if($state.error){[string]$state.error}else{'Terminal local state exists without a result payload.'}
+          [void](Try-PushStatus 'failed' $job $stateSha $errText)
+          [void](Try-GhComment 'BLOCKED' "Recovered terminal local state for job $job without rerunning Qwen: $errText")
+        }
+        Start-Sleep -Seconds $IntervalSeconds
+        continue
+      }
+
+      if($state -and [string]$state.job_id -eq $job -and [string]$state.status -eq 'running' -and (Test-ControllerRunning)){
+        [void](Try-PushStatus 'running' $job $sha 'Existing benchmark controller process is already running on H3; watcher restart did not launch a duplicate.')
+        [void](Try-GhComment 'STATUS' "Job $job is already running directly on H3; watcher restart did not launch a duplicate controller.")
+        Start-Sleep -Seconds $IntervalSeconds
+        continue
+      }
 
       Write-Json $stateFile ([ordered]@{job_id=$job;status='running';source_sha=$sha;start_iteration=[int]$req.start_iteration;max_iterations=[int]$req.max_iterations;started_at=(Get-Date -Format o)})
-      [void](Try-GhComment 'STATUS' "Job $job started directly on H3 from GitHub. Iterations $($req.start_iteration)-$($req.max_iterations). No AFZ queue/claim path is used.")
+      $statusPushed=Try-PushStatus 'running' $job $sha "Job started directly on H3 from GitHub. Iterations $($req.start_iteration)-$($req.max_iterations). No AFZ queue/claim path is used."
+      [void](Try-GhComment 'STATUS' "Job $job started directly on H3 from GitHub. Iterations $($req.start_iteration)-$($req.max_iterations). No AFZ queue/claim path is used. StatusBranchPush=$statusPushed")
       Download-Controller $sha
 
       $out=Join-Path $stateRoot "$job.stdout.log";$err=Join-Path $stateRoot "$job.stderr.log"
@@ -129,12 +184,14 @@ try{
       $status=if([bool]$result.ok){'completed'}else{'failed'}
       Write-Json $stateFile ([ordered]@{job_id=$job;status=$status;source_sha=$sha;result=$result;finished_at=(Get-Date -Format o)})
       $pushed=Try-PushResult $result $job $sha
+      [void](Try-PushStatus $status $job $sha "Benchmark controller finished: status=$($result.benchmarkStatus); iteration=$($result.lastIteration); routes=$($result.routesPassing)/$($result.routesTotal).")
       $commented=Try-GhComment 'RESULT' "Job $job finished: status=$($result.benchmarkStatus); iteration=$($result.lastIteration); build_exit=$($result.buildExit); routes=$($result.routesPassing)/$($result.routesTotal); reason=$($result.reason). ResultBranchPush=$pushed"
       Log "FINISH job=$job status=$status pushed=$pushed commented=$commented"
     }catch{
       $msg=$_.Exception.Message
       Log "ERROR $msg"
-      try{Write-Json $stateFile ([ordered]@{job_id=$(if($job){$job}else{''});status='failed';error=$msg;finished_at=(Get-Date -Format o)})}catch{}
+      try{Write-Json $stateFile ([ordered]@{job_id=$(if($job){$job}else{''});status='failed';source_sha=$(if($sha){$sha}else{''});error=$msg;finished_at=(Get-Date -Format o)})}catch{}
+      try{if($job){[void](Try-PushStatus 'failed' $job $(if($sha){$sha}else{''}) $msg)}}catch{}
       try{[void](Try-GhComment 'BLOCKED' $msg)}catch{}
     }
     Start-Sleep -Seconds $IntervalSeconds
