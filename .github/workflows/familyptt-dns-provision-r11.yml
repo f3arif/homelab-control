@@ -1,0 +1,217 @@
+name: FamilyPTT Porkbun DNS Provision R11
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/familyptt-dns-provision-r11.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+      PORKBUN_SECRET_API_KEY: ${{ secrets.PORKBUN_SECRET_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      TARGET_DOMAIN: afzeng.ca
+      TARGET_IPV4: 99.235.82.12
+      ISSUE_NUMBER: '17'
+    steps:
+      - name: Credential gate
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PORKBUN_API_KEY:-}" || -z "${PORKBUN_SECRET_API_KEY:-}" ]]; then
+            body=$(cat <<'EOF'
+          ### FamilyPTT Porkbun DNS provisioning R11
+
+          Provisioning was invoked but stopped before any DNS mutation because the required GitHub secrets are not configured.
+
+          Required secret names:
+          - `PORKBUN_API_KEY`
+          - `PORKBUN_SECRET_API_KEY`
+
+          No credential values were printed. No DNS, proxy, certificate, firewall, backend, or application change occurred.
+
+          Classification: `PORKBUN_CREDENTIALS_REQUIRED`
+          EOF
+          )
+            jq -n --arg body "$body" '{body:$body}' > /tmp/issue.json
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --input /tmp/issue.json >/dev/null
+            exit 20
+          fi
+
+      - name: Dry-run, provision, and verify exact FamilyPTT A records
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error, uuid
+
+          BASE = 'https://api.porkbun.com/api/json/v3'
+          DOMAIN = os.environ['TARGET_DOMAIN']
+          TARGET = os.environ['TARGET_IPV4']
+          API_KEY = os.environ['PORKBUN_API_KEY']
+          SECRET = os.environ['PORKBUN_SECRET_API_KEY']
+          SUBDOMAINS = ('ptt-api', 'ptt-livekit')
+
+          result = {
+              'status': 'ERROR',
+              'classification': 'PORKBUN_DNS_PROVISION_FAILED',
+              'domain': DOMAIN,
+              'targetIpv4': TARGET,
+              'records': [],
+              'secretValuesLogged': False,
+              'scope': ['ptt-api', 'ptt-livekit'],
+          }
+
+          def call(method, path, payload=None, idem=None):
+              headers = {
+                  'Accept': 'application/json',
+                  'X-API-Key': API_KEY,
+                  'X-Secret-API-Key': SECRET,
+              }
+              data = None
+              if payload is not None:
+                  headers['Content-Type'] = 'application/json'
+                  data = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+              if idem:
+                  headers['Idempotency-Key'] = idem
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      raw = resp.read().decode('utf-8')
+                      return json.loads(raw or '{}')
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read().decode('utf-8', 'replace')
+                  try:
+                      body = json.loads(raw)
+                  except Exception:
+                      body = {'status': 'ERROR', 'code': f'HTTP_{exc.code}'}
+                  code = body.get('code') or f'HTTP_{exc.code}'
+                  raise RuntimeError(f'Porkbun API error: {code}')
+
+          try:
+              for sub in SUBDOMAINS:
+                  current = call('GET', f'/dns/retrieveByNameType/{DOMAIN}/A/{sub}')
+                  if current.get('status') != 'SUCCESS':
+                      raise RuntimeError(f'Porkbun retrieve failed for {sub}: {current.get("code", "UNKNOWN")})
+                  records = current.get('records') or []
+                  if len(records) > 1:
+                      raise RuntimeError(f'Duplicate A records require review for {sub}')
+
+                  action = 'noop'
+                  record_id = records[0].get('id') if records else None
+                  if records and records[0].get('content') == TARGET:
+                      action = 'unchanged'
+                  elif records:
+                      dry = {
+                          'name': sub,
+                          'type': 'A',
+                          'content': TARGET,
+                          'ttl': 600,
+                          'dryRun': True,
+                      }
+                      preview = call('POST', f'/dns/edit/{DOMAIN}/{record_id}', dry)
+                      if preview.get('status') != 'SUCCESS' or preview.get('wouldSucceed') is False:
+                          raise RuntimeError(f'Dry-run edit rejected for {sub}: {preview.get("code", "UNKNOWN")}')
+                      live = dict(dry)
+                      live.pop('dryRun', None)
+                      changed = call('POST', f'/dns/edit/{DOMAIN}/{record_id}', live, f'familyptt-r11-edit-{sub}-{TARGET}')
+                      if changed.get('status') != 'SUCCESS':
+                          raise RuntimeError(f'Edit failed for {sub}: {changed.get("code", "UNKNOWN")}')
+                      action = 'edited'
+                  else:
+                      dry = {
+                          'name': sub,
+                          'type': 'A',
+                          'content': TARGET,
+                          'ttl': 600,
+                          'dryRun': True,
+                      }
+                      preview = call('POST', f'/dns/create/{DOMAIN}', dry)
+                      if preview.get('status') != 'SUCCESS' or preview.get('wouldSucceed') is False:
+                          raise RuntimeError(f'Dry-run create rejected for {sub}: {preview.get("code", "UNKNOWN")}')
+                      live = dict(dry)
+                      live.pop('dryRun', None)
+                      changed = call('POST', f'/dns/create/{DOMAIN}', live, f'familyptt-r11-create-{sub}-{TARGET}')
+                      if changed.get('status') != 'SUCCESS':
+                          raise RuntimeError(f'Create failed for {sub}: {changed.get("code", "UNKNOWN")}')
+                      record_id = changed.get('id')
+                      action = 'created'
+
+                  verify = call('GET', f'/dns/retrieveByNameType/{DOMAIN}/A/{sub}')
+                  vrecs = verify.get('records') or []
+                  if verify.get('status') != 'SUCCESS' or len(vrecs) != 1 or vrecs[0].get('content') != TARGET:
+                      raise RuntimeError(f'Authoritative verification failed for {sub}')
+
+                  result['records'].append({
+                      'host': f'{sub}.{DOMAIN}',
+                      'type': 'A',
+                      'content': TARGET,
+                      'action': action,
+                      'verified': True,
+                  })
+
+              result['status'] = 'SUCCESS'
+              result['classification'] = 'PORKBUN_DNS_PROVISIONED_VERIFIED'
+          except Exception as exc:
+              result['error'] = str(exc)[:300]
+              with open('/tmp/familyptt-dns-r11.json', 'w', encoding='utf-8') as fh:
+                  json.dump(result, fh)
+              raise
+
+          with open('/tmp/familyptt-dns-r11.json', 'w', encoding='utf-8') as fh:
+              json.dump(result, fh)
+          PY
+
+      - name: Reconcile sanitized result to issue 17
+        if: always() && steps.gate.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/familyptt-dns-r11.json ]]; then
+            status=$(jq -r '.status' /tmp/familyptt-dns-r11.json)
+            class=$(jq -r '.classification' /tmp/familyptt-dns-r11.json)
+            if [[ "$status" == "SUCCESS" ]]; then
+              summary=$(jq -r '.records[] | "- `\(.host)` -> `\(.content)` (`\(.action)`, verified through Porkbun API)"' /tmp/familyptt-dns-r11.json)
+              body=$(cat <<EOF
+          ### FamilyPTT Porkbun DNS provisioning R11
+
+          Exact-scope provisioning completed successfully using Porkbun API dry-run-before-write and idempotent writes.
+
+          ${summary}
+
+          No API key or secret value was printed or committed. No unrelated DNS record, proxy, certificate, firewall, backend, or application setting was changed.
+
+          Classification: \`${class}\`
+          EOF
+          )
+            else
+              err=$(jq -r '.error // "unknown"' /tmp/familyptt-dns-r11.json)
+              body=$(cat <<EOF
+          ### FamilyPTT Porkbun DNS provisioning R11
+
+          Provisioning stopped safely.
+
+          Sanitized error: \`${err}\`
+          No credential value was printed or committed.
+
+          Classification: \`${class}\`
+          EOF
+          )
+            fi
+          else
+            body='### FamilyPTT Porkbun DNS provisioning R11
+
+Provisioning ended without a result artifact. Review the workflow run. No credential values were intentionally printed.'
+          fi
+          jq -n --arg body "$body" '{body:$body}' > /tmp/issue.json
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --input /tmp/issue.json >/dev/null
