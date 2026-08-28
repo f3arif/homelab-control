@@ -4,5 +4,5 @@
   "action": "deploy-pi-static-site",
   "job_id": "afz-site-git-cutover-20260827T2105",
   "source_repository": "f3arif/afz-engineering",
-  "expected_sha": "8c02e1f8cf695ed55be25cb229627c1d77362656"
+  "expected_sha": "c38576741ce2d379723fde038300363429845656"
 }
