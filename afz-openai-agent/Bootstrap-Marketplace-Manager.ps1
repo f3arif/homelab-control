@@ -14,8 +14,10 @@ $status=Join-Path $stateRoot 'latest.json'
 $githubLog=Join-Path $stateRoot 'github-post.log'
 $controlRepo='f3arif/faiz-homelab'
 $controlIssue=15
-$emergencyDir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-$emergencyAck=Join-Path $emergencyDir 'AFZ-MARKETPLACE-WORKER-ACK-LATEST.txt'
+$emergencyTargets=@(
+  @{Dir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius';Name='AFZ-MARKETPLACE-WORKER-ACK-LATEST.txt'},
+  @{Dir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results';Name='000-marketplace-manager-worker-ack-latest.txt'}
+)
 New-Item -ItemType Directory -Force -Path $stateRoot,$appRoot | Out-Null
 
 function Save([string]$State,[string]$Message,[hashtable]$Extra=@{}){
@@ -54,7 +56,6 @@ function Post-Github([string]$Kind,[string]$Body){
 function Write-EmergencyAck([string]$State,[bool]$GithubPosted,[string]$Message){
   # Emergency observability only. Never read as request, authority, approval, or listing state.
   try{
-    if(-not(Test-Path -LiteralPath $emergencyDir -PathType Container)){return}
     $safeMessage=($Message -replace '[\r\n]+',' ')
     $lines=@(
       'AFZ_MARKETPLACE_EMERGENCY_OBSERVABILITY_ONLY',
@@ -67,7 +68,14 @@ function Write-EmergencyAck([string]$State,[bool]$GithubPosted,[string]$Message)
       "MESSAGE=$safeMessage",
       "UPDATED_AT=$(Get-Date -Format o)"
     )
-    [IO.File]::WriteAllText($emergencyAck,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
+    $text=$lines -join "`r`n"
+    $utf8=New-Object Text.UTF8Encoding($false)
+    foreach($target in $emergencyTargets){
+      $dir=[string]$target.Dir
+      if(Test-Path -LiteralPath $dir -PathType Container){
+        [IO.File]::WriteAllText((Join-Path $dir ([string]$target.Name)),$text,$utf8)
+      }
+    }
   }catch{}
 }
 
