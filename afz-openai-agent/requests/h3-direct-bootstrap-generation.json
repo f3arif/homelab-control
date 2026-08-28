@@ -4,6 +4,6 @@
   "target": "DESKTOP-H3R6CQN",
   "lane": "h3-direct-github-benchmark",
   "benchmark_job_id": "qwen27b-website-20260827-i02",
-  "generation": 1,
-  "note": "Forces windows-main exact-SHA sync to reinstall/start the H3-local direct GitHub watcher. Does not create or duplicate a benchmark job."
+  "generation": 2,
+  "note": "Forces windows-main exact-SHA sync to install H3 return-only V3, disable the obsolete raw watcher, and republish recovered status/result without launching or duplicating Qwen."
 }
