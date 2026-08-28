@@ -74,7 +74,8 @@ $tokens=$null;$errors=$null
 [void][System.Management.Automation.Language.Parser]::ParseFile($wrapper,[ref]$tokens,[ref]$errors)
 if($errors.Count -gt 0){throw ('Interactive wrapper parse failure: '+($errors.Message -join '; '))}
 
-$userId="$env:USERDOMAIN\$env:USERNAME"
+$userId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+if([string]::IsNullOrWhiteSpace($userId) -or $userId -notmatch '\\'){throw "Unable to resolve authenticated H3 Windows identity: '$userId'"}
 $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$wrapper`""
 $principal=New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
 $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
