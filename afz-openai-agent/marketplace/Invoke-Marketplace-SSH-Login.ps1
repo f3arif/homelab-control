@@ -21,8 +21,6 @@ if(-not(Test-Path -LiteralPath $loginHelper)){throw "Marketplace login helper mi
 function Invoke-NativeCaptured([string]$File,[string[]]$Arguments){
   $old=$ErrorActionPreference
   try{
-    # Windows PowerShell promotes native stderr to ErrorRecord objects. Keep that from
-    # terminating this wrapper so we can inspect the native exit code cleanly.
     $ErrorActionPreference='Continue'
     $out=@(& $File @Arguments 2>&1)
     $code=$LASTEXITCODE
@@ -39,8 +37,6 @@ if(-not $basePy){
 if(-not $basePy){throw 'Python is not available on windows-main.'}
 $basePyPath=if($basePy.Source){[string]$basePy.Source}else{[string]$basePy.Path}
 
-# Use a dedicated Marketplace virtual environment. This keeps Playwright out of the
-# system Python and avoids requiring the user to preinstall dependencies manually.
 $venvRoot=Join-Path $RuntimeRoot 'venv'
 $venvPy=Join-Path $venvRoot 'Scripts\python.exe'
 if(-not(Test-Path -LiteralPath $venvPy -PathType Leaf)){
@@ -86,25 +82,15 @@ if(-not $browserUp){
 }
 if(-not $browserUp){throw "Dedicated Marketplace browser did not expose local CDP at $cdp"}
 
-Write-Host 'Marketplace credential entry is LOCAL to windows-main.'
-Write-Host 'Nothing entered here is written to GitHub, OneDrive, logs, command-line arguments, or environment variables.'
-$username=Read-Host 'Facebook email / username'
-if([string]::IsNullOrWhiteSpace($username)){throw 'Facebook email / username is required.'}
-$secure=Read-Host 'Facebook password' -AsSecureString
-if(-not $secure -or $secure.Length -eq 0){throw 'Facebook password is required.'}
-
-$bstr=[IntPtr]::Zero
-$plain=$null
-$payload=$null
-try{
-  $bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-  $payload=@{username=$username;password=$plain}|ConvertTo-Json -Compress
-
+function Invoke-MarketplaceAuthHelper {
+  param(
+    [Parameter(Mandatory=$true)][string]$Payload,
+    [switch]$VerifyCode
+  )
   $psi=New-Object Diagnostics.ProcessStartInfo
   $psi.FileName=$venvPy
   $quotedHelper='"'+($loginHelper.Replace('"','\"'))+'"'
-  $psi.Arguments=$quotedHelper+' --cdp "'+$cdp+'"'
+  $psi.Arguments=$quotedHelper+' --cdp "'+$cdp+'"'+$(if($VerifyCode){' --verify-code'}else{''})
   $psi.UseShellExecute=$false
   $psi.CreateNoWindow=$true
   $psi.RedirectStandardInput=$true
@@ -114,29 +100,89 @@ try{
   $proc=New-Object Diagnostics.Process
   $proc.StartInfo=$psi
   if(-not $proc.Start()){throw 'Failed to start Marketplace authentication helper.'}
-  $proc.StandardInput.WriteLine($payload)
-  $proc.StandardInput.Close()
-
-  # Clear local plaintext variables immediately after stdin is handed to the child process.
-  $payload=$null
-  $plain=$null
-  $username=$null
-  $secure=$null
-  if($bstr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr);$bstr=[IntPtr]::Zero}
-
-  $stdout=$proc.StandardOutput.ReadToEnd()
-  $stderr=$proc.StandardError.ReadToEnd()
-  $proc.WaitForExit()
-  if($stdout){$stdout.Trim()|Write-Output}
-  if($proc.ExitCode -eq 2){
-    Write-Warning 'Facebook requires an interactive verification step (for example 2FA/checkpoint/CAPTCHA). The helper stopped without attempting to bypass it.'
-    exit 2
+  try{
+    $proc.StandardInput.WriteLine($Payload)
+    $proc.StandardInput.Close()
+    $stdout=$proc.StandardOutput.ReadToEnd()
+    $stderr=$proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    [pscustomobject]@{ExitCode=[int]$proc.ExitCode;StdOut=[string]$stdout;StdErr=[string]$stderr}
+  }finally{
+    $Payload=$null
+    $proc.Dispose()
   }
-  if($proc.ExitCode -ne 0){
-    $safeError=if($stderr){$stderr.Trim()}else{"Marketplace authentication helper exited $($proc.ExitCode)"}
-    throw $safeError
+}
+
+function Convert-SecureToPlain([Security.SecureString]$SecureValue){
+  $ptr=[IntPtr]::Zero
+  try{
+    $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureValue)
+    [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+  }finally{
+    if($ptr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)}
   }
+}
+
+function Parse-HelperJson([string]$Text){
+  if([string]::IsNullOrWhiteSpace($Text)){return $null}
+  $candidate=($Text -split '\r?\n' | Where-Object {$_.Trim().StartsWith('{')} | Select-Object -Last 1)
+  if(-not $candidate){return $null}
+  try{return ($candidate|ConvertFrom-Json)}catch{return $null}
+}
+
+Write-Host 'Marketplace credential entry is LOCAL to windows-main.'
+Write-Host 'Nothing entered here is written to GitHub, OneDrive, logs, command-line arguments, or environment variables.'
+$username=Read-Host 'Facebook email / username'
+if([string]::IsNullOrWhiteSpace($username)){throw 'Facebook email / username is required.'}
+$secure=Read-Host 'Facebook password' -AsSecureString
+if(-not $secure -or $secure.Length -eq 0){throw 'Facebook password is required.'}
+
+$plain=$null
+$payload=$null
+try{
+  $plain=Convert-SecureToPlain $secure
+  $payload=@{username=$username;password=$plain}|ConvertTo-Json -Compress
+  $first=Invoke-MarketplaceAuthHelper -Payload $payload
 }finally{
   $payload=$null;$plain=$null;$username=$null;$secure=$null
-  if($bstr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)}
 }
+
+if($first.StdOut){$first.StdOut.Trim()|Write-Output}
+$firstJson=Parse-HelperJson $first.StdOut
+if($first.ExitCode -eq 0){return}
+if($first.ExitCode -ne 2){
+  $safeError=if($first.StdErr){$first.StdErr.Trim()}else{"Marketplace authentication helper exited $($first.ExitCode)"}
+  throw $safeError
+}
+
+if($firstJson -and [string]$firstJson.status -eq 'otp_required'){
+  Write-Host 'Facebook requested a one-time verification code. Enter the code from your authenticator/SMS/email.'
+  $secureCode=Read-Host 'Facebook verification code' -AsSecureString
+  if(-not $secureCode -or $secureCode.Length -eq 0){throw 'Facebook verification code is required.'}
+  $plainCode=$null
+  $codePayload=$null
+  try{
+    $plainCode=Convert-SecureToPlain $secureCode
+    $codePayload=@{code=$plainCode}|ConvertTo-Json -Compress
+    $second=Invoke-MarketplaceAuthHelper -Payload $codePayload -VerifyCode
+  }finally{
+    $codePayload=$null;$plainCode=$null;$secureCode=$null
+  }
+
+  if($second.StdOut){$second.StdOut.Trim()|Write-Output}
+  $secondJson=Parse-HelperJson $second.StdOut
+  if($second.ExitCode -eq 0){return}
+  if($second.ExitCode -ne 2){
+    $safeError=if($second.StdErr){$second.StdErr.Trim()}else{"Marketplace verification helper exited $($second.ExitCode)"}
+    throw $safeError
+  }
+  if($secondJson -and [string]$secondJson.status -eq 'otp_required'){
+    Write-Warning 'Facebook still requires a one-time code. The submitted code may have expired/been rejected, or Facebook requested another code. Re-run the SSH login to try again.'
+    exit 2
+  }
+  Write-Warning 'Facebook requires a manual verification step (for example CAPTCHA, identity review, checkpoint, or approval from another device). The helper stopped without attempting to bypass it.'
+  exit 2
+}
+
+Write-Warning 'Facebook requires a manual verification step (for example CAPTCHA, identity review, checkpoint, or approval from another device). The helper stopped without attempting to bypass it.'
+exit 2
