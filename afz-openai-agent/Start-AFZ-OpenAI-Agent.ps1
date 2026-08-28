@@ -12,7 +12,7 @@ $allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
 $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
-$familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher.ps1'
+$familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -69,7 +69,7 @@ if(Test-Path $watcherSrc){
 # FamilyPTT reverse-pull audit gets an independent SYSTEM scheduled task so its state
 # is visible/restartable without changing the shared AFZ updater or touching other lanes.
 if(Test-Path $familyPttAuditWatcher){
-  $familyPttTaskName='AFZ FamilyPTT Transport Audit Watcher'
+  $familyPttTaskName='AFZ FamilyPTT Transport Audit Watcher R3'
   $familyPttTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttAuditWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $familyPttTask=Get-ScheduledTask -TaskName $familyPttTaskName -ErrorAction SilentlyContinue
   if($familyPttTask){
