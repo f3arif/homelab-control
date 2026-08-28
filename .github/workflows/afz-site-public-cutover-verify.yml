@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 8
     env:
       SITE_SHA: c38576741ce2d379723fde038300363429845656
-      JOB_ID: afz-site-git-cutover-r3-20260827T2138
+      JOB_ID: afz-site-git-cutover-r5-20260828T1151
       BASE_URL: https://afzeng.ca
     steps:
       - name: Fetch exact Git-authoritative production snapshot
@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           marker=/tmp/afz-git-deploy.json
           ok=0
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 48); do
             if curl -fsS --max-time 8 -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
               "$BASE_URL/afz-git-deploy.json?verify=${GITHUB_RUN_ID}-${attempt}" -o "$marker"; then
               if python - "$marker" "$SITE_SHA" "$JOB_ID" <<'PY'
