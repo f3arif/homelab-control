@@ -4,6 +4,7 @@ param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
   [int]$IntervalSeconds=5
 )
+# bootstrap-only: windows-main may bootstrap H3-local GitHub watchers but must not dispatch benchmark iterations directly.
 $ErrorActionPreference='Stop'
 $IntervalSeconds=[math]::Max(3,[math]::Min($IntervalSeconds,30))
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen27b'
@@ -19,7 +20,7 @@ $owWatchState=Join-Path $owStateRoot 'request-watcher.json'
 $owRequestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-openwebui-afz-pipe.json'
 $owBootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-OpenWebUI-AFZ-Pipe.ps1'
 $owBootstrapState='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-openwebui-pipe-bootstrap\latest.json'
-$owBreadcrumb='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Results\000-critical-openwebui-afz-pipe-watcher-latest.txt'
+$owBreadcrumb=Join-Path $owStateRoot 'latest.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot,$owStateRoot | Out-Null
 
 function Log([string]$Message){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8}
@@ -32,11 +33,9 @@ function Save-OpenWebUIState([string]$JobId,[string]$Status,[string]$Message,[st
   $o|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $owWatchState -Encoding UTF8
   try{
     $parent=Split-Path -Parent $owBreadcrumb
-    if(Test-Path -LiteralPath (Split-Path -Parent $parent)){
-      New-Item -ItemType Directory -Force -Path $parent|Out-Null
-      $lines=@('AFZ_OPENWEBUI_PIPE_WATCHER','STATUS='+$Status,'JOB_ID='+$JobId,'EXPECTED_SHA='+$Sha,'BOOTSTRAP_PID='+$PidValue,'MESSAGE='+$Message,'UPDATED_AT='+$o.updatedAt)
-      [IO.File]::WriteAllText($owBreadcrumb,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
-    }
+    New-Item -ItemType Directory -Force -Path $parent|Out-Null
+    $lines=@('AFZ_OPENWEBUI_PIPE_WATCHER','STATUS='+$Status,'JOB_ID='+$JobId,'EXPECTED_SHA='+$Sha,'BOOTSTRAP_PID='+$PidValue,'MESSAGE='+$Message,'UPDATED_AT='+$o.updatedAt)
+    [IO.File]::WriteAllText($owBreadcrumb,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
   }catch{}
 }
 function Read-Json([string]$Path){if(-not(Test-Path $Path)){return $null};try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $null}}
