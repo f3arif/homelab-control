@@ -1,0 +1,87 @@
+name: AFZ Website Post-State ACK Validate
+
+on:
+  push:
+    branches:
+      - diag/afz-site-poststate-ack
+    paths:
+      - 'afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/afz-site-poststate-ack-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/afz-site-poststate-ack-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1',
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Enforce read-only ACK contract
+        shell: python
+        run: |
+          from pathlib import Path
+          ack=Path('afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1').read_text()
+          sync=Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1').read_text()
+
+          required_ack=[
+            "purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'",
+            "controlPlane='github'",
+            "AFZ-WEBSITE-DEPLOY-ACK-LATEST.json",
+            "request-watcher.json",
+            "WebsiteGitDeploy\\latest.json",
+            "AFZ Edge Backup",
+            "AFZ Website Sync to Pi",
+            "AFZ Website Git Deploy Request Watcher",
+            "activeRequestExists",
+            "carrierRestored",
+            "legacySiteRestored",
+            "resultStatus",
+            "edgeBackupTaskState",
+            "legacySiteTaskState"
+          ]
+          for marker in required_ack: assert marker in ack, marker
+
+          forbidden=[
+            'Stop-Process','taskkill','Stop-ScheduledTask','Start-ScheduledTask',
+            'Set-ScheduledTask','Register-ScheduledTask','Unregister-ScheduledTask',
+            'Enable-ScheduledTask','Disable-ScheduledTask','Remove-Item',
+            'Copy-Item','Move-Item','Invoke-WebRequest','Invoke-RestMethod','ssh.exe','scp.exe'
+          ]
+          for marker in forbidden: assert marker not in ack, marker
+
+          assert 'Publish-SiteDeployAck' in sync
+          assert 'Publish-AFZ-WebsiteDeployAck.ps1' in sync
+          assert 'failure to publish must never affect the GitHub source-sync control path' in sync
+          assert sync.index("$state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile") < sync.rindex('Publish-SiteDeployAck')
+          print('POST-STATE ACK READ-ONLY CONTRACT PASS')
+
+      - name: Execute no-op publisher when diagnostic root is absent
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\afz-openai-agent\Publish-AFZ-WebsiteDeployAck.ps1 -InstallRoot "$env:RUNNER_TEMP\afz-empty-install"
+          if($LASTEXITCODE -ne 0){throw "Publisher no-op returned $LASTEXITCODE"}
+          Write-Host 'POST-STATE ACK NO-OP PASS'
