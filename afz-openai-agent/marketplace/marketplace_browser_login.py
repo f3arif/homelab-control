@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-import time
 from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -60,6 +60,42 @@ def first_visible(page: Page, selectors: tuple[str, ...]):
     return None
 
 
+def submit_login(page: Page, passwd) -> str:
+    """Submit only the Facebook authentication form, using bounded fallbacks."""
+    button = first_visible(
+        page,
+        (
+            'button[name="login"]',
+            'button[type="submit"]',
+            'input[name="login"]',
+            'input[type="submit"]',
+            'form[action*="login"] button',
+            'form[action*="login"] input[type="submit"]',
+        ),
+    )
+    if button is not None:
+        button.click()
+        return "selector"
+
+    # Facebook sometimes renders the submit control without the historical
+    # name/type attributes. Try a semantic button match before using Enter.
+    try:
+        semantic = page.get_by_role("button", name=re.compile(r"^\s*log\s*in\s*$", re.I)).first
+        if semantic.count() and semantic.is_visible(timeout=1000):
+            semantic.click()
+            return "semantic-button"
+    except Exception:
+        pass
+
+    # Final login-only fallback: submitting from the password field avoids
+    # guessing at generic page buttons and remains scoped to authentication.
+    try:
+        passwd.press("Enter")
+        return "password-enter"
+    except Exception as exc:
+        raise RuntimeError("Facebook login form could not be submitted") from exc
+
+
 def authenticate(page: Page, username: str, password: str) -> dict[str, Any]:
     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
 
@@ -68,16 +104,27 @@ def authenticate(page: Page, username: str, password: str) -> dict[str, Any]:
     if email is None or passwd is None:
         state = protection_state(page)
         if state:
-            return {"ok": False, "authenticated": False, "status": "protected", "reason": state}
+            return {"ok": False, "authenticated": False, "status": "protected", "reason": state, "facebook_writes": 0}
+        # The dedicated profile may already hold a valid session. Check Marketplace
+        # instead of treating a missing login form as an error.
+        page.goto(SELLING_URL, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(1200)
+        state = protection_state(page)
+        if state:
+            return {"ok": False, "authenticated": False, "status": "needs_interactive_verification", "reason": state, "facebook_writes": 0}
+        if "login" not in (page.url or "").lower():
+            return {
+                "ok": True,
+                "authenticated": True,
+                "status": "session_ready",
+                "profile_scope": "dedicated-marketplace-browser",
+                "facebook_writes": 0,
+            }
         raise RuntimeError("Facebook login fields were not found")
 
     email.fill(username)
     passwd.fill(password)
-
-    button = first_visible(page, ('button[name="login"]', 'button[type="submit"]'))
-    if button is None:
-        raise RuntimeError("Facebook login submit button was not found")
-    button.click()
+    submit_login(page, passwd)
 
     try:
         page.wait_for_load_state("domcontentloaded", timeout=15000)
