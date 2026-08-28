@@ -55,7 +55,7 @@ jobs:
           if([int]$request.context -ne 16384){throw 'context must be 16384'}
           if(-not [bool]$request.no_think){throw 'no_think must be true'}
           if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
-          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 3){throw 'recovery_generation must remain within bounded transport-only range 1..3'}
+          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 4){throw 'recovery_generation must remain within bounded transport-only range 1..4'}
           $expected=@('/','/services','/projects','/about','/contact')
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
@@ -86,9 +86,13 @@ jobs:
             'transport-recovery-g',
             'AFZ H3 Qwen Ridge16K Runner',
             'LogonType Interactive',
-            'execution_context=''h3-interactive-user'''
+            'execution_context=''h3-interactive-user''',
+            '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
           )){if(-not $all.Contains($needle)){throw "Required boundary missing: $needle"}}
 
+          if($launcher -match '\$env:USERDOMAIN\\\$env:USERNAME'){
+            throw 'H3 task principal must not depend on SSH-session USERDOMAIN/USERNAME environment variables.'
+          }
           if($runner -notmatch 'max_model_calls' -or $runner -notmatch 'num_ctx=\$context' -or $runner -notmatch 'num_predict=11000'){
             throw 'Runner missing bounded one-call/context generation contract.'
           }
