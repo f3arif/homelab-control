@@ -39,6 +39,19 @@ if($prior -and [string]$prior.status -in @('running','completed')){
 $tmp=Join-Path $env:TEMP ('AFZ-H3-QwenRidge16K-'+[guid]::NewGuid().ToString('N')+'.ps1')
 try{
   Invoke-WebRequest -Uri $runnerUrl -OutFile $tmp -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-QwenRidge16K-Launcher';'Cache-Control'='no-cache';'Pragma'='no-cache'} -TimeoutSec 60
+
+  # Windows PowerShell treats the '?' next to an unbraced variable name as part
+  # of that variable token in these GitHub contents URLs. Normalize the exact-SHA
+  # runner before execution so its typed-request and result-branch reads preserve
+  # both the path and ref. This is transport/runtime compatibility only; Qwen
+  # authors all website source and the one-model-call guard is unchanged.
+  $runnerText=[IO.File]::ReadAllText($tmp)
+  $before=$runnerText
+  $runnerText=$runnerText.Replace('"repos/$repo/contents/$Path?ref=$Ref"','"repos/$repo/contents/${Path}?ref=${Ref}"')
+  $runnerText=$runnerText.Replace('"repos/$repo/contents/$Path?ref=$resultBranch"','"repos/$repo/contents/${Path}?ref=${resultBranch}"')
+  if($runnerText -eq $before){throw 'Ridge16K GitHub contents URL compatibility patch did not match the exact-SHA runner.'}
+  [IO.File]::WriteAllText($tmp,$runnerText,$utf8)
+
   $tokens=$null;$errors=$null
   [void][System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)
   if($errors.Count -gt 0){throw ('Runner parse failure: '+($errors.Message -join '; '))}

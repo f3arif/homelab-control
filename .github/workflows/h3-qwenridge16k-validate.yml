@@ -55,7 +55,7 @@ jobs:
           if([int]$request.context -ne 16384){throw 'context must be 16384'}
           if(-not [bool]$request.no_think){throw 'no_think must be true'}
           if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
-          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 5){throw 'recovery_generation must remain within bounded transport-only range 1..5'}
+          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 6){throw 'recovery_generation must remain within bounded transport-only range 1..6'}
           $expected=@('/','/services','/projects','/about','/contact')
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
@@ -88,11 +88,16 @@ jobs:
             'AFZ H3 Qwen Ridge16K Runner',
             'LogonType Interactive',
             'execution_context=''h3-interactive-user''',
-            '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
+            '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name',
+            'contents/${Path}?ref=${Ref}',
+            'contents/${Path}?ref=${resultBranch}'
           )){if(-not $all.Contains($needle)){throw "Required boundary missing: $needle"}}
 
           if($runner -notmatch 'max_model_calls' -or $runner -notmatch 'num_ctx=\$context' -or $runner -notmatch 'num_predict=11000'){
             throw 'Runner missing bounded one-call/context generation contract.'
+          }
+          if($launcher -notmatch 'GitHub contents URL compatibility patch' -or $launcher -notmatch '\$runnerText\.Replace'){
+            throw 'H3 launcher missing exact-SHA GitHub contents URL compatibility normalization.'
           }
           if($launcher -notmatch 'Register-ScheduledTask' -or $launcher -notmatch 'Start-ScheduledTask' -or $launcher -notmatch 'New-ScheduledTaskPrincipal'){
             throw 'H3 Interactive scheduled-task carrier boundary missing.'
