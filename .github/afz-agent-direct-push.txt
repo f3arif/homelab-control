@@ -1,0 +1,3 @@
+AFZ direct agent source recovery
+reason=website-r4-preactivation-transport-repair
+requested_at=2026-08-27T23:38:00-04:00
