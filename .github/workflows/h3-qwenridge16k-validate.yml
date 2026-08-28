@@ -55,7 +55,7 @@ jobs:
           if([int]$request.context -ne 16384){throw 'context must be 16384'}
           if(-not [bool]$request.no_think){throw 'no_think must be true'}
           if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
-          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 4){throw 'recovery_generation must remain within bounded transport-only range 1..4'}
+          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 5){throw 'recovery_generation must remain within bounded transport-only range 1..5'}
           $expected=@('/','/services','/projects','/about','/contact')
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
@@ -81,29 +81,39 @@ jobs:
             'Path]::IsPathRooted',
             'think=$false',
             '/no_think',
-            'AFZ Edge Backup',
             'StrictHostKeyChecking=yes',
             'transport-recovery-g',
+            'AFZ Edge Backup',
+            'AFZ H3 Qwen Ridge16K Transport',
             'AFZ H3 Qwen Ridge16K Runner',
             'LogonType Interactive',
             'execution_context=''h3-interactive-user''',
             '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
           )){if(-not $all.Contains($needle)){throw "Required boundary missing: $needle"}}
 
-          if($launcher -match '\$env:USERDOMAIN\\\$env:USERNAME'){
-            throw 'H3 task principal must not depend on SSH-session USERDOMAIN/USERNAME environment variables.'
-          }
           if($runner -notmatch 'max_model_calls' -or $runner -notmatch 'num_ctx=\$context' -or $runner -notmatch 'num_predict=11000'){
             throw 'Runner missing bounded one-call/context generation contract.'
           }
           if($launcher -notmatch 'Register-ScheduledTask' -or $launcher -notmatch 'Start-ScheduledTask' -or $launcher -notmatch 'New-ScheduledTaskPrincipal'){
             throw 'H3 Interactive scheduled-task carrier boundary missing.'
           }
-          if($launcher -match 'New-ScheduledTaskTrigger'){
-            throw 'Ridge16K carrier must remain triggerless to prevent automatic replay.'
+          if($launcher -match '\$env:USERDOMAIN\\\$env:USERNAME'){
+            throw 'H3 task principal must not depend on SSH-session USERDOMAIN/USERNAME environment variables.'
           }
-          if($bootstrap -notmatch 'Set-ScheduledTask' -or $bootstrap -notmatch 'New-RestoredAction' -or $carrier -notmatch 'StrictHostKeyChecking=yes'){
-            throw 'Windows interactive carrier swap/restore or strict SSH boundary missing.'
+          if($launcher -match 'New-ScheduledTaskTrigger'){
+            throw 'H3 Ridge16K carrier must remain triggerless.'
+          }
+          if($bootstrap -notmatch 'Register-ScheduledTask' -or $bootstrap -notmatch 'Start-ScheduledTask' -or $bootstrap -notmatch '\.Principal'){
+            throw 'Dedicated windows-main Interactive transport task boundary missing.'
+          }
+          if($bootstrap -match 'New-ScheduledTaskTrigger'){
+            throw 'Dedicated windows-main Ridge16K transport must remain triggerless.'
+          }
+          foreach($mutation in @('Set-ScheduledTask','Enable-ScheduledTask','Disable-ScheduledTask')){
+            if($bootstrap -match [regex]::Escape($mutation)){throw "Shared carrier mutation primitive must not be present: $mutation"}
+          }
+          if($carrier -notmatch 'StrictHostKeyChecking=yes'){
+            throw 'Strict SSH host-key boundary missing.'
           }
           if($sync -notmatch "status -in @\('failed','error'\)" -or $sync -notmatch 'transport-recovery-g'){
             throw 'One-shot pre-launch transport recovery migration missing.'
