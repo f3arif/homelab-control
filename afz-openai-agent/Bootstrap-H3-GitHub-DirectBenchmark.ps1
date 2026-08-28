@@ -7,66 +7,16 @@ param(
 $ErrorActionPreference='Stop'
 if($ExpectedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSha required'}
 $ExpectedSha=$ExpectedSha.ToLowerInvariant()
-$key='C:\Users\Faiz\.ssh\afz_h3_worker'
-$known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
-$h3='Faiz@100.106.186.118'
-$remoteWatcher='C:\AFZ\GitHubDirect\H3-GitHub-Direct-Benchmark-Watcher.ps1'
-$remoteLauncher='C:\AFZ\GitHubDirect\Start-H3-GitHub-Direct-Benchmark.ps1'
-$remoteAuthHelper='C:\AFZ\GitHubDirect\Enable-H3-GitHub-DirectAuth.ps1'
-$rawBase="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/tools"
-$rawWatcher="$rawBase/H3-GitHub-Direct-Benchmark-Watcher.ps1"
-$rawLauncher="$rawBase/Start-H3-GitHub-Direct-Benchmark.ps1"
-$rawAuthHelper="$rawBase/Enable-H3-GitHub-DirectAuth.ps1"
-$stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-github-direct-bootstrap'
-$stateFile=Join-Path $stateRoot 'latest.json'
-New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
-$utf8=New-Object Text.UTF8Encoding($false)
-function Save-State([string]$Status,[string]$Message,$Extra=$null){$o=[ordered]@{ok=($Status -eq 'completed');status=$Status;message=$Message;target='DESKTOP-H3R6CQN';transport='one-time-ssh-bootstrap';expectedSha=$ExpectedSha;updatedAt=(Get-Date -Format o)};if($Extra){foreach($p in $Extra.PSObject.Properties){$o[$p.Name]=$p.Value}};[IO.File]::WriteAllText($stateFile,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)}
+# Trusted exact-SHA entrypoint for DESKTOP-H3R6CQN (Faiz@100.106.186.118).
+# The benchmark job remains qwen3.8:27b / Qwen38-27B-Website-Benchmark-20260826-174739.
+# This generation installs the return-only publisher and retires the obsolete raw watcher; it never launches Qwen.
+$uri="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/Bootstrap-H3-GitHub-DirectReturnV3.ps1"
+$tmp=Join-Path $env:TEMP ('AFZ-H3-ReturnV3-'+$ExpectedSha+'.ps1')
 try{
-  if(-not(Test-Path $key)){throw "H3 SSH key missing: $key"}
-  $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
-  Save-State 'running' 'Installing persistent H3-local GitHub direct watcher with GitHub write preflight.'
-  $remote=@"
-`$ErrorActionPreference='Stop'
-if(`$env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: `$env:COMPUTERNAME"}
-`$dir='C:\AFZ\GitHubDirect'
-New-Item -ItemType Directory -Force -Path `$dir|Out-Null
-`$downloads=@(
-  @{uri='$rawWatcher';path='$remoteWatcher'},
-  @{uri='$rawLauncher';path='$remoteLauncher'},
-  @{uri='$rawAuthHelper';path='$remoteAuthHelper'}
-)
-foreach(`$d in `$downloads){
-  Invoke-WebRequest -Uri `$d.uri -OutFile `$d.path -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-Direct-Bootstrap'} -TimeoutSec 60
-  `$tokens=`$null;`$errors=`$null
-  [void][System.Management.Automation.Language.Parser]::ParseFile(`$d.path,[ref]`$tokens,[ref]`$errors)
-  if(`$errors.Count -gt 0){throw ('PowerShell parse failed: '+`$d.path+' :: '+(`$errors.Message -join '; '))}
-}
-`$task='AFZ H3 GitHub Direct Benchmark Watcher'
-`$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File ```"$remoteLauncher```" -Watcher ```"$remoteWatcher```" -IntervalSeconds 10"
-`$trigger=New-ScheduledTaskTrigger -AtLogOn -User `$env:USERNAME
-`$principal=New-ScheduledTaskPrincipal -UserId "`$env:USERDOMAIN\`$env:USERNAME" -LogonType Interactive -RunLevel Highest
-`$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-Register-ScheduledTask -TaskName `$task -Action `$action -Trigger `$trigger -Principal `$principal -Settings `$settings -Force|Out-Null
-try{Stop-ScheduledTask -TaskName `$task -ErrorAction SilentlyContinue}catch{}
-Start-ScheduledTask -TaskName `$task
-Start-Sleep -Seconds 3
-`$t=Get-ScheduledTask -TaskName `$task
-`$preflight='C:\ProgramData\AFZ\H3GitHubDirect\github-preflight.json'
-`$pf=`$null;if(Test-Path `$preflight){try{`$pf=Get-Content -LiteralPath `$preflight -Raw|ConvertFrom-Json}catch{}}
-[pscustomobject]@{host=`$env:COMPUTERNAME;task=`$task;taskState=[string]`$t.State;watcher='$remoteWatcher';launcher='$remoteLauncher';authHelper='$remoteAuthHelper';githubPreflightStatus=`$(if(`$pf){[string]`$pf.status}else{'pending'})}|ConvertTo-Json -Compress
-"@
-  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
-  $out=& $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known" $h3 powershell.exe -NoProfile -EncodedCommand $encoded 2>&1
-  if($LASTEXITCODE -ne 0){throw "H3 bootstrap SSH failed exit=$LASTEXITCODE output=$($out|Out-String)"}
-  $line=@($out|Where-Object {$_ -match '^\{.*\}$'}|Select-Object -Last 1)
-  $extra=$null;if($line){try{$extra=$line|ConvertFrom-Json}catch{}}
-  Save-State 'completed' 'H3-local GitHub watcher installed; launcher now requires verified GitHub write access before Qwen can start.' $extra
-  $state=Get-Content $stateFile -Raw|ConvertFrom-Json
-  Write-Output ('AFZ_BOOTSTRAP_JSON='+($state|ConvertTo-Json -Depth 10 -Compress))
-}catch{
-  $msg=$_.Exception.Message
-  Save-State 'failed' $msg
-  Write-Error $msg
-  exit 1
-}
+  Invoke-WebRequest -Uri $uri -OutFile $tmp -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-ExactSha-ReturnV3'} -TimeoutSec 60
+  $tokens=$null;$errors=$null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)
+  if($errors.Count -gt 0){throw ('Return V3 bootstrap parse failure: '+($errors.Message -join '; '))}
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmp -ExpectedSha $ExpectedSha -InstallRoot $InstallRoot
+  exit $LASTEXITCODE
+}finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
