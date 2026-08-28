@@ -44,9 +44,9 @@ try{
   [IO.File]::WriteAllText($runner,[IO.File]::ReadAllText($tmp),$utf8)
 }finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
 
-# Do not create a second process for the same job if a detached runner already exists.
+# If this exact-SHA detached runner is already alive, do not create a second GPU job.
 $existing=@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue|Where-Object {
-  $_.CommandLine -and $_.CommandLine -match [regex]::Escape('Start-H3-QwenRidge16K-WebsiteTest.ps1') -and $_.CommandLine -match [regex]::Escape($JobId)
+  $_.CommandLine -and $_.CommandLine -match [regex]::Escape('Start-H3-QwenRidge16K-WebsiteTest.ps1') -and $_.CommandLine -match [regex]::Escape($ExpectedSha)
 })
 if($existing.Count -gt 0){
   Emit ([ordered]@{ok=$true;already=$true;job_id=$JobId;status='process-running';expected_sha=$ExpectedSha;pid=[int]$existing[0].ProcessId;state_file=$stateFile;runner=$runner})
