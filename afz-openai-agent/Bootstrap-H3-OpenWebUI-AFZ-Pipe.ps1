@@ -21,29 +21,9 @@ function Save-State([string]$Status,[string]$Message,$Extra=$null){
   if($Extra){foreach($p in $Extra.PSObject.Properties){$o[$p.Name]=$p.Value}}
   [IO.File]::WriteAllText($stateFile,($o|ConvertTo-Json -Depth 12 -Compress),$utf8)
 }
-try{
-  if(-not(Test-Path $key)){throw "H3 SSH key missing: $key"}
-  $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
-  Save-State 'running' 'Installing/updating AFZ Typed Agent Pipe in H3 OpenWebUI.'
-  $remoteTemplate=@'
-$ErrorActionPreference='Stop'
-if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: $env:COMPUTERNAME"}
-$root='C:\OpenWebUI'
-$db=Join-Path $root 'data\webui.db'
-$py=Join-Path $root 'venv\Scripts\python.exe'
-$pipeDir=Join-Path $root 'afz-functions'
-$pipePath=Join-Path $pipeDir 'afz_agent_pipe.py'
-$backupDir=Join-Path $root 'data\backups'
-$resultPath=Join-Path $root 'logs\afz-pipe-bootstrap-latest.json'
-if(-not(Test-Path $db)){throw "OpenWebUI database missing: $db"}
-if(-not(Test-Path $py)){throw "OpenWebUI venv python missing: $py"}
-New-Item -ItemType Directory -Force -Path $pipeDir,$backupDir,(Split-Path $resultPath -Parent)|Out-Null
-Invoke-WebRequest -Uri '__PIPE_URL__' -OutFile $pipePath -UseBasicParsing -Headers @{'User-Agent'='AFZ-OpenWebUI-Pipe-Bootstrap'} -TimeoutSec 60
-& $py -m py_compile $pipePath
-if($LASTEXITCODE -ne 0){throw 'AFZ Pipe Python compile failed'}
-$installer=Join-Path $env:TEMP ('afz-openwebui-install-'+[guid]::NewGuid().ToString('n')+'.py')
+
 $installerCode=@'
-import json, os, sqlite3, sys, time
+import json, sqlite3, sys, time
 from pathlib import Path
 
 db=Path(sys.argv[1])
@@ -70,21 +50,20 @@ try:
     if 'user' in tables:
         ucols={r[1] for r in con.execute('pragma table_info("user")')}
         if 'id' in ucols:
+            row=None
             if 'role' in ucols:
                 row=con.execute('select id from "user" where lower(role)=? order by rowid limit 1',('admin',)).fetchone()
-            else:
-                row=None
             if not row:
                 row=con.execute('select id from "user" order by rowid limit 1').fetchone()
             if row: user_id=row[0]
-    existing=con.execute('select * from "function" where id=?',('afz_typed_agent',)).fetchone()
+    existing=con.execute('select id from "function" where id=?',('afz_typed_agent',)).fetchone()
     values={
         'id':'afz_typed_agent',
         'user_id':user_id,
         'name':'AFZ Typed Agent',
         'type':'pipe',
         'content':source,
-        'meta':json.dumps({'description':'AFZ typed-agent bridge to Windows-main','manifest':{'title':'AFZ Typed Agent','version':'0.1.0'}}, separators=(',',':')),
+        'meta':json.dumps({'description':'AFZ typed-agent bridge to Windows-main','manifest':{'title':'AFZ Typed Agent','version':'0.1.0'}},separators=(',',':')),
         'is_active':1,
         'is_global':0,
         'updated_at':now,
@@ -93,8 +72,7 @@ try:
     }
     if existing:
         update_keys=[k for k in ('user_id','name','type','content','meta','is_active','is_global','updated_at') if k in cols]
-        sql='update "function" set '+','.join('"%s"=?'%k for k in update_keys)+' where id=?'
-        con.execute(sql,[values[k] for k in update_keys]+['afz_typed_agent'])
+        con.execute('update "function" set '+','.join('"%s"=?'%k for k in update_keys)+' where id=?',[values[k] for k in update_keys]+['afz_typed_agent'])
         action='updated'
     else:
         insert_keys=[k for k in values if k in cols]
@@ -105,8 +83,7 @@ try:
                 missing.append(name)
         if missing:
             raise RuntimeError('Unsupported required function columns: '+','.join(missing))
-        sql='insert into "function" ('+','.join('"%s"'%k for k in insert_keys)+') values ('+','.join('?' for _ in insert_keys)+')'
-        con.execute(sql,[values[k] for k in insert_keys])
+        con.execute('insert into "function" ('+','.join('"%s"'%k for k in insert_keys)+') values ('+','.join('?' for _ in insert_keys)+')',[values[k] for k in insert_keys])
         action='created'
     con.commit()
     row=con.execute('select id,name,type,is_active,is_global,updated_at from "function" where id=?',('afz_typed_agent',)).fetchone()
@@ -114,15 +91,50 @@ try:
 finally:
     con.close()
 '@
-[IO.File]::WriteAllText($installer,$installerCode,(New-Object Text.UTF8Encoding($false)))
+$smokeCode=@'
+import asyncio, importlib.util, json, sys
+p=sys.argv[1]
+spec=importlib.util.spec_from_file_location('afz_agent_pipe',p)
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+pipe=m.Pipe()
+body={'model':'torbox-auto','messages':[{'role':'user','content':'Use afz_system_status and jellyfin_public_info exactly once each. Do not call any other tools. Read-only only. Report concise status.'}]}
+out=asyncio.run(pipe.pipe(body))
+s=str(out)
+ok=not s.startswith('AFZ Agent error') and not s.startswith('AFZ Agent connection error') and not s.startswith('AFZ Agent HTTP error')
+print(json.dumps({'ok':ok,'output':s[:12000]},separators=(',',':')))
+'@
+$installerB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($installerCode))
+$smokeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($smokeCode))
+
+try{
+  if(-not(Test-Path $key)){throw "H3 SSH key missing: $key"}
+  $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
+  Save-State 'running' 'Installing/updating AFZ Typed Agent Pipe in H3 OpenWebUI.'
+  $remoteTemplate=@'
+$ErrorActionPreference='Stop'
+if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: $env:COMPUTERNAME"}
+$root='C:\OpenWebUI'
+$db=Join-Path $root 'data\webui.db'
+$py=Join-Path $root 'venv\Scripts\python.exe'
+$pipeDir=Join-Path $root 'afz-functions'
+$pipePath=Join-Path $pipeDir 'afz_agent_pipe.py'
+$backupDir=Join-Path $root 'data\backups'
+$resultPath=Join-Path $root 'logs\afz-pipe-bootstrap-latest.json'
+if(-not(Test-Path $db)){throw "OpenWebUI database missing: $db"}
+if(-not(Test-Path $py)){throw "OpenWebUI venv python missing: $py"}
+New-Item -ItemType Directory -Force -Path $pipeDir,$backupDir,(Split-Path $resultPath -Parent)|Out-Null
+Invoke-WebRequest -Uri '__PIPE_URL__' -OutFile $pipePath -UseBasicParsing -Headers @{'User-Agent'='AFZ-OpenWebUI-Pipe-Bootstrap'} -TimeoutSec 60
+& $py -m py_compile $pipePath
+if($LASTEXITCODE -ne 0){throw 'AFZ Pipe Python compile failed'}
+$installer=Join-Path $env:TEMP ('afz-openwebui-install-'+[guid]::NewGuid().ToString('n')+'.py')
+[IO.File]::WriteAllBytes($installer,[Convert]::FromBase64String('__INSTALLER_B64__'))
 $dbResultRaw=& $py $installer $db $pipePath $backupDir 2>&1
 $installExit=$LASTEXITCODE
 Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
 if($installExit -ne 0){throw ('OpenWebUI function DB install failed: '+(($dbResultRaw|ForEach-Object{[string]$_}) -join ' '))}
-$dbResultText=($dbResultRaw|Select-Object -Last 1)
-$dbResult=$dbResultText|ConvertFrom-Json
+$dbResult=(($dbResultRaw|Select-Object -Last 1)|ConvertFrom-Json)
 $task='OpenWebUI Server'
-$t=Get-ScheduledTask -TaskName $task -ErrorAction Stop
+Get-ScheduledTask -TaskName $task -ErrorAction Stop|Out-Null
 try{Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue}catch{}
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $task
@@ -133,17 +145,7 @@ for($i=0;$i -lt 30;$i++){
 }
 if(-not $httpOk){throw 'OpenWebUI did not return HTTP 200 after restart'}
 $smoke=Join-Path $env:TEMP ('afz-openwebui-smoke-'+[guid]::NewGuid().ToString('n')+'.py')
-$smokeCode=@'
-import asyncio, importlib.util, json, sys
-p=sys.argv[1]
-spec=importlib.util.spec_from_file_location('afz_agent_pipe',p)
-m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-pipe=m.Pipe()
-body={'model':'torbox-auto','messages':[{'role':'user','content':'Use afz_system_status and jellyfin_public_info exactly once each. Do not call any other tools. Read-only only. Report concise status.'}]}
-out=asyncio.run(pipe.pipe(body))
-print(json.dumps({'ok':not str(out).startswith('AFZ Agent error') and not str(out).startswith('AFZ Agent connection error') and not str(out).startswith('AFZ Agent HTTP error'),'output':str(out)[:12000]},separators=(',',':')))
-'@
-[IO.File]::WriteAllText($smoke,$smokeCode,(New-Object Text.UTF8Encoding($false)))
+[IO.File]::WriteAllBytes($smoke,[Convert]::FromBase64String('__SMOKE_B64__'))
 $smokeRaw=& $py $smoke $pipePath 2>&1
 $smokeExit=$LASTEXITCODE
 Remove-Item -LiteralPath $smoke -Force -ErrorAction SilentlyContinue
@@ -152,9 +154,16 @@ $smokeObj=(($smokeRaw|Select-Object -Last 1)|ConvertFrom-Json)
 if(-not [bool]$smokeObj.ok){throw ('AFZ Pipe smoke returned failure: '+[string]$smokeObj.output)}
 $result=[ordered]@{ok=$true;host=$env:COMPUTERNAME;expectedSha='__SHA__';jobId='__JOB__';pipe=$pipePath;dbAction=$dbResult.action;backup=$dbResult.backup;openWebUiHttp=$httpOk;taskState=[string](Get-ScheduledTask -TaskName $task).State;smoke=$smokeObj.output;completedAt=(Get-Date -Format o)}
 $result|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $resultPath -Encoding UTF8
+$od=$env:OneDriveCommercial
+if([string]::IsNullOrWhiteSpace($od) -or -not(Test-Path -LiteralPath $od)){$od=Join-Path $env:USERPROFILE 'OneDrive - AFZ Engineering Inc'}
+if(Test-Path -LiteralPath $od){
+  $safeResult=Join-Path $od 'AFZ Shared\AFZ Results\000-critical-openwebui-afz-pipe-bootstrap-latest.txt'
+  $lines=@('AFZ_OPENWEBUI_PIPE_BOOTSTRAP','STATUS=PASS','HOST='+$env:COMPUTERNAME,'EXPECTED_SHA=__SHA__','JOB_ID=__JOB__','DB_ACTION='+$dbResult.action,'BACKUP='+$dbResult.backup,'OPENWEBUI_HTTP='+$httpOk,'TASK_STATE='+[string](Get-ScheduledTask -TaskName $task).State,'SMOKE_BEGIN',[string]$smokeObj.output,'SMOKE_END','COMPLETED_AT='+$result.completedAt)
+  [IO.File]::WriteAllText($safeResult,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
+}
 $result|ConvertTo-Json -Depth 8 -Compress
 '@
-  $remote=$remoteTemplate.Replace('__PIPE_URL__',$pipeUrl).Replace('__SHA__',$ExpectedSha).Replace('__JOB__',$JobId)
+  $remote=$remoteTemplate.Replace('__PIPE_URL__',$pipeUrl).Replace('__INSTALLER_B64__',$installerB64).Replace('__SMOKE_B64__',$smokeB64).Replace('__SHA__',$ExpectedSha).Replace('__JOB__',$JobId)
   $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
   $out=& $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known" $h3 powershell.exe -NoProfile -EncodedCommand $encoded 2>&1
   if($LASTEXITCODE -ne 0){throw "H3 OpenWebUI bootstrap SSH failed exit=$LASTEXITCODE output=$($out|Out-String)"}
