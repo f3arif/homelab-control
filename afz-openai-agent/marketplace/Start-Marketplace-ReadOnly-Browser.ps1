@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 if($identity -match '\\SYSTEM$'){
-  throw 'Marketplace browser must be launched in the signed-in interactive user session, not SYSTEM.'
+  throw 'Marketplace browser must be launched in the user account context, not SYSTEM.'
 }
 if($DebugPort -lt 1024 -or $DebugPort -gt 65535){throw 'DebugPort out of range'}
 
@@ -23,9 +23,9 @@ if(-not $candidates){throw 'Chrome or Edge was not found.'}
 $browser=$candidates|Select-Object -First 1
 New-Item -ItemType Directory -Force -Path $ProfileRoot|Out-Null
 
-# Do not attach the user's normal browser profile. This dedicated profile is intentionally
-# separate so the automation has only the Marketplace session the user signs into here.
+# Dedicated profile only. CDP is explicitly loopback-bound so it is not exposed to LAN/Tailscale.
 $arguments=@(
+  '--remote-debugging-address=127.0.0.1',
   "--remote-debugging-port=$DebugPort",
   "--user-data-dir=$ProfileRoot",
   '--no-first-run',
@@ -36,9 +36,10 @@ Start-Process -FilePath $browser -ArgumentList $arguments | Out-Null
 
 [ordered]@{
   ok=$true
-  mode='interactive-user-read-only-preparation'
+  mode='dedicated-marketplace-browser'
   browser=$browser
   profileRoot=$ProfileRoot
   cdp="http://127.0.0.1:$DebugPort"
-  next='Sign in manually if Facebook asks. Do not provide credentials to scripts. Then run the read-only collector.'
+  cdpExposure='loopback-only'
+  next='For SSH credential entry run Invoke-Marketplace-SSH-Login.ps1. For desktop use, manual sign-in remains allowed.'
 }|ConvertTo-Json -Compress
