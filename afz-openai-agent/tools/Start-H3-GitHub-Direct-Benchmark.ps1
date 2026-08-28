@@ -1,0 +1,39 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+  [string]$Watcher='C:\AFZ\GitHubDirect\H3-GitHub-Direct-Benchmark-Watcher.ps1',
+  [int]$IntervalSeconds=10
+)
+$ErrorActionPreference='Stop'
+$repo='f3arif/homelab-control'
+$alertIssue=7
+$stateRoot='C:\ProgramData\AFZ\H3GitHubDirect'
+$stateFile=Join-Path $stateRoot 'github-preflight.json'
+New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
+$utf8=New-Object Text.UTF8Encoding($false)
+function Save-State([string]$Status,[string]$Message){$o=[ordered]@{ok=($Status -eq 'ready');status=$Status;message=$Message;host=$env:COMPUTERNAME;repo=$repo;updated_at=(Get-Date -Format o)};[IO.File]::WriteAllText($stateFile,($o|ConvertTo-Json -Depth 6 -Compress),$utf8)}
+function Get-Gh{
+  $c=Get-Command gh.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if($c){if($c.Source){return [string]$c.Source};if($c.Path){return [string]$c.Path}}
+  foreach($p in @('C:\Program Files\GitHub CLI\gh.exe','C:\Program Files (x86)\GitHub CLI\gh.exe')){if(Test-Path $p){return $p}}
+  return $null
+}
+try{
+  if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "H3-only launcher; host=$env:COMPUTERNAME"}
+  if(-not(Test-Path $Watcher)){throw "Watcher missing: $Watcher"}
+  $gh=Get-Gh
+  if(-not $gh){Save-State 'blocked-github-auth' 'GitHub CLI is not installed on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 20}
+  & $gh auth status --hostname github.com *> $null
+  if($LASTEXITCODE -ne 0){Save-State 'blocked-github-auth' 'GitHub CLI is not authenticated on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 21}
+  $perm=& $gh api "repos/$repo" --jq '.permissions.push' 2>$null
+  if($LASTEXITCODE -ne 0 -or ([string]$perm).Trim().ToLowerInvariant() -ne 'true'){Save-State 'blocked-github-write' 'H3 GitHub identity does not have push permission to homelab-control.';exit 22}
+  & $gh auth setup-git *> $null
+  if($LASTEXITCODE -ne 0){Save-State 'blocked-github-write' 'gh auth setup-git failed on H3.';exit 23}
+  Save-State 'ready' 'GitHub authentication and repository push permission verified; starting direct H3 benchmark watcher.'
+  try{& $gh issue comment $alertIssue --repo $repo --body "[H3-DIRECT PREFLIGHT] GitHub write channel verified on H3. Direct benchmark watcher is starting; AFZ queue/claims are bypassed." *> $null}catch{}
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Watcher -IntervalSeconds $IntervalSeconds
+  exit $LASTEXITCODE
+}catch{
+  Save-State 'failed' $_.Exception.Message
+  throw
+}
