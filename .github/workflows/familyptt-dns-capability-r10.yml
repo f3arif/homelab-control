@@ -1,0 +1,98 @@
+name: FamilyPTT DNS Capability R10
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/familyptt-dns-capability-r10.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: familyptt-dns-capability-r10
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+      PORKBUN_SECRET_API_KEY: ${{ secrets.PORKBUN_SECRET_API_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Resolve DNS authority and capability without exposing secret values
+        id: audit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t ns < <(dig +short NS afzeng.ca | sed 's/\.$//' | sort -u)
+          ns_csv=$(IFS=,; echo "${ns[*]:-}")
+          provider=unknown
+          if printf '%s\n' "${ns[@]:-}" | grep -Eqi 'porkbun'; then
+            provider=porkbun
+          elif printf '%s\n' "${ns[@]:-}" | grep -Eqi 'cloudflare'; then
+            provider=cloudflare
+          elif printf '%s\n' "${ns[@]:-}" | grep -Eqi 'domaincontrol'; then
+            provider=godaddy
+          elif printf '%s\n' "${ns[@]:-}" | grep -Eqi 'registrar-servers'; then
+            provider=namecheap
+          fi
+
+          porkbun_key_present=false
+          porkbun_secret_present=false
+          cloudflare_token_present=false
+          [[ -n "${PORKBUN_API_KEY:-}" ]] && porkbun_key_present=true
+          [[ -n "${PORKBUN_SECRET_API_KEY:-}" ]] && porkbun_secret_present=true
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] && cloudflare_token_present=true
+
+          classification=DNS_PROVIDER_IDENTIFIED_NO_GITHUB_AUTOMATION
+          if [[ "$provider" == porkbun && "$porkbun_key_present" == true && "$porkbun_secret_present" == true ]]; then
+            classification=DNS_AUTOMATION_GITHUB_PORKBUN_READY
+          elif [[ "$provider" == cloudflare && "$cloudflare_token_present" == true ]]; then
+            classification=DNS_AUTOMATION_GITHUB_CLOUDFLARE_READY
+          elif [[ "$provider" == unknown ]]; then
+            classification=DNS_PROVIDER_UNRESOLVED
+          fi
+
+          {
+            echo "provider=$provider"
+            echo "nameservers=$ns_csv"
+            echo "porkbun_key_present=$porkbun_key_present"
+            echo "porkbun_secret_present=$porkbun_secret_present"
+            echo "cloudflare_token_present=$cloudflare_token_present"
+            echo "classification=$classification"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reconcile sanitized R10 result to control issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVIDER: ${{ steps.audit.outputs.provider }}
+          NAMESERVERS: ${{ steps.audit.outputs.nameservers }}
+          PORKBUN_KEY_PRESENT: ${{ steps.audit.outputs.porkbun_key_present }}
+          PORKBUN_SECRET_PRESENT: ${{ steps.audit.outputs.porkbun_secret_present }}
+          CLOUDFLARE_TOKEN_PRESENT: ${{ steps.audit.outputs.cloudflare_token_present }}
+          CLASSIFICATION: ${{ steps.audit.outputs.classification }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(cat <<EOF
+          ### FamilyPTT DNS capability audit R10
+
+          Read-only GitHub-side DNS authority/capability audit completed. No DNS, proxy, certificate, firewall, backend, or credential mutation occurred, and no secret values were printed.
+
+          - Authoritative DNS provider inference: \`$PROVIDER\`
+          - Nameservers: \`$NAMESERVERS\`
+          - Porkbun API key slot populated: \`$PORKBUN_KEY_PRESENT\`
+          - Porkbun secret-key slot populated: \`$PORKBUN_SECRET_PRESENT\`
+          - Cloudflare token slot populated: \`$CLOUDFLARE_TOKEN_PRESENT\`
+
+          Classification: \`$CLASSIFICATION\`
+          EOF
+          )
+          jq -n --arg body "$body" '{body:$body}' > /tmp/comment.json
+          gh api --method POST repos/f3arif/homelab-control/issues/17/comments --input /tmp/comment.json >/dev/null
