@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 8
     env:
       SITE_SHA: c38576741ce2d379723fde038300363429845656
-      JOB_ID: afz-site-git-cutover-r2-20260827T2128
+      JOB_ID: afz-site-git-cutover-r3-20260827T2138
       BASE_URL: https://afzeng.ca
     steps:
       - name: Fetch exact Git-authoritative production snapshot
