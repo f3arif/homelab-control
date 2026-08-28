@@ -13,6 +13,8 @@ $watchState=Join-Path $stateRoot 'push-watcher.json'
 $logRoot=Join-Path $stateRoot 'logs'
 $logFile=Join-Path $logRoot 'push-watcher.log'
 $signalBase='https://raw.githubusercontent.com/f3arif/homelab-control/main/.github/afz-agent-deploy-signal.txt'
+$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -32,6 +34,30 @@ function Save-State([string]$signal,[string]$status,[string]$message){
   [ordered]@{ok=($status -eq 'idle' -or $status -eq 'deployed');signalSha=$signal;currentSha=(Current-Sha);status=$status;message=$message;intervalSeconds=$IntervalSeconds;time=(Get-Date -Format o)} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $watchState -Encoding UTF8
 }
+function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
+  # OneDrive is emergency observability only. It is never read as a control/request
+  # input and failure to sync/write it does not affect the GitHub control path.
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    $pushTask=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Push Deploy Watcher' -ErrorAction SilentlyContinue
+    $siteTask=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
+    [ordered]@{
+      schema=1
+      purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
+      source='windows-main'
+      controlPlane='github'
+      component='AFZ OpenAI Agent Push Deploy Watcher'
+      signalSha=$(if($signal){$signal}else{$null})
+      currentSha=(Current-Sha)
+      status=$status
+      message=$message
+      pushWatcherTaskState=$(if($pushTask){[string]$pushTask.State}else{'missing'})
+      siteWatcherTaskState=$(if($siteTask){[string]$siteTask.State}else{'missing'})
+      processId=$PID
+      time=(Get-Date -Format o)
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $diagFile -Encoding UTF8
+  }catch{}
+}
 function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
   Log "UPDATER_PASS_START pass=$Pass signal=$Sha"
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Updater -InstallRoot $InstallRoot -ExpectedSha $Sha *> $null
@@ -47,7 +73,8 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true"
+  Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
     try{
       $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -64,6 +91,7 @@ try{
           if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
           $before=Current-Sha
           Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
+          Save-DiagnosticAck $sha 'signal-consumed' "Fast signal observed; source before update=$before"
           Log "DEPLOY signal=$sha current=$before"
 
           # Pass 1 synchronizes the exact GitHub source. If that synchronization
@@ -77,10 +105,12 @@ try{
           $after=Current-Sha
           if($code -eq 0 -and $after -eq $sha){
             Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
+            Save-DiagnosticAck $sha 'source-synced' "Exact-SHA two-pass update completed; source=$after"
             Log "DEPLOY_OK signal=$sha source=$after passes=2"
             $lastAttemptSha=''
           }else{
             Save-State $sha 'failed' "Updater exit=$code current=$after expected=$sha"
+            Save-DiagnosticAck $sha 'source-sync-failed' "Updater exit=$code current=$after expected=$sha"
             Log "DEPLOY_FAIL signal=$sha exit=$code current=$after expected=$sha"
           }
         }
@@ -91,7 +121,7 @@ try{
       $lastError=''
     }catch{
       $msg=$_.Exception.Message
-      if($msg -ne $lastError){Log "WATCH_ERROR $msg";$lastError=$msg}
+      if($msg -ne $lastError){Log "WATCH_ERROR $msg";Save-DiagnosticAck '' 'watch-error' $msg;$lastError=$msg}
       Save-State '' 'error' $msg
     }
     Start-Sleep -Seconds $IntervalSeconds

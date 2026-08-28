@@ -1,0 +1,97 @@
+name: AFZ Fast Signal Persistence Validate
+
+on:
+  push:
+    branches:
+      - fix/afz-fast-signal-persistence
+    paths:
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-fast-signal-persistence-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-fast-signal-persistence-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell transport sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Push-Deploy-Watcher.ps1',
+            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Validate persistent watcher and diagnostic-only ack contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          push=Path('afz-openai-agent/Push-Deploy-Watcher.ps1').read_text()
+          update=Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1').read_text()
+          install=Path('afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1').read_text()
+          start=Path('afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1').read_text()
+
+          task='AFZ OpenAI Agent Push Deploy Watcher'
+          ack='AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
+          purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
+
+          assert task in update
+          assert 'Register-ScheduledTask -TaskName $pushWatcherTaskName' in update
+          assert 'Ensure-Running $pushWatcherTaskName $false' in update
+          assert task in install
+          assert 'Register-ScheduledTask -TaskName $pushWatcherTask' in install
+          assert 'Start-ScheduledTask -TaskName $pushWatcherTask' in install
+          assert task in start
+          assert 'if(-not $pushTask -and (Test-Path $watcherSrc))' in start
+          assert task in push
+          assert ack in push and ack in update
+          assert purpose in push and purpose in update
+
+          # Diagnostic ack is write-only observability, never a control/request input.
+          for text in (push, update):
+            for line in text.splitlines():
+              if ack in line:
+                assert 'Get-Content' not in line
+          assert "controlPlane='github'" in push
+          assert "controlPlane='github'" in update
+
+          # No website deployment may be armed while the transport layer is repaired.
+          assert not Path('afz-openai-agent/requests/afz-site-deploy.json').exists()
+          print('FAST SIGNAL PERSISTENCE CONTRACT PASS')
+
+      - name: Validate exact-SHA signal publisher remains GitHub-only
+        shell: python
+        run: |
+          from pathlib import Path
+          y=Path('.github/workflows/afz-agent-fast-signal.yml').read_text()
+          assert "context.sha" in y
+          assert ".github/afz-agent-deploy-signal.txt" in y
+          assert "permissions:\n  contents: write" in y
+          assert 'OneDrive' not in y
+          assert 'SharePoint' not in y
+          print('SIGNAL PUBLISHER CONTRACT PASS')
