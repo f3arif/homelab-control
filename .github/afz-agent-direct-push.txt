@@ -1,3 +1,4 @@
 AFZ direct agent source recovery
-reason=website-r4-preactivation-transport-repair
-requested_at=2026-08-27T23:38:00-04:00
+reason=h3-request-watcher-one-shot-replay-fix
+target_parent=6972ef50b8c37ca9b4572c434c1bdc6779e717c1
+requested_at=2026-08-28T13:31:00-04:00
