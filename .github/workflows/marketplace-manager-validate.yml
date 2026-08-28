@@ -1,0 +1,53 @@
+name: Marketplace Manager Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/marketplace/**'
+      - 'afz-openai-agent/Bootstrap-Marketplace-Manager.ps1'
+      - 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1'
+      - 'afz-openai-agent/requests/marketplace-manager.json'
+      - '.github/workflows/marketplace-manager-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax and typed boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@('afz-openai-agent/Bootstrap-Marketplace-Manager.ps1','afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1')
+          foreach($f in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $f"}
+          }
+          $watch=Get-Content 'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1' -Raw
+          foreach($needle in @('marketplace-manager.json','install-validate-dryrun','Bootstrap-Marketplace-Manager.ps1')){if(-not $watch.Contains($needle)){throw "Marketplace typed boundary missing: $needle"}}
+      - name: Validate Python and dry-run behavior
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile afz-openai-agent/marketplace/marketplace_manager.py
+          $env:AFZ_MARKETPLACE_HOME=Join-Path $env:RUNNER_TEMP 'marketplace-test'
+          python afz-openai-agent/marketplace/marketplace_manager.py init | Out-Null
+          $status=python afz-openai-agent/marketplace/marketplace_manager.py status | ConvertFrom-Json
+          if(-not $status.ok -or $status.active_listings -ne 0 -or $status.pending_actions -ne 0){throw 'Initial Marketplace status invalid'}
+          $csv=Join-Path $env:RUNNER_TEMP 'listings.csv'
+          @'
+url,title,description,price,posted_at,messages_count,locked
+https://example.invalid/1,Old Item,Test,100,2026-07-01T00:00:00Z,0,0
+https://example.invalid/2,Messaged Item,Test,100,2026-07-01T00:00:00Z,2,0
+'@ | Set-Content -LiteralPath $csv -Encoding UTF8
+          python afz-openai-agent/marketplace/marketplace_manager.py import-csv $csv | Out-Null
+          $audit=python afz-openai-agent/marketplace/marketplace_manager.py audit --queue | ConvertFrom-Json
+          if($audit.queued -ne 3){throw "Expected 3 queued dry-run actions for stale unmessaged listing; got $($audit.queued)"}
+          $s=python afz-openai-agent/marketplace/marketplace_manager.py status | ConvertFrom-Json
+          if($s.active_listings -ne 2 -or $s.pending_actions -ne 3 -or $s.held_listings -ne 1){throw 'Marketplace smoke-test counts invalid'}
