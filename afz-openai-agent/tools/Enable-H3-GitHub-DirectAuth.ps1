@@ -48,15 +48,16 @@ if($auth.ExitCode -ne 0){
   $auth=Invoke-GhQuiet -Arguments @('auth','status','--hostname','github.com')
   if($auth.ExitCode -ne 0){throw 'GitHub CLI login returned success but auth status still failed.'}
 }
-$setup=Invoke-GhQuiet -Arguments @('auth','setup-git')
-if($setup.ExitCode -ne 0){throw "gh auth setup-git failed exit=$($setup.ExitCode)"}
 $perm=Invoke-GhQuiet -Arguments @('api',"repos/$repo",'--jq','.permissions.push')
 $permText=([string]($perm.Output -join "`n")).Trim().ToLowerInvariant()
 if($perm.ExitCode -ne 0 -or $permText -ne 'true'){throw 'Authenticated GitHub identity does not have push permission to f3arif/homelab-control.'}
+$setup=Invoke-GhQuiet -Arguments @('auth','setup-git')
+$gitSetup=($setup.ExitCode -eq 0)
+if(-not $gitSetup){Write-Warning 'gh auth setup-git failed. Continuing because authenticated GitHub API/issue-comment reporting is the primary direct-H3 return channel; result-branch push remains best-effort.'}
 $t=Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
 if(-not $t){throw "Scheduled task not found: $task"}
 try{Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue}catch{}
 Start-ScheduledTask -TaskName $task
 Start-Sleep -Seconds 3
 $t=Get-ScheduledTask -TaskName $task
-[pscustomobject]@{ok=$true;host=$env:COMPUTERNAME;github='authenticated';repoPush=$true;ghPath=$gh;task=$task;taskState=[string]$t.State}|ConvertTo-Json -Compress
+[pscustomobject]@{ok=$true;host=$env:COMPUTERNAME;github='authenticated';repoPush=$true;gitSetup=$gitSetup;primaryReturn='gh-issue-comment';ghPath=$gh;task=$task;taskState=[string]$t.State}|ConvertTo-Json -Compress
