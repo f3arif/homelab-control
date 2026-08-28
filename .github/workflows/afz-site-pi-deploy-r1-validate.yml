@@ -5,6 +5,7 @@ on:
     branches:
       - fix/afz-site-cutover-r3-carrier
       - stage/afz-site-cutover-r4
+      - activate/afz-site-cutover-r4
   pull_request:
     branches:
       - main
@@ -42,23 +43,31 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate staged R4 request and carrier safety contract
+      - name: Validate staged/active R4 request and carrier safety contract
         shell: python
         run: |
           import json
           from pathlib import Path
-          active=Path('afz-openai-agent/requests/afz-site-deploy.json')
-          assert not active.exists(), 'Active deployment request must remain absent during R4 staging'
-          req=json.loads(Path('afz-openai-agent/requests/afz-site-deploy-next.json').read_text())
-          assert req == {
+
+          expected_base={
             'schema':1,
             'project':'afz-website',
             'action':'deploy-pi-static-site',
             'job_id':'afz-site-git-cutover-r4-20260827T2330',
             'source_repository':'f3arif/afz-engineering',
-            'expected_sha':'c38576741ce2d379723fde038300363429845656',
-            'status':'staged-not-active'
+            'expected_sha':'c38576741ce2d379723fde038300363429845656'
           }
+          staged=json.loads(Path('afz-openai-agent/requests/afz-site-deploy-next.json').read_text())
+          assert staged == {**expected_base,'status':'staged-not-active'}
+
+          active=Path('afz-openai-agent/requests/afz-site-deploy.json')
+          if active.exists():
+            active_req=json.loads(active.read_text())
+            assert active_req == {**expected_base,'status':'active'}
+            print('R4 ACTIVE REQUEST CONTRACT PASS')
+          else:
+            print('R4 STAGED-NOT-ACTIVE CONTRACT PASS')
+
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           watcher=Path('afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1').read_text()
           updater=Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1').read_text()
@@ -108,12 +117,12 @@ jobs:
             "Set-ScheduledTask -TaskName $carrierTaskName -Action $newAction",
             "Start-ScheduledTask -TaskName $carrierTaskName",
             "if($legacy -and $legacy.State -eq 'Running')",
-            "if($carrier -and $carrier.State -eq 'Running')"
+            "if($carrier -and $carrier.State -eq 'Running')",
+            "source_repository -ne 'f3arif/afz-engineering'"
           ]
           for marker in required_watcher: assert marker in watcher, marker
           assert "Set-ScheduledTask -TaskName $legacySiteTaskName -Action $newAction" not in watcher
           assert "Disable-ScheduledTask -TaskName $carrierTaskName | Out-Null\n      Save-State" not in watcher
-          assert "source_repository -ne 'f3arif/afz-engineering'" in watcher
           assert "AFZ Website Git Deploy Request Watcher" in updater
           print('R4 CARRIER + ARCHIVE CONTRACT PASS')
 
@@ -132,7 +141,7 @@ jobs:
         shell: bash
         run: bash -n /tmp/afz-site-deploy.sh
 
-      - name: Verify staged AFZ production commit and guard
+      - name: Verify AFZ production commit and guard
         shell: bash
         run: |
           set -euo pipefail
