@@ -3,6 +3,7 @@
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
   [string]$ProfileRoot='C:\AFZ\MarketplaceBrowserProfile',
+  [string]$RuntimeRoot='C:\AFZ\MarketplaceManager',
   [int]$DebugPort=9222
 )
 $ErrorActionPreference='Stop'
@@ -17,18 +18,51 @@ $loginHelper=Join-Path $marketRoot 'marketplace_browser_login.py'
 if(-not(Test-Path -LiteralPath $launcher)){throw "Marketplace browser launcher missing: $launcher"}
 if(-not(Test-Path -LiteralPath $loginHelper)){throw "Marketplace login helper missing: $loginHelper"}
 
-$py=Get-Command python.exe -ErrorAction SilentlyContinue
-$pyArgsPrefix=@()
-if(-not $py){
-  $py=Get-Command py.exe -ErrorAction SilentlyContinue
-  if($py){$pyArgsPrefix=@('-3')}
+function Invoke-NativeCaptured([string]$File,[string[]]$Arguments){
+  $old=$ErrorActionPreference
+  try{
+    # Windows PowerShell promotes native stderr to ErrorRecord objects. Keep that from
+    # terminating this wrapper so we can inspect the native exit code cleanly.
+    $ErrorActionPreference='Continue'
+    $out=@(& $File @Arguments 2>&1)
+    $code=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$old}
+  [pscustomobject]@{ExitCode=$code;Text=([string]($out -join "`n"))}
 }
-if(-not $py){throw 'Python is not available on windows-main.'}
 
-# Confirm Playwright is importable before requesting any credential input.
-$checkArgs=@($pyArgsPrefix)+@('-c','import playwright')
-& $py.Source @checkArgs *> $null
-if($LASTEXITCODE -ne 0){throw 'Python Playwright is not installed for this user context.'}
+$basePy=Get-Command python.exe -ErrorAction SilentlyContinue
+$basePrefix=@()
+if(-not $basePy){
+  $basePy=Get-Command py.exe -ErrorAction SilentlyContinue
+  if($basePy){$basePrefix=@('-3')}
+}
+if(-not $basePy){throw 'Python is not available on windows-main.'}
+$basePyPath=if($basePy.Source){[string]$basePy.Source}else{[string]$basePy.Path}
+
+# Use a dedicated Marketplace virtual environment. This keeps Playwright out of the
+# system Python and avoids requiring the user to preinstall dependencies manually.
+$venvRoot=Join-Path $RuntimeRoot 'venv'
+$venvPy=Join-Path $venvRoot 'Scripts\python.exe'
+if(-not(Test-Path -LiteralPath $venvPy -PathType Leaf)){
+  New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
+  Write-Host 'Preparing isolated Marketplace Python environment...'
+  $mkArgs=@($basePrefix)+@('-m','venv',$venvRoot)
+  $mk=Invoke-NativeCaptured $basePyPath $mkArgs
+  if($mk.ExitCode -ne 0 -or -not(Test-Path -LiteralPath $venvPy -PathType Leaf)){
+    throw "Could not create Marketplace Python environment. $($mk.Text.Trim())"
+  }
+}
+
+$check=Invoke-NativeCaptured $venvPy @('-c','import playwright')
+if($check.ExitCode -ne 0){
+  Write-Host 'Installing Playwright into the isolated Marketplace environment...'
+  $install=Invoke-NativeCaptured $venvPy @('-m','pip','install','--disable-pip-version-check','playwright>=1.48,<2')
+  if($install.ExitCode -ne 0){
+    throw "Could not install Playwright in the Marketplace environment. $($install.Text.Trim())"
+  }
+  $check=Invoke-NativeCaptured $venvPy @('-c','import playwright')
+  if($check.ExitCode -ne 0){throw 'Playwright installation completed but the import check still failed.'}
+}
 
 $cdp="http://127.0.0.1:$DebugPort"
 $browserUp=$false
@@ -37,8 +71,11 @@ try{
   $browserUp=($r.StatusCode -eq 200)
 }catch{}
 if(-not $browserUp){
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -ProfileRoot $ProfileRoot -DebugPort $DebugPort | Out-Null
-  $deadline=(Get-Date).AddSeconds(15)
+  $launcherArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$launcher,'-ProfileRoot',$ProfileRoot,'-DebugPort',[string]$DebugPort)
+  if(-not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION)){$launcherArgs += '-Headless'}
+  $launch=Invoke-NativeCaptured 'powershell.exe' $launcherArgs
+  if($launch.ExitCode -ne 0){throw "Dedicated Marketplace browser launch failed. $($launch.Text.Trim())"}
+  $deadline=(Get-Date).AddSeconds(20)
   do{
     Start-Sleep -Milliseconds 500
     try{
@@ -65,10 +102,9 @@ try{
   $payload=@{username=$username;password=$plain}|ConvertTo-Json -Compress
 
   $psi=New-Object Diagnostics.ProcessStartInfo
-  $psi.FileName=$py.Source
+  $psi.FileName=$venvPy
   $quotedHelper='"'+($loginHelper.Replace('"','\"'))+'"'
-  $prefix=if($pyArgsPrefix.Count){($pyArgsPrefix -join ' ')+' '}else{''}
-  $psi.Arguments=$prefix+$quotedHelper+' --cdp "'+$cdp+'"'
+  $psi.Arguments=$quotedHelper+' --cdp "'+$cdp+'"'
   $psi.UseShellExecute=$false
   $psi.CreateNoWindow=$true
   $psi.RedirectStandardInput=$true
@@ -97,8 +133,8 @@ try{
     exit 2
   }
   if($proc.ExitCode -ne 0){
-    if($stderr){Write-Error $stderr.Trim()}else{Write-Error "Marketplace authentication helper exited $($proc.ExitCode)"}
-    exit $proc.ExitCode
+    $safeError=if($stderr){$stderr.Trim()}else{"Marketplace authentication helper exited $($proc.ExitCode)"}
+    throw $safeError
   }
 }finally{
   $payload=$null;$plain=$null;$username=$null;$secure=$null
