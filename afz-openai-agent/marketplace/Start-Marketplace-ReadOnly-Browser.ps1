@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
   [string]$ProfileRoot='C:\AFZ\MarketplaceBrowserProfile',
-  [int]$DebugPort=9222
+  [int]$DebugPort=9222,
+  [switch]$Headless
 )
 $ErrorActionPreference='Stop'
 
@@ -29,17 +30,24 @@ $arguments=@(
   "--remote-debugging-port=$DebugPort",
   "--user-data-dir=$ProfileRoot",
   '--no-first-run',
-  '--no-default-browser-check',
-  'https://www.facebook.com/marketplace/you/selling'
+  '--no-default-browser-check'
 )
+if($Headless){
+  # OpenSSH sessions do not have an interactive Windows desktop. Headless mode allows
+  # the same dedicated profile/session to be authenticated securely from SSH.
+  $arguments += '--headless=new'
+  $arguments += '--disable-gpu'
+}
+$arguments += 'https://www.facebook.com/marketplace/you/selling'
 Start-Process -FilePath $browser -ArgumentList $arguments | Out-Null
 
 [ordered]@{
   ok=$true
-  mode='dedicated-marketplace-browser'
+  mode=$(if($Headless){'dedicated-marketplace-browser-headless'}else{'dedicated-marketplace-browser'})
   browser=$browser
   profileRoot=$ProfileRoot
   cdp="http://127.0.0.1:$DebugPort"
   cdpExposure='loopback-only'
+  headless=[bool]$Headless
   next='For SSH credential entry run Invoke-Marketplace-SSH-Login.ps1. For desktop use, manual sign-in remains allowed.'
 }|ConvertTo-Json -Compress
