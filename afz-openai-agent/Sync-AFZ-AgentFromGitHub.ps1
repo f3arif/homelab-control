@@ -12,6 +12,16 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent'
 $stateFile=Join-Path $stateRoot 'source-state.json'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 function Emit($o){$o|ConvertTo-Json -Depth 8 -Compress; exit 0}
+function Publish-SiteDeployAck {
+  # Emergency observability only. This helper is read-only except for its own ACK file,
+  # and failure to publish must never affect the GitHub source-sync control path.
+  try {
+    $publisher=Join-Path $InstallRoot 'afz-openai-agent\Publish-AFZ-WebsiteDeployAck.ps1'
+    if(Test-Path -LiteralPath $publisher -PathType Leaf){
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $publisher -InstallRoot $InstallRoot *> $null
+    }
+  } catch {}
+}
 $headers=@{
   'User-Agent'='AFZ-OpenAI-Agent-Updater'
   'Cache-Control'='no-cache'
@@ -36,7 +46,10 @@ if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
 $repoZip="https://codeload.github.com/f3arif/homelab-control/zip/$remoteSha"
 $localSha=$null
 if(Test-Path $stateFile){try{$localSha=[string]((Get-Content $stateFile -Raw|ConvertFrom-Json).remoteSha)}catch{}}
-if((-not $Force) -and $localSha -eq $remoteSha -and (Test-Path (Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'))){Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;installRoot=$InstallRoot;refTransport=$refTransport})}
+if((-not $Force) -and $localSha -eq $remoteSha -and (Test-Path (Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'))){
+  Publish-SiteDeployAck
+  Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;installRoot=$InstallRoot;refTransport=$refTransport})
+}
 $temp=Join-Path $env:TEMP ('AFZ-AgentSync-'+[guid]::NewGuid().ToString('n'))
 $zip=Join-Path $temp 'source.zip'
 $extract=Join-Path $temp 'extract'
@@ -120,6 +133,7 @@ try{
 
   $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
+  Publish-SiteDeployAck
   # Only agent-tree file changes require a service restart. A branch-head-only signal commit must not restart services.
   Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
