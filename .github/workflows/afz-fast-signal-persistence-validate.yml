@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - fix/afz-fast-signal-persistence
+      - fix/afz-direct-push-recovery
     paths:
       - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-agent-push-deploy.yml'
       - '.github/workflows/afz-fast-signal-persistence-validate.yml'
   pull_request:
     branches: [main]
@@ -17,6 +19,7 @@ on:
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-agent-push-deploy.yml'
       - '.github/workflows/afz-fast-signal-persistence-validate.yml'
 
 permissions:
@@ -95,3 +98,26 @@ jobs:
           assert 'OneDrive' not in y
           assert 'SharePoint' not in y
           print('SIGNAL PUBLISHER CONTRACT PASS')
+
+      - name: Validate direct Tailscale recovery contract
+        shell: python
+        run: |
+          from pathlib import Path
+          y=Path('.github/workflows/afz-agent-push-deploy.yml').read_text()
+          required=[
+            "'.github/afz-agent-direct-push.txt'",
+            'tailscale/github-action@v4',
+            'tags: tag:afz-deploy',
+            'http://100.70.25.8:8797/api/push-deploy',
+            '"repository":"f3arif/homelab-control"',
+            '"ref":"refs/heads/main"',
+            'http://100.70.25.8:8797/health',
+            'Windows-main exact source confirmed',
+            'cancel-in-progress: true'
+          ]
+          for marker in required:
+            assert marker in y, marker
+          assert 'OneDrive' not in y
+          assert 'SharePoint' not in y
+          assert 'afz-site-deploy.json' not in y
+          print('DIRECT PUSH RECOVERY CONTRACT PASS')

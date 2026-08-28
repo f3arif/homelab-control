@@ -1,11 +1,19 @@
-name: AFZ Agent Push Deploy (optional Tailscale OIDC)
+name: AFZ Agent Direct Push Recovery (Tailscale OIDC)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/afz-agent-direct-push.txt'
 
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: afz-agent-direct-push-recovery
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -19,7 +27,7 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Trigger exact-SHA deploy on Windows-main
+      - name: Trigger exact-SHA source sync on Windows-main
         env:
           AFZ_SHA: ${{ github.sha }}
         shell: bash
@@ -32,3 +40,27 @@ jobs:
             -X POST \
             --data "$payload" \
             http://100.70.25.8:8797/api/push-deploy
+
+      - name: Confirm Windows-main reached exact SHA
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            if health=$(curl --silent --show-error --fail \
+              --connect-timeout 3 --max-time 10 \
+              http://100.70.25.8:8797/health 2>/dev/null); then
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              if [ "$commit" = "${AFZ_SHA,,}" ]; then
+                echo "Windows-main exact source confirmed: $commit"
+                exit 0
+              fi
+              echo "Attempt $attempt: Windows-main source=$commit expected=${AFZ_SHA,,}"
+            else
+              echo "Attempt $attempt: control health unavailable"
+            fi
+            sleep 5
+          done
+          echo "Windows-main did not confirm exact source SHA within bounded recovery window" >&2
+          exit 1
