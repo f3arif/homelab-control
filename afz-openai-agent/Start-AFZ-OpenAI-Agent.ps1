@@ -60,8 +60,12 @@ $runtimeTools=Join-Path $runtimeRoot 'tools'
 if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
 Copy-Item -LiteralPath $toolsSrc -Destination $runtimeTools -Recurse -Force
 
-# Start the secretless fast GitHub deploy watcher. Its global mutex prevents duplicates.
-if(Test-Path $watcherSrc){
+# Fast signal watcher is normally owned by its independent SYSTEM Scheduled Task.
+# Keep a compatibility fallback only for hosts that have not yet received the
+# persistent-task updater repair. The global mutex still prevents duplicates.
+$pushTaskName='AFZ OpenAI Agent Push Deploy Watcher'
+$pushTask=Get-ScheduledTask -TaskName $pushTaskName -ErrorAction SilentlyContinue
+if(-not $pushTask -and (Test-Path $watcherSrc)){
   $watchArgs="-NoProfile -ExecutionPolicy Bypass -File `"$watcherSrc`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 3"
   Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 }
