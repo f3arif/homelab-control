@@ -77,7 +77,7 @@ function Select-PiEndpoint {
       return
     }
     $detail=$(if($r.TimedOut){'timeout'}else{"exit=$($r.ExitCode) stderr=$(([string]$r.StdErr).Trim())"})
-    $errors.Add("$route:$detail")
+    $errors.Add("${route}:$detail")
   }
   throw ('No bounded Pi SSH endpoint succeeded. '+($errors -join ' | '))
 }
