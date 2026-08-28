@@ -1,5 +1,4 @@
 #Requires -Version 5.1
-Set-StrictMode -Version 2.0
 
 function ConvertTo-AFZWindowsCommandLineArgument {
   [CmdletBinding()]
