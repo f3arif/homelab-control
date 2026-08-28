@@ -46,14 +46,16 @@ function Save-Result([bool]$Ok,[string]$Status,[string]$Message,[hashtable]$Extr
   foreach($k in $Extra.Keys){$o[$k]=$Extra[$k]}
   $o|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $ResultFile -Encoding UTF8
 }
-function Invoke-External([string]$Exe,[string[]]$Args,[string]$Failure){
-  & $Exe @Args
+function Invoke-External([string]$Exe,[string[]]$ArgumentList,[string]$Failure){
+  & $Exe @ArgumentList
   if($LASTEXITCODE -ne 0){throw "$Failure Exit code: $LASTEXITCODE"}
 }
 function Invoke-Ssh([string]$Command,[string]$Failure){
   Invoke-External 'ssh.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new',$Pi,$Command) $Failure
 }
-function Invoke-Tar([string[]]$Args){
+function Invoke-Tar([string[]]$TarArguments){
+  # Do not name this parameter Args: $args is an automatic PowerShell variable and
+  # using that name silently discards the bound native argument list in Windows PowerShell 5.1.
   # Windows tar can emit benign stderr. Capture it explicitly so PowerShell 5.1
   # does not convert native stderr into a terminating NativeCommandError before
   # we can inspect the real process exit code.
@@ -62,7 +64,7 @@ function Invoke-Tar([string[]]$Args){
   $old=$ErrorActionPreference
   try{
     $ErrorActionPreference='Continue'
-    & tar.exe @Args 1>$stdout 2>$stderr
+    & tar.exe @TarArguments 1>$stdout 2>$stderr
     $code=$LASTEXITCODE
   }finally{
     $ErrorActionPreference=$old
