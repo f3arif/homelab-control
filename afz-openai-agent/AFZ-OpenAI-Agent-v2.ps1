@@ -335,6 +335,10 @@ function Get-ResponseText {
   return ($parts -join "`n")
 }
 
+$ProspectEngineModule = Join-Path $AgentRoot 'prospect-engine\ProspectEngine.ps1'
+if (-not (Test-Path -LiteralPath $ProspectEngineModule -PathType Leaf)) { throw "Prospect Engine module missing: $ProspectEngineModule" }
+. $ProspectEngineModule
+
 $AgentInstructions = @'
 You are the AFZ private operations agent running beside Windows-main. Use the typed tools to inspect live state; tool results are authoritative. Do not say a file, backup, database, service, or Jellyfin view is unavailable until you have tried an applicable read-only tool. Never request or expose passwords, API keys, authentication tokens, cookies, credentials, or secrets. The v1 registry is deliberately read-only. Do not imply a mutation was executed. For Jellyfin/TorBox regressions, prefer jellyfin_regression_forensic and jellyfin_user_views, then use the allowlisted file tools for targeted follow-up. Preserve media, databases, library IDs, services, and active work. If a mutation is required, identify the exact minimal reversible change and return APPROVAL_REQUIRED with the evidence. Do not use OneDrive or SharePoint as an execution or state bus.
 '@
@@ -407,7 +411,7 @@ $listener = New-Object Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 if ($BindHost -and $BindHost -ne '127.0.0.1') { $listener.Prefixes.Add("http://$BindHost`:$Port/") }
 $listener.Start()
-Write-AgentLog "START version=1.1.0 port=$Port bind=$BindHost"
+Write-AgentLog "START version=2.0.0 port=$Port bind=$BindHost prospectEngine=enabled"
 
 try {
   while ($listener.IsListening) {
@@ -423,7 +427,8 @@ try {
       }
       if ($path -eq '/health') {
         Send-Json $ctx 200 [ordered]@{
-          ok=$true;service='AFZ-OpenAI-Agent';version='1.1.0';mode='typed-readonly';onedriveRequired=$false
+          ok=$true;service='AFZ-OpenAI-Agent';version='2.0.0';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
+          prospectEngine='/prospects';prospectPersistence='server-local';outlookSendEnabled=$false
           modelLuna=$ModelLuna;modelSol=$ModelSol;time=(Get-Date -Format o)
         }
         continue
@@ -458,6 +463,7 @@ try {
         else { Send-Json $ctx 404 @{ok=$false;state='UNKNOWN';error='request id not found'} }
         continue
       }
+      if (Invoke-ProspectEngineRoute $ctx $path) { continue }
       Send-Json $ctx 404 @{ok=$false;error='not found'}
     } catch {
       try { Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message} } catch {}

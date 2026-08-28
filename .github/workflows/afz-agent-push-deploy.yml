@@ -64,3 +64,22 @@ jobs:
           done
           echo "Windows-main did not confirm exact source SHA within bounded recovery window" >&2
           exit 1
+
+      - name: Confirm Prospect Engine is healthy and draft-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            if health=$(curl --silent --show-error --fail \
+              --connect-timeout 3 --max-time 15 \
+              http://100.70.25.8:8797/health 2>/dev/null); then
+              if python -c 'import json,sys; p=json.load(sys.stdin).get("prospectEngine") or {}; assert p.get("ok") is True; assert p.get("version")=="2.0.0"; assert p.get("route")=="/prospects"; assert p.get("serverStore")=="server-local"; assert p.get("outlookSendEnabled") is False' <<<"$health"; then
+                echo "AFZ Prospect Engine is healthy, server-backed, and draft-only"
+                exit 0
+              fi
+            fi
+            echo "Attempt $attempt: Prospect Engine not healthy yet"
+            sleep 5
+          done
+          echo "AFZ Prospect Engine did not become healthy within the bounded deployment window" >&2
+          exit 1

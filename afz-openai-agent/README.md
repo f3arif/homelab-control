@@ -68,6 +68,14 @@ Open:
 http://127.0.0.1:8796/
 ```
 
+AFZ Prospect Engine:
+
+```text
+http://127.0.0.1:8796/prospects
+```
+
+The Prospect Engine searches and verifies public Ontario business websites, stores leads and edited drafts under `C:\ProgramData\AFZ\ProspectEngine`, and can create explicitly reviewed Outlook drafts through delegated Microsoft Graph access. It has no email-send endpoint and does not use OneDrive/SharePoint for runtime state.
+
 Then requests can be as short as:
 
 ```text

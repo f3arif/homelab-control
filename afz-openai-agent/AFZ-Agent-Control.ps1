@@ -31,6 +31,19 @@ function Get-Commit{if(Test-Path $sourceState){try{return [string]((Get-Content 
 function Get-LastUpdate{if(Test-Path $updateState){try{return Get-Content $updateState -Raw|ConvertFrom-Json}catch{}};return $null}
 function Get-WatcherState{if(Test-Path $watchState){try{return Get-Content $watchState -Raw|ConvertFrom-Json}catch{}};return $null}
 function Get-BenchmarkState{if(Test-Path $benchmarkState){try{return Get-Content $benchmarkState -Raw|ConvertFrom-Json}catch{}};return $null}
+function Get-ProspectEngineHealth{
+  try{
+    $health=Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8796/health' -TimeoutSec 8
+    $ui=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8796/prospects' -TimeoutSec 8
+    $store=Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8796/api/prospects' -TimeoutSec 8
+    return [ordered]@{
+      ok=([bool]$health.ok -and [string]$health.version -eq '2.0.0' -and [int]$ui.StatusCode -eq 200 -and [bool]$store.ok)
+      version=[string]$health.version;route=[string]$health.prospectEngine;uiStatus=[int]$ui.StatusCode
+      serverStore=[string]$health.prospectPersistence;outlookSendEnabled=[bool]$health.outlookSendEnabled
+      leadCount=$(if($store.store -and $store.store.leads){@($store.store.leads).Count}else{0})
+    }
+  }catch{return [ordered]@{ok=$false;error=$_.Exception.Message}}
+}
 function Get-TailscaleCli{
   $c=Get-Command tailscale.exe -ErrorAction SilentlyContinue | Select-Object -First 1
   if($c){if($c.Source){return [string]$c.Source};if($c.Path){return [string]$c.Path}}
@@ -65,7 +78,7 @@ function Start-H3QwenBenchmark([string]$jobId,[int]$startIteration,[int]$maxIter
   return [ordered]@{ok=$true;state='STARTED';job=$queued}
 }
 
-$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.5.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed"
+$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.6.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed prospectEngineProbe=enabled"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
@@ -98,8 +111,8 @@ try{
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark execution is available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
 '@;Send-Html $ctx $html;continue}
     if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){
-      $u=Get-LastUpdate;$w=Get-WatcherState;$b=Get-BenchmarkState;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
-      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.5.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});h3QwenBenchmark=$(if($b){$b}else{$null});time=(Get-Date -Format o)};continue
+      $u=Get-LastUpdate;$w=Get-WatcherState;$b=Get-BenchmarkState;$p=Get-ProspectEngineHealth;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
+      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.6.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});time=(Get-Date -Format o)};continue
     }
     if($path -eq '/api/update-now' -and $ctx.Request.HttpMethod -eq 'POST'){$r=Start-Update;Log "fallback update requested by $ip";Send-Json $ctx 202 $r;continue}
     if($path -eq '/api/control' -and $ctx.Request.HttpMethod -eq 'POST'){$req=Read-Json $ctx;$action=[string]$req.action;if($action -notin @('update-agent','update-openai-agent','pull-agent-now')){Send-Json $ctx 400 @{ok=$false;error='unsupported action'};continue};$r=Start-Update;Log "control action=$action requested by $ip";Send-Json $ctx 202 $r;continue}

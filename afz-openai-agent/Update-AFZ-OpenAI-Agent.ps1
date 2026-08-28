@@ -79,7 +79,9 @@ try{
   $benchmarkRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\H3-Qwen27B-Request-Watcher.ps1'
   $siteDeployRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Site-Deploy-Request-Watcher.ps1'
   $siteDeployExecutor=Join-Path $InstallRoot 'afz-openai-agent\Deploy-AFZ-WebsiteToPi.ps1'
-  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
+  $prospectModule=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\ProspectEngine.ps1'
+  $prospectUi=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\index.html'
+  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
   $ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
   if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}

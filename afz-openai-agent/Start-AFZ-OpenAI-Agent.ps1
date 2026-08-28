@@ -11,6 +11,7 @@ $src=Join-Path $sourceRoot 'AFZ-OpenAI-Agent-v2.ps1'
 $allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
 $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
+$prospectSrc=Join-Path $sourceRoot 'prospect-engine'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
@@ -18,6 +19,7 @@ $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
 if(-not(Test-Path $uiSrc)){throw "Agent UI missing: $uiSrc"}
 if(-not(Test-Path $toolsSrc)){throw "Agent tools directory missing: $toolsSrc"}
+if(-not(Test-Path $prospectSrc)){throw "Prospect Engine directory missing: $prospectSrc"}
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $ips=@()
 if(Test-Path $allowFile){
@@ -59,6 +61,9 @@ Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI
 $runtimeTools=Join-Path $runtimeRoot 'tools'
 if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
 Copy-Item -LiteralPath $toolsSrc -Destination $runtimeTools -Recurse -Force
+$runtimeProspect=Join-Path $runtimeRoot 'prospect-engine'
+if(Test-Path $runtimeProspect){Remove-Item -LiteralPath $runtimeProspect -Recurse -Force}
+Copy-Item -LiteralPath $prospectSrc -Destination $runtimeProspect -Recurse -Force
 
 # Fast signal watcher is normally owned by its independent SYSTEM Scheduled Task.
 # Keep a compatibility fallback only for hosts that have not yet received the
