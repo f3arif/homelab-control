@@ -88,8 +88,38 @@ try{
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
   }
 
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';refTransport=$refTransport}
+  # One-shot transport-state migration for the Ridge16K job. The model job id is
+  # intentionally unchanged. A recovery generation may clear only a terminal
+  # pre-launch watcher failure once; the marker prevents replay on later syncs.
+  $ridgeRecoveryReset=$false
+  $ridgeRequest=Join-Path $dst 'requests\h3-qwenridge16k-website-test.json'
+  if(Test-Path -LiteralPath $ridgeRequest -PathType Leaf){
+    try{
+      $rr=Get-Content -LiteralPath $ridgeRequest -Raw|ConvertFrom-Json
+      $generation=0
+      if($rr.PSObject.Properties.Name -contains 'recovery_generation'){$generation=[int]$rr.recovery_generation}
+      if($generation -gt 0 -and ([string]$rr.job_id) -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){
+        $ridgeStateRoot=Join-Path $stateRoot 'jobs\h3-qwenridge16k-request'
+        New-Item -ItemType Directory -Force -Path $ridgeStateRoot|Out-Null
+        $ridgeWatch=Join-Path $ridgeStateRoot 'request-watcher.json'
+        $marker=Join-Path $ridgeStateRoot ("transport-recovery-g$generation-"+[string]$rr.job_id+'.applied')
+        if(-not(Test-Path -LiteralPath $marker)){
+          $prior=$null
+          if(Test-Path -LiteralPath $ridgeWatch){try{$prior=Get-Content -LiteralPath $ridgeWatch -Raw|ConvertFrom-Json}catch{}}
+          if($prior -and [string]$prior.jobId -eq [string]$rr.job_id -and [string]$prior.status -in @('failed','error')){
+            Remove-Item -LiteralPath $ridgeWatch -Force
+            $ridgeRecoveryReset=$true
+          }
+          if(-not $prior -or [string]$prior.jobId -eq [string]$rr.job_id){
+            Set-Content -LiteralPath $marker -Value ("job="+[string]$rr.job_id+" generation=$generation source=$remoteSha reset=$ridgeRecoveryReset time="+(Get-Date -Format o)) -Encoding ASCII
+          }
+        }
+      }
+    }catch{throw "Ridge16K transport recovery migration failed: $($_.Exception.Message)"}
+  }
+
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   # Only agent-tree file changes require a service restart. A branch-head-only signal commit must not restart services.
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
