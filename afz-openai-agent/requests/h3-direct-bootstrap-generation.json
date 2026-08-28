@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "purpose": "force-exact-sha-bootstrap-generation",
+  "target": "DESKTOP-H3R6CQN",
+  "lane": "h3-direct-github-benchmark",
+  "benchmark_job_id": "qwen27b-website-20260827-i02",
+  "generation": 1,
+  "note": "Forces windows-main exact-SHA sync to reinstall/start the H3-local direct GitHub watcher. Does not create or duplicate a benchmark job."
+}
