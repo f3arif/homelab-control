@@ -13,10 +13,19 @@ $bootstrapState='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-github-direct-bootstrap\
 $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-direct-bootstrap-generation.json'
 $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-GitHub-DirectBenchmark.ps1'
 $logFile=Join-Path $stateRoot 'latest.log'
+$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$diagFile=Join-Path $diagRoot 'H3-DIRECT-RETURN-GENERATION-LATEST.json'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Write-State($Object){[IO.File]::WriteAllText($stateFile,($Object|ConvertTo-Json -Depth 12 -Compress),$utf8)}
-function Emit($Object){Write-Output ($Object|ConvertTo-Json -Depth 12 -Compress);exit 0}
+function Publish-Diagnostic($Object){
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    $d=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github';observedAt=(Get-Date -Format o);state=$Object}
+    [IO.File]::WriteAllText($diagFile,($d|ConvertTo-Json -Depth 20 -Compress),$utf8)
+  }catch{}
+}
+function Emit($Object){Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 12 -Compress);exit 0}
 function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $null}}
 
 $generation=0
@@ -33,7 +42,7 @@ try{
 
   $prior=Read-Json $stateFile
   if($prior -and [int]$prior.generation -ge $generation){
-    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha})
+    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior})
   }
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){throw "Return bootstrap missing: $bootstrap"}
   $text=Get-Content -LiteralPath $bootstrap -Raw
