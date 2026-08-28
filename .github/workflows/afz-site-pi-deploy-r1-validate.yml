@@ -92,7 +92,10 @@ jobs:
             "Pi contact begins only after local archive creation + integrity verification passes."
           ]
           for marker in required_core: assert marker in core, marker
-          assert core.index('New-VerifiedProductionArchive $repoRoot.FullName $Archive') < core.index('Select-PiEndpoint'), 'Pi contact must follow local archive verification'
+          archive_call='New-VerifiedProductionArchive $repoRoot.FullName $Archive'
+          archive_pos=core.index(archive_call)
+          deploy_select=core.index('\n  Select-PiEndpoint\n', archive_pos)
+          assert archive_pos < deploy_select, 'Pi contact must follow local archive verification'
           assert "Invoke-External 'ssh.exe'" not in core
           assert "Invoke-External 'scp.exe'" not in core
           assert '[string[]]$Args' not in core
