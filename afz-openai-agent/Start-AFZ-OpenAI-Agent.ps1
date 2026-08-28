@@ -12,7 +12,6 @@ $allowFile=Join-Path $sourceRoot 'allowed-clients.txt'
 $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
-$familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -66,13 +65,9 @@ if(Test-Path $watcherSrc){
   Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 }
 
-# FamilyPTT uses the reverse-pull pattern: Windows-main consumes the exact-SHA GitHub
-# typed request locally, audits the private tailnet path, and publishes only sanitized
-# result evidence. No GitHub Actions -> tailnet credential is required for this lane.
-if(Test-Path $familyPttAuditWatcher){
-  $familyPttArgs="-NoProfile -ExecutionPolicy Bypass -File `"$familyPttAuditWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
-  Start-Process -FilePath 'powershell.exe' -ArgumentList $familyPttArgs -WindowStyle Hidden | Out-Null
-}
+# FamilyPTT transport audit is owned by its dedicated scheduled task, installed by
+# Update-AFZ-OpenAI-Agent.ps1. Keeping it out of the agent child-process tree gives
+# the lane independent restart/health semantics while the global mutex prevents overlap.
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runtime -Port $Port -BindHost $BindHost
