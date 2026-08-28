@@ -35,13 +35,13 @@ $probe=& $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChec
 if($LASTEXITCODE -ne 0){throw "H3 SSH preflight failed after ACL restore: $($probe|Out-String)"}
 if((($probe|Out-String).Trim()) -notmatch 'DESKTOP-H3R6CQN'){throw "H3 SSH preflight reached unexpected host: $($probe|Out-String)"}
 
-$uri="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/Bootstrap-H3-GitHub-DirectReturnV3.ps1"
-$tmp=Join-Path $env:TEMP ('AFZ-H3-ReturnV3-'+$ExpectedSha+'.ps1')
+$uri="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/Bootstrap-H3-GitHub-DirectReturnV4.ps1"
+$tmp=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-'+$ExpectedSha+'.ps1')
 try{
-  Invoke-WebRequest -Uri $uri -OutFile $tmp -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-ExactSha-ReturnV3'} -TimeoutSec 60
+  Invoke-WebRequest -Uri $uri -OutFile $tmp -UseBasicParsing -Headers @{'User-Agent'='AFZ-H3-ExactSha-ReturnV4'} -TimeoutSec 60
   $tokens=$null;$errors=$null
   [void][System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)
-  if($errors.Count -gt 0){throw ('Return V3 bootstrap parse failure: '+($errors.Message -join '; '))}
+  if($errors.Count -gt 0){throw ('Return V4 bootstrap parse failure: '+($errors.Message -join '; '))}
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmp -ExpectedSha $ExpectedSha -InstallRoot $InstallRoot
   exit $LASTEXITCODE
 }finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
