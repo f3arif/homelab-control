@@ -14,6 +14,8 @@ $status=Join-Path $stateRoot 'latest.json'
 $githubLog=Join-Path $stateRoot 'github-post.log'
 $controlRepo='f3arif/faiz-homelab'
 $controlIssue=15
+$emergencyDir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$emergencyAck=Join-Path $emergencyDir 'AFZ-MARKETPLACE-WORKER-ACK-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot,$appRoot | Out-Null
 
 function Save([string]$State,[string]$Message,[hashtable]$Extra=@{}){
@@ -49,6 +51,25 @@ function Post-Github([string]$Kind,[string]$Body){
     return $false
   }
 }
+function Write-EmergencyAck([string]$State,[bool]$GithubPosted,[string]$Message){
+  # Emergency observability only. Never read as request, authority, approval, or listing state.
+  try{
+    if(-not(Test-Path -LiteralPath $emergencyDir -PathType Container)){return}
+    $safeMessage=($Message -replace '[\r\n]+',' ')
+    $lines=@(
+      'AFZ_MARKETPLACE_EMERGENCY_OBSERVABILITY_ONLY',
+      'PROJECT=marketplace-manager',
+      "JOB_ID=$JobId",
+      "STATUS=$State",
+      "EXPECTED_SHA=$ExpectedSha",
+      "HOST=$env:COMPUTERNAME",
+      "GITHUB_POST_OK=$($GithubPosted.ToString().ToLowerInvariant())",
+      "MESSAGE=$safeMessage",
+      "UPDATED_AT=$(Get-Date -Format o)"
+    )
+    [IO.File]::WriteAllText($emergencyAck,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
+  }catch{}
+}
 
 try{
   if($JobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid JobId'}
@@ -72,11 +93,14 @@ try{
   }
   if($LASTEXITCODE -ne 0){throw 'Marketplace Manager status smoke test failed'}
   $parsed=$raw|ConvertFrom-Json
-  $result=Save 'completed' 'Marketplace Manager installed and dry-run core validated; no Facebook listing was changed.' @{appRoot=$appRoot;activeListings=[int]$parsed.active_listings;pendingActions=[int]$parsed.pending_actions;mode='install-validate-dryrun'}
-  [void](Post-Github 'RESULT' "Marketplace Manager job $JobId completed on $($result.host): install/validate PASS; active_listings=$($result.activeListings); pending_actions=$($result.pendingActions); mode=$($result.mode); source=$ExpectedSha. No Facebook listing was changed.")
+  $message='Marketplace Manager installed and dry-run core validated; no Facebook listing was changed.'
+  $result=Save 'completed' $message @{appRoot=$appRoot;activeListings=[int]$parsed.active_listings;pendingActions=[int]$parsed.pending_actions;mode='install-validate-dryrun'}
+  $posted=[bool](Post-Github 'RESULT' "Marketplace Manager job $JobId completed on $($result.host): install/validate PASS; active_listings=$($result.activeListings); pending_actions=$($result.pendingActions); mode=$($result.mode); source=$ExpectedSha. No Facebook listing was changed.")
+  Write-EmergencyAck 'completed' $posted $message
 }catch{
   $msg=$_.Exception.Message
   try{[void](Save 'failed' $msg)}catch{}
-  [void](Post-Github 'BLOCKED' "Marketplace Manager job $JobId failed during install/validate on $env:COMPUTERNAME. Reason: $msg. No Facebook listing was changed.")
+  $posted=[bool](Post-Github 'BLOCKED' "Marketplace Manager job $JobId failed during install/validate on $env:COMPUTERNAME. Reason: $msg. No Facebook listing was changed.")
+  Write-EmergencyAck 'failed' $posted $msg
   throw
 }
