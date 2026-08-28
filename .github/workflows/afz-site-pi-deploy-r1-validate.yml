@@ -1,9 +1,9 @@
-name: AFZ Website Pi Deploy R1 Validate
+name: AFZ Website Pi Deploy Validate
 
 on:
   push:
     branches:
-      - feature/afz-site-pi-deploy-r1
+      - fix/afz-site-cutover-r2
   pull_request:
     branches:
       - main
@@ -11,7 +11,7 @@ on:
       - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi*.ps1'
       - 'afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
-      - 'afz-openai-agent/requests/afz-site-deploy.json'
+      - 'afz-openai-agent/requests/afz-site-deploy*.json'
       - '.github/workflows/afz-site-pi-deploy-r1-validate.yml'
 
 permissions:
@@ -41,42 +41,49 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate typed request and fixed safety contract
+      - name: Validate staged R2 request and fixed safety contract
         shell: python
         run: |
           import json
           from pathlib import Path
-          req=json.loads(Path('afz-openai-agent/requests/afz-site-deploy.json').read_text())
+          active=Path('afz-openai-agent/requests/afz-site-deploy.json')
+          assert not active.exists(), 'R1 active request must remain retired during R2 staging'
+          req=json.loads(Path('afz-openai-agent/requests/afz-site-deploy-next.json').read_text())
           assert req == {
             'schema':1,
             'project':'afz-website',
             'action':'deploy-pi-static-site',
-            'job_id':'afz-site-git-cutover-20260827T2105',
+            'job_id':'afz-site-git-cutover-r2-20260827T2128',
             'source_repository':'f3arif/afz-engineering',
-            'expected_sha':'c38576741ce2d379723fde038300363429845656'
+            'expected_sha':'c38576741ce2d379723fde038300363429845656',
+            'status':'staged-not-active'
           }
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           watcher=Path('afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1').read_text()
           updater=Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1').read_text()
           required_core=[
-            "https://github.com/f3arif/afz-engineering.git",
+            'https://codeload.github.com/f3arif/afz-engineering/zip/',
             "coolyo@192.168.50.68",
+            "C:\\Users\\Faiz\\.ssh\\afz_pi_sync",
+            "C:\\Users\\Faiz\\AppData\\Local\\AFZ\\WebsiteGitDeploy",
             "/opt/edge/afz-site/html",
-            "afz_pi_sync",
             "deleteExtraneousFiles",
             "hpenvy",
             "/api/ai-chat",
             "rollback.sh",
-            "afz-git-deploy.json"
+            "afz-git-deploy.json",
+            "AFZ CHAT SESSION PERSISTENCE",
+            "AFZ AI PROJECT QUESTION PREFILL",
+            "Do you provide HVAC design?"
           ]
           for marker in required_core: assert marker in core, marker
+          assert 'git.exe' not in core
+          assert 'node.exe' not in core
+          assert "$env:USERPROFILE '.ssh" not in core
           assert "source_repository -ne 'f3arif/afz-engineering'" in watcher
           assert "legacyTaskName='AFZ Website Sync to Pi'" in watcher
           assert "AFZ Website Git Deploy Request Watcher" in updater
-          assert "AFZ-Site-Deploy-Request-Watcher.ps1" in updater
-          assert "AFZ CHAT SESSION PERSISTENCE" in core
-          assert "Do you provide HVAC design?" in core
-          print('FIXED CONTRACT PASS')
+          print('R2 FIXED CONTRACT PASS')
 
       - name: Syntax-check embedded Pi Bash
         shell: python
@@ -93,11 +100,11 @@ jobs:
         shell: bash
         run: bash -n /tmp/afz-site-deploy.sh
 
-      - name: Verify requested AFZ production commit and guard
+      - name: Verify staged AFZ production commit and guard
         shell: bash
         run: |
           set -euo pipefail
-          sha=$(python -c "import json;print(json.load(open('afz-openai-agent/requests/afz-site-deploy.json'))['expected_sha'])")
+          sha=$(python -c "import json;print(json.load(open('afz-openai-agent/requests/afz-site-deploy-next.json'))['expected_sha'])")
           git init -q /tmp/afz-engineering
           git -C /tmp/afz-engineering remote add origin https://github.com/f3arif/afz-engineering.git
           git -C /tmp/afz-engineering fetch -q --depth 1 origin "$sha"
