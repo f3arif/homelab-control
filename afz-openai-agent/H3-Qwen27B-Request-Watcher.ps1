@@ -4,10 +4,12 @@ param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
   [int]$IntervalSeconds=5
 )
-# Multi-role secretless request watcher. Existing H3/OpenWebUI behavior is preserved;
-# Marketplace Manager is install/validate only and cannot edit listings from this watcher.
+# Multi-role secretless request watcher.
+# Each request is one-shot by job_id. A repository SHA change never replays an old request.
+# To intentionally rerun a lane, publish a new typed request with a new job_id.
 $ErrorActionPreference='Stop'
 $IntervalSeconds=[math]::Max(3,[math]::Min($IntervalSeconds,30))
+
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen27b'
 $watchState=Join-Path $stateRoot 'request-watcher.json'
 $requestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-qwen27b-benchmark.json'
@@ -28,30 +30,114 @@ $mpWatchState=Join-Path $mpStateRoot 'request-watcher.json'
 $mpRequestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\marketplace-manager.json'
 $mpBootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-Marketplace-Manager.ps1'
 $mpBootstrapState='C:\ProgramData\AFZ\OpenAIAgent\jobs\marketplace-manager\latest.json'
+
 New-Item -ItemType Directory -Force -Path $stateRoot,$owStateRoot,$mpStateRoot | Out-Null
 
-function Log([string]$Message){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8}
-function Save-WatchState([string]$JobId,[string]$Status,[string]$Message,[int]$PidValue=0){
-  [ordered]@{ok=($Status -notin @('error','failed'));jobId=$JobId;status=$Status;message=$Message;bootstrapPid=$PidValue;transport='one-time-bootstrap-to-h3-direct-github';intervalSeconds=$IntervalSeconds;updatedAt=(Get-Date -Format o)} |
-    ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $watchState -Encoding UTF8
+function Log([string]$Message){
+  Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
 }
-function Save-OpenWebUIState([string]$JobId,[string]$Status,[string]$Message,[string]$Sha,[int]$PidValue=0){
-  $o=[ordered]@{ok=($Status -notin @('error','failed'));jobId=$JobId;status=$Status;message=$Message;expectedSha=$Sha;bootstrapPid=$PidValue;transport='windows-main-ssh+github-exact-sha';intervalSeconds=$IntervalSeconds;updatedAt=(Get-Date -Format o)}
-  $o|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $owWatchState -Encoding UTF8
+function Save-WatchState(
+  [string]$JobId,
+  [string]$Status,
+  [string]$Message,
+  [string]$Sha='',
+  [int]$PidValue=0
+){
+  [ordered]@{
+    ok=($Status -notin @('error','failed'))
+    jobId=$JobId
+    status=$Status
+    message=$Message
+    expectedSha=$Sha
+    bootstrapPid=$PidValue
+    transport='one-time-bootstrap-to-h3-direct-github'
+    intervalSeconds=$IntervalSeconds
+    updatedAt=(Get-Date -Format o)
+  } | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $watchState -Encoding UTF8
+}
+function Save-OpenWebUIState(
+  [string]$JobId,
+  [string]$Status,
+  [string]$Message,
+  [string]$Sha,
+  [int]$PidValue=0
+){
+  $o=[ordered]@{
+    ok=($Status -notin @('error','failed'))
+    jobId=$JobId
+    status=$Status
+    message=$Message
+    expectedSha=$Sha
+    bootstrapPid=$PidValue
+    transport='windows-main-ssh+github-exact-sha'
+    intervalSeconds=$IntervalSeconds
+    updatedAt=(Get-Date -Format o)
+  }
+  $o | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $owWatchState -Encoding UTF8
   try{
     $parent=Split-Path -Parent $owBreadcrumb
-    New-Item -ItemType Directory -Force -Path $parent|Out-Null
-    $lines=@('AFZ_OPENWEBUI_PIPE_WATCHER','STATUS='+$Status,'JOB_ID='+$JobId,'EXPECTED_SHA='+$Sha,'BOOTSTRAP_PID='+$PidValue,'MESSAGE='+$Message,'UPDATED_AT='+$o.updatedAt)
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    $lines=@(
+      'AFZ_OPENWEBUI_PIPE_WATCHER',
+      'STATUS='+$Status,
+      'JOB_ID='+$JobId,
+      'EXPECTED_SHA='+$Sha,
+      'BOOTSTRAP_PID='+$PidValue,
+      'MESSAGE='+$Message,
+      'UPDATED_AT='+$o.updatedAt
+    )
     [IO.File]::WriteAllText($owBreadcrumb,($lines -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
   }catch{}
 }
-function Save-MarketplaceState([string]$JobId,[string]$Status,[string]$Message,[string]$Sha,[int]$PidValue=0){
-  [ordered]@{ok=($Status -notin @('error','failed'));jobId=$JobId;status=$Status;message=$Message;expectedSha=$Sha;bootstrapPid=$PidValue;mode='install-validate-dryrun';transport='github-exact-sha-to-windows-main';intervalSeconds=$IntervalSeconds;updatedAt=(Get-Date -Format o)} |
-    ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $mpWatchState -Encoding UTF8
+function Save-MarketplaceState(
+  [string]$JobId,
+  [string]$Status,
+  [string]$Message,
+  [string]$Sha,
+  [int]$PidValue=0
+){
+  [ordered]@{
+    ok=($Status -notin @('error','failed'))
+    jobId=$JobId
+    status=$Status
+    message=$Message
+    expectedSha=$Sha
+    bootstrapPid=$PidValue
+    mode='install-validate-dryrun'
+    transport='github-exact-sha-to-windows-main'
+    intervalSeconds=$IntervalSeconds
+    updatedAt=(Get-Date -Format o)
+  } | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $mpWatchState -Encoding UTF8
 }
-function Read-Json([string]$Path){if(-not(Test-Path $Path)){return $null};try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return $null}}
-function Current-Sha{$s=Read-Json $sourceState;if($s -and ([string]$s.remoteSha) -match '^[0-9a-fA-F]{40}$'){return ([string]$s.remoteSha).ToLowerInvariant()};return ''}
-function Valid-Request($r){if(-not $r){return $false};if([int]$r.schema -ne 1){return $false};if([string]$r.project -ne 'qwen38-27b-website-benchmark'){return $false};if(([string]$r.job_id) -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){return $false};try{$start=[int]$r.start_iteration;$max=[int]$r.max_iterations}catch{return $false};return ($start -ge 1 -and $start -le 8 -and $max -ge $start -and $max -le 8)}
+function Read-Json([string]$Path){
+  if(-not(Test-Path -LiteralPath $Path)){return $null}
+  try{return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json}catch{return $null}
+}
+function Current-Sha{
+  $s=Read-Json $sourceState
+  if($s -and ([string]$s.remoteSha) -match '^[0-9a-fA-F]{40}$'){
+    return ([string]$s.remoteSha).ToLowerInvariant()
+  }
+  return ''
+}
+function Same-Job($State,[string]$JobId){
+  return ($State -and [string]$State.jobId -eq $JobId)
+}
+function Is-TerminalStatus([string]$Status){
+  return ($Status -in @('completed','failed','error','h3-direct'))
+}
+function Process-IsAlive([int]$PidValue){
+  if($PidValue -le 0){return $false}
+  return [bool](Get-Process -Id $PidValue -ErrorAction SilentlyContinue)
+}
+function Valid-Request($r){
+  if(-not $r){return $false}
+  if([int]$r.schema -ne 1){return $false}
+  if([string]$r.project -ne 'qwen38-27b-website-benchmark'){return $false}
+  if(([string]$r.job_id) -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){return $false}
+  try{$start=[int]$r.start_iteration;$max=[int]$r.max_iterations}catch{return $false}
+  return ($start -ge 1 -and $start -le 8 -and $max -ge $start -and $max -le 8)
+}
 function Valid-OpenWebUIRequest($r){
   if(-not $r){return $false}
   if([int]$r.schema -ne 1){return $false}
@@ -70,53 +156,154 @@ function Valid-MarketplaceRequest($r){
 }
 
 function Handle-BenchmarkRequest {
-  if(-not(Test-Path $requestFile)){return}
+  if(-not(Test-Path -LiteralPath $requestFile)){return}
   $req=Read-Json $requestFile
   if(-not(Valid-Request $req)){throw "Invalid typed request: $requestFile"}
   $jobId=[string]$req.job_id
   $sha=Current-Sha
   if($sha -notmatch '^[0-9a-f]{40}$'){throw 'Current exact GitHub source SHA unavailable'}
-  $bs=Read-Json $bootstrapState
+
   $handled=Read-Json $watchState
+  $bs=Read-Json $bootstrapState
+
+  if(Same-Job $handled $jobId){
+    $status=[string]$handled.status
+    if(Is-TerminalStatus $status){return}
+
+    if($status -eq 'bootstrapping'){
+      $pinnedSha=[string]$handled.expectedSha
+      if($pinnedSha -notmatch '^[0-9a-f]{40}$'){$pinnedSha=$sha}
+      if(Process-IsAlive ([int]$handled.bootstrapPid)){return}
+
+      if($bs -and [string]$bs.status -eq 'completed' -and [string]$bs.expectedSha -eq $pinnedSha){
+        Save-WatchState $jobId 'h3-direct' 'H3 direct GitHub return publisher installed; benchmark request completed.' $pinnedSha
+        Log "BENCHMARK_TERMINAL_SUCCESS job=$jobId sha=$pinnedSha"
+        return
+      }
+
+      $reason='Benchmark bootstrap exited before durable completion; request is terminal and will not replay automatically.'
+      if($bs -and [string]$bs.status -eq 'failed'){$reason='Benchmark bootstrap failed: '+[string]$bs.message}
+      Save-WatchState $jobId 'failed' $reason $pinnedSha
+      Log "BENCHMARK_TERMINAL_FAILED job=$jobId sha=$pinnedSha reason=$reason"
+      return
+    }
+
+    Save-WatchState $jobId 'failed' ("Unexpected prior benchmark state '$status'; request will not replay automatically.") ([string]$handled.expectedSha)
+    return
+  }
+
   if($bs -and [string]$bs.status -eq 'completed' -and [string]$bs.expectedSha -eq $sha){
-    Save-WatchState $jobId 'h3-direct' 'H3 direct GitHub watcher installed; benchmark dispatch no longer uses windows-main or AFZ queue.'
+    Save-WatchState $jobId 'h3-direct' 'H3 direct GitHub return publisher already installed at this exact SHA.' $sha
+    return
   }
-  elseif($handled -and [string]$handled.status -eq 'bootstrapping' -and [int]$handled.bootstrapPid -gt 0 -and (Get-Process -Id ([int]$handled.bootstrapPid) -ErrorAction SilentlyContinue)){return}
-  else{
-    if(-not(Test-Path $bootstrap)){throw "H3 direct bootstrap script missing: $bootstrap"}
-    $argLine="-NoProfile -ExecutionPolicy Bypass -File `"$bootstrap`" -InstallRoot `"$InstallRoot`" -ExpectedSha `"$sha`""
-    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
-    Save-WatchState $jobId 'bootstrapping' "Installing H3-local GitHub watcher from exact source $sha" $p.Id
-    Log "BENCHMARK_BOOTSTRAP_START job=$jobId pid=$($p.Id) sha=$sha"
-  }
+
+  if(-not(Test-Path -LiteralPath $bootstrap)){throw "H3 direct bootstrap script missing: $bootstrap"}
+  $argLine="-NoProfile -ExecutionPolicy Bypass -File `"$bootstrap`" -InstallRoot `"$InstallRoot`" -ExpectedSha `"$sha`""
+  $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+  Save-WatchState $jobId 'bootstrapping' "Installing H3-local GitHub return publisher from exact source $sha" $sha $p.Id
+  Log "BENCHMARK_BOOTSTRAP_START job=$jobId pid=$($p.Id) sha=$sha"
 }
+
 function Handle-OpenWebUIRequest {
-  if(-not(Test-Path $owRequestFile)){return}
+  if(-not(Test-Path -LiteralPath $owRequestFile)){return}
   $req=Read-Json $owRequestFile
   if(-not(Valid-OpenWebUIRequest $req)){throw "Invalid typed OpenWebUI request: $owRequestFile"}
-  $jobId=[string]$req.job_id; $sha=Current-Sha
+  $jobId=[string]$req.job_id
+  $sha=Current-Sha
   if($sha -notmatch '^[0-9a-f]{40}$'){throw 'Current exact GitHub source SHA unavailable for OpenWebUI request'}
-  $bs=Read-Json $owBootstrapState; $handled=Read-Json $owWatchState
-  if($bs -and [string]$bs.status -eq 'completed' -and [string]$bs.jobId -eq $jobId -and [string]$bs.expectedSha -eq $sha){Save-OpenWebUIState $jobId 'completed' 'AFZ Typed Agent Pipe installed/enabled and smoke-tested in H3 OpenWebUI.' $sha;return}
-  if($handled -and [string]$handled.status -eq 'bootstrapping' -and [string]$handled.expectedSha -eq $sha -and [int]$handled.bootstrapPid -gt 0 -and (Get-Process -Id ([int]$handled.bootstrapPid) -ErrorAction SilentlyContinue)){return}
-  if(-not(Test-Path $owBootstrap)){throw "H3 OpenWebUI bootstrap script missing: $owBootstrap"}
+
+  $handled=Read-Json $owWatchState
+  $bs=Read-Json $owBootstrapState
+
+  if(Same-Job $handled $jobId){
+    $status=[string]$handled.status
+    if(Is-TerminalStatus $status){return}
+
+    if($status -eq 'bootstrapping'){
+      $pinnedSha=[string]$handled.expectedSha
+      if($pinnedSha -notmatch '^[0-9a-f]{40}$'){$pinnedSha=$sha}
+      if(Process-IsAlive ([int]$handled.bootstrapPid)){return}
+
+      if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'completed'){
+        Save-OpenWebUIState $jobId 'completed' 'AFZ Typed Agent Pipe installed/enabled and smoke-tested in H3 OpenWebUI.' ([string]$bs.expectedSha)
+        Log "OPENWEBUI_TERMINAL_SUCCESS job=$jobId sha=$([string]$bs.expectedSha)"
+        return
+      }
+
+      $reason='OpenWebUI bootstrap exited before durable completion; request is terminal and will not replay automatically.'
+      if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'failed'){$reason='OpenWebUI bootstrap failed: '+[string]$bs.message}
+      Save-OpenWebUIState $jobId 'failed' $reason $pinnedSha
+      Log "OPENWEBUI_TERMINAL_FAILED job=$jobId sha=$pinnedSha reason=$reason"
+      return
+    }
+
+    Save-OpenWebUIState $jobId 'failed' ("Unexpected prior OpenWebUI state '$status'; request will not replay automatically.") ([string]$handled.expectedSha)
+    return
+  }
+
+  if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'completed'){
+    Save-OpenWebUIState $jobId 'completed' 'AFZ Typed Agent Pipe was already completed for this request.' ([string]$bs.expectedSha)
+    return
+  }
+  if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'failed'){
+    Save-OpenWebUIState $jobId 'failed' ('OpenWebUI bootstrap previously failed: '+[string]$bs.message) ([string]$bs.expectedSha)
+    return
+  }
+
+  if(-not(Test-Path -LiteralPath $owBootstrap)){throw "H3 OpenWebUI bootstrap script missing: $owBootstrap"}
   $argLine="-NoProfile -ExecutionPolicy Bypass -File `"$owBootstrap`" -ExpectedSha `"$sha`" -JobId `"$jobId`""
   $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
   Save-OpenWebUIState $jobId 'bootstrapping' "Installing AFZ Typed Agent Pipe on H3 from exact source $sha" $sha $p.Id
   Log "OPENWEBUI_BOOTSTRAP_START job=$jobId pid=$($p.Id) sha=$sha"
 }
+
 function Handle-MarketplaceRequest {
-  if(-not(Test-Path $mpRequestFile)){return}
+  if(-not(Test-Path -LiteralPath $mpRequestFile)){return}
   $req=Read-Json $mpRequestFile
   if(-not(Valid-MarketplaceRequest $req)){throw "Invalid typed Marketplace request: $mpRequestFile"}
-  $jobId=[string]$req.job_id; $sha=Current-Sha
+  $jobId=[string]$req.job_id
+  $sha=Current-Sha
   if($sha -notmatch '^[0-9a-f]{40}$'){throw 'Current exact GitHub source SHA unavailable for Marketplace request'}
-  $bs=Read-Json $mpBootstrapState; $handled=Read-Json $mpWatchState
-  if($bs -and [string]$bs.status -eq 'completed' -and [string]$bs.jobId -eq $jobId -and [string]$bs.expectedSha -eq $sha){
-    Save-MarketplaceState $jobId 'completed' 'Marketplace Manager installed and dry-run core validated; no Facebook listing was changed.' $sha; return
+
+  $handled=Read-Json $mpWatchState
+  $bs=Read-Json $mpBootstrapState
+
+  if(Same-Job $handled $jobId){
+    $status=[string]$handled.status
+    if(Is-TerminalStatus $status){return}
+
+    if($status -eq 'bootstrapping'){
+      $pinnedSha=[string]$handled.expectedSha
+      if($pinnedSha -notmatch '^[0-9a-f]{40}$'){$pinnedSha=$sha}
+      if(Process-IsAlive ([int]$handled.bootstrapPid)){return}
+
+      if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'completed'){
+        Save-MarketplaceState $jobId 'completed' 'Marketplace Manager installed and dry-run core validated; no Facebook listing was changed.' ([string]$bs.expectedSha)
+        Log "MARKETPLACE_TERMINAL_SUCCESS job=$jobId sha=$([string]$bs.expectedSha)"
+        return
+      }
+
+      $reason='Marketplace bootstrap exited before durable completion; request is terminal and will not replay automatically.'
+      if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'failed'){$reason='Marketplace bootstrap failed: '+[string]$bs.message}
+      Save-MarketplaceState $jobId 'failed' $reason $pinnedSha
+      Log "MARKETPLACE_TERMINAL_FAILED job=$jobId sha=$pinnedSha reason=$reason"
+      return
+    }
+
+    Save-MarketplaceState $jobId 'failed' ("Unexpected prior Marketplace state '$status'; request will not replay automatically.") ([string]$handled.expectedSha)
+    return
   }
-  if($handled -and [string]$handled.status -eq 'bootstrapping' -and [string]$handled.expectedSha -eq $sha -and [int]$handled.bootstrapPid -gt 0 -and (Get-Process -Id ([int]$handled.bootstrapPid) -ErrorAction SilentlyContinue)){return}
-  if(-not(Test-Path $mpBootstrap)){throw "Marketplace bootstrap script missing: $mpBootstrap"}
+
+  if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'completed'){
+    Save-MarketplaceState $jobId 'completed' 'Marketplace Manager was already completed for this request.' ([string]$bs.expectedSha)
+    return
+  }
+  if($bs -and [string]$bs.jobId -eq $jobId -and [string]$bs.status -eq 'failed'){
+    Save-MarketplaceState $jobId 'failed' ('Marketplace bootstrap previously failed: '+[string]$bs.message) ([string]$bs.expectedSha)
+    return
+  }
+
+  if(-not(Test-Path -LiteralPath $mpBootstrap)){throw "Marketplace bootstrap script missing: $mpBootstrap"}
   $argLine="-NoProfile -ExecutionPolicy Bypass -File `"$mpBootstrap`" -InstallRoot `"$InstallRoot`" -ExpectedSha `"$sha`" -JobId `"$jobId`""
   $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
   Save-MarketplaceState $jobId 'bootstrapping' "Installing Marketplace Manager from exact source $sha" $sha $p.Id
@@ -128,11 +315,14 @@ $locked=$false
 try{
   $locked=$mutex.WaitOne(0)
   if(-not $locked){exit 0}
-  Log "START interval=${IntervalSeconds}s roles=benchmark-bootstrap,openwebui-pipe-bootstrap,marketplace-install-validate"
+  Log "START interval=${IntervalSeconds}s roles=benchmark-bootstrap,openwebui-pipe-bootstrap,marketplace-install-validate one-shot-job-id=true"
   while($true){
-    try{Handle-MarketplaceRequest}catch{$msg=$_.Exception.Message;Log "MARKETPLACE_ERROR $msg";Save-MarketplaceState '' 'error' $msg (Current-Sha)}
-    try{Handle-OpenWebUIRequest}catch{$msg=$_.Exception.Message;Log "OPENWEBUI_ERROR $msg";Save-OpenWebUIState '' 'error' $msg (Current-Sha)}
-    try{Handle-BenchmarkRequest}catch{$msg=$_.Exception.Message;Log "BENCHMARK_ERROR $msg";Save-WatchState '' 'error' $msg}
+    try{Handle-MarketplaceRequest}catch{$msg=$_.Exception.Message;Log "MARKETPLACE_ERROR $msg"}
+    try{Handle-OpenWebUIRequest}catch{$msg=$_.Exception.Message;Log "OPENWEBUI_ERROR $msg"}
+    try{Handle-BenchmarkRequest}catch{$msg=$_.Exception.Message;Log "BENCHMARK_ERROR $msg"}
     Start-Sleep -Seconds $IntervalSeconds
   }
-}finally{if($locked){try{$mutex.ReleaseMutex()}catch{}};$mutex.Dispose()}
+}finally{
+  if($locked){try{$mutex.ReleaseMutex()}catch{}}
+  $mutex.Dispose()
+}
