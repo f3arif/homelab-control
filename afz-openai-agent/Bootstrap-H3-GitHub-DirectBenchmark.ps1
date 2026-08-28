@@ -10,6 +10,16 @@ $ExpectedSha=$ExpectedSha.ToLowerInvariant()
 # Trusted exact-SHA entrypoint for DESKTOP-H3R6CQN (Faiz@100.106.186.118).
 # The benchmark job remains qwen3.8:27b / Qwen38-27B-Website-Benchmark-20260826-174739.
 # This generation installs the return-only publisher and retires the obsolete raw watcher; it never launches Qwen.
+$key='C:\Users\Faiz\.ssh\afz_h3_worker'
+if(-not(Test-Path $key)){throw "H3 SSH key missing: $key"}
+$identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+$acl=Get-Acl -LiteralPath $key
+$acl.SetAccessRuleProtection($true,$false)
+foreach($r in @($acl.Access)){$acl.RemoveAccessRuleAll($r)}
+$readRule=New-Object Security.AccessControl.FileSystemAccessRule($identity,[Security.AccessControl.FileSystemRights]::Read,[Security.AccessControl.AccessControlType]::Allow)
+$acl.AddAccessRule($readRule)
+try{$acl.SetOwner((New-Object Security.Principal.NTAccount($identity)))}catch{}
+Set-Acl -LiteralPath $key -AclObject $acl
 $uri="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSha/afz-openai-agent/Bootstrap-H3-GitHub-DirectReturnV3.ps1"
 $tmp=Join-Path $env:TEMP ('AFZ-H3-ReturnV3-'+$ExpectedSha+'.ps1')
 try{
