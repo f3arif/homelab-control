@@ -31,7 +31,11 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $files=@('afz-openai-agent/Bootstrap-Marketplace-Manager.ps1','afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1')
+          $files=@(
+            'afz-openai-agent/Bootstrap-Marketplace-Manager.ps1',
+            'afz-openai-agent/H3-Qwen27B-Request-Watcher.ps1',
+            'afz-openai-agent/marketplace/Start-Marketplace-ReadOnly-Browser.ps1'
+          )
           foreach($f in $files){
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)
@@ -44,6 +48,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           python -m py_compile afz-openai-agent/marketplace/marketplace_manager.py
+          python -m py_compile afz-openai-agent/marketplace/marketplace_browser_collect.py
           $env:AFZ_MARKETPLACE_HOME=Join-Path $env:RUNNER_TEMP 'marketplace-test'
           python afz-openai-agent/marketplace/marketplace_manager.py init | Out-Null
           $status=python afz-openai-agent/marketplace/marketplace_manager.py status | ConvertFrom-Json
@@ -59,3 +64,14 @@ jobs:
           if($audit.queued -ne 3){throw "Expected 3 queued dry-run actions for stale unmessaged listing; got $($audit.queued)"}
           $s=python afz-openai-agent/marketplace/marketplace_manager.py status | ConvertFrom-Json
           if($s.active_listings -ne 2 -or $s.pending_actions -ne 3 -or $s.held_listings -ne 1){throw 'Marketplace smoke-test counts invalid'}
+      - name: Enforce read-only browser collector boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $collector=Get-Content 'afz-openai-agent/marketplace/marketplace_browser_collect.py' -Raw
+          foreach($required in @('locked": "1"','message_state_unverified','facebook_writes": 0','captcha','checkpoint','two-factor authentication')){
+            if(-not $collector.Contains($required)){throw "Read-only collector guard missing: $required"}
+          }
+          foreach($forbidden in @('.click(','.fill(','.press(','keyboard.','mouse.click','Edit listing','Renew listing','Delete listing')){
+            if($collector.Contains($forbidden)){throw "Write-capable browser behavior found in read-only collector: $forbidden"}
+          }
