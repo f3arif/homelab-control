@@ -417,7 +417,17 @@ try {
   while ($listener.IsListening) {
     $ctx = $listener.GetContext()
     try {
-      if (-not (Test-ClientAllowed $ctx)) { Send-Json $ctx 403 @{ok=$false;error='client not allowlisted'}; continue }
+      if (-not (Test-ClientAllowed $ctx)) {
+        $deniedIp = Get-RemoteIp $ctx
+        Write-AgentLog "DENY client=$deniedIp method=$($ctx.Request.HttpMethod) path=$($ctx.Request.Url.AbsolutePath)"
+        Send-Json $ctx 403 @{
+          ok=$false
+          error='client not allowlisted'
+          clientIp=$deniedIp
+          guidance='Authorize this exact Tailscale client IP in allowed-clients.txt.'
+        }
+        continue
+      }
       if ($ctx.Request.HttpMethod -eq 'OPTIONS') { Send-Json $ctx 200 @{ok=$true}; continue }
       $path = $ctx.Request.Url.AbsolutePath.TrimEnd('/')
 
