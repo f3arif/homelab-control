@@ -32,15 +32,15 @@ try{
     }finally{$ErrorActionPreference=$old}
     return [pscustomobject]@{ExitCode=$code;Output=$output}
   }
-  $auth=Invoke-GhQuiet @('auth','status','--hostname','github.com')
+  $auth=Invoke-GhQuiet -Arguments @('auth','status','--hostname','github.com')
   if($auth.ExitCode -ne 0){Save-State 'blocked-github-auth' 'GitHub CLI is installed but not authenticated on H3. Run Enable-H3-GitHub-DirectAuth.ps1 interactively.';exit 21}
-  $perm=Invoke-GhQuiet @('api',"repos/$repo",'--jq','.permissions.push')
+  $perm=Invoke-GhQuiet -Arguments @('api',"repos/$repo",'--jq','.permissions.push')
   $permText=([string]($perm.Output -join "`n")).Trim().ToLowerInvariant()
   if($perm.ExitCode -ne 0 -or $permText -ne 'true'){Save-State 'blocked-github-write' 'H3 GitHub identity does not have push permission to homelab-control.';exit 22}
-  $setup=Invoke-GhQuiet @('auth','setup-git')
+  $setup=Invoke-GhQuiet -Arguments @('auth','setup-git')
   if($setup.ExitCode -ne 0){Save-State 'blocked-github-write' 'gh auth setup-git failed on H3.';exit 23}
   Save-State 'ready' 'GitHub authentication and repository push permission verified; starting direct H3 benchmark watcher.'
-  [void](Invoke-GhQuiet @('issue','comment',[string]$alertIssue,'--repo',$repo,'--body','[H3-DIRECT PREFLIGHT] GitHub write channel verified on H3. Direct benchmark watcher is starting; AFZ queue/claims are bypassed.'))
+  [void](Invoke-GhQuiet -Arguments @('issue','comment',[string]$alertIssue,'--repo',$repo,'--body','[H3-DIRECT PREFLIGHT] GitHub write channel verified on H3. Direct benchmark watcher is starting; AFZ queue/claims are bypassed.'))
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Watcher -IntervalSeconds $IntervalSeconds
   exit $LASTEXITCODE
 }catch{
