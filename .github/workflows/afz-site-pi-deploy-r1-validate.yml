@@ -3,15 +3,13 @@ name: AFZ Website Pi Deploy Validate
 on:
   push:
     branches:
-      - fix/afz-site-cutover-r3-carrier
-      - stage/afz-site-cutover-r4
-      - activate/afz-site-cutover-r4
-      - fix/afz-site-cutover-r5-nativeargs
+      - fix/afz-site-cutover-r6-bounded-pi-transport
   pull_request:
     branches:
       - main
     paths:
       - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi*.ps1'
+      - 'afz-openai-agent/AFZ-Native-Process.ps1'
       - 'afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/requests/afz-site-deploy*.json'
@@ -34,6 +32,7 @@ jobs:
           $files=@(
             'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1',
             'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1',
+            'afz-openai-agent/AFZ-Native-Process.ps1',
             'afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1',
             'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
           )
@@ -44,34 +43,35 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate R5 request and carrier safety contract
+      - name: Validate staged R6 and bounded transport contract
         shell: python
         run: |
           import json
           from pathlib import Path
 
-          expected_base={
+          expected={
             'schema':1,
             'project':'afz-website',
             'action':'deploy-pi-static-site',
-            'job_id':'afz-site-git-cutover-r5-20260828T1151',
+            'job_id':'afz-site-git-cutover-r6-20260828T1602',
             'source_repository':'f3arif/afz-engineering',
-            'expected_sha':'c38576741ce2d379723fde038300363429845656'
+            'expected_sha':'c38576741ce2d379723fde038300363429845656',
+            'status':'staged-not-active'
           }
           staged=json.loads(Path('afz-openai-agent/requests/afz-site-deploy-next.json').read_text())
-          active=json.loads(Path('afz-openai-agent/requests/afz-site-deploy.json').read_text())
-          assert staged == {**expected_base,'status':'staged-not-active'}
-          assert active == {**expected_base,'status':'active'}
+          assert staged == expected
+          assert not Path('afz-openai-agent/requests/afz-site-deploy.json').exists(), 'R6 must remain staged and inactive during validation'
 
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
+          helper=Path('afz-openai-agent/AFZ-Native-Process.ps1').read_text()
           watcher=Path('afz-openai-agent/AFZ-Site-Deploy-Request-Watcher.ps1').read_text()
           updater=Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1').read_text()
 
           required_core=[
             'https://codeload.github.com/f3arif/afz-engineering/zip/',
             "coolyo@192.168.50.68",
+            "coolyo@100.91.50.9",
             "C:\\Users\\Faiz\\.ssh\\afz_pi_sync",
-            "C:\\Users\\Faiz\\AppData\\Local\\AFZ\\WebsiteGitDeploy",
             "/opt/edge/afz-site/html",
             "deleteExtraneousFiles",
             "hpenvy",
@@ -82,50 +82,52 @@ jobs:
             "AFZ AI PROJECT QUESTION PREFILL",
             "Do you provide HVAC design?",
             "New-VerifiedProductionArchive",
-            "$TempBase=Join-Path $ResultRoot 'temp'",
-            "archiveAttempts",
-            "'-tzf'",
-            "ConnectionAttempts=1",
-            "ServerAliveCountMax=3",
-            "Pi contact begins only after local archive creation + integrity verification passes.",
-            "[string[]]$ArgumentList",
-            "@ArgumentList",
-            "[string[]]$TarArguments",
-            "@TarArguments"
+            "AFZ-Native-Process.ps1",
+            "Select-PiEndpoint",
+            "Invoke-AFZBoundedNative",
+            "boundedNativeTransport",
+            "piRoute",
+            "timeout --signal=TERM --kill-after=10s 120s bash",
+            "Native process timeout after",
+            "Pi contact begins only after local archive creation + integrity verification passes."
           ]
           for marker in required_core: assert marker in core, marker
-          assert '[string[]]$Args' not in core, 'PowerShell automatic $args collision reintroduced'
-          assert '& tar.exe @Args' not in core, 'PowerShell automatic $args collision reintroduced'
-          archive_call="New-VerifiedProductionArchive $repoRoot.FullName $Archive"
-          first_pi='Invoke-Ssh "mkdir -p'
-          assert core.index(archive_call) < core.index(first_pi), 'Pi contact must occur only after archive verification'
-          for forbidden in (
-            "Invoke-External 'git.exe'",
-            'Invoke-External "git.exe"',
-            "Invoke-External 'node.exe'",
-            'Invoke-External "node.exe"',
-            '& git.exe', '& node.exe'
-          ):
-            assert forbidden not in core, forbidden
+          archive_call='New-VerifiedProductionArchive $repoRoot.FullName $Archive'
+          archive_pos=core.index(archive_call)
+          deploy_select=core.index('\n  Select-PiEndpoint\n', archive_pos)
+          assert archive_pos < deploy_select, 'Pi contact must follow local archive verification'
+          assert "Invoke-External 'ssh.exe'" not in core
+          assert "Invoke-External 'scp.exe'" not in core
+          assert '[string[]]$Args' not in core
+          assert '& tar.exe @Args' not in core
+
+          required_helper=[
+            'ConvertTo-AFZWindowsCommandLineArgument',
+            'Invoke-AFZBoundedNative',
+            'System.Diagnostics.ProcessStartInfo',
+            'WaitForExit($TimeoutSeconds*1000)',
+            'try{$p.Kill()}catch{}',
+            'TimedOut=$true',
+            'RedirectStandardOutput=$true',
+            'RedirectStandardError=$true'
+          ]
+          for marker in required_helper: assert marker in helper, marker
+          assert 'Set-StrictMode' not in helper
 
           required_watcher=[
             "$carrierTaskName='AFZ Edge Backup'",
             "$legacySiteTaskName='AFZ Website Sync to Pi'",
-            "edge-backup-interactive-carrier",
-            "Restore-CarrierTask",
-            "Restore-LegacySiteTask",
-            "Disable-ScheduledTask -TaskName $legacySiteTaskName",
-            "Set-ScheduledTask -TaskName $carrierTaskName -Action $newAction",
-            "Start-ScheduledTask -TaskName $carrierTaskName",
-            "if($legacy -and $legacy.State -eq 'Running')",
-            "if($carrier -and $carrier.State -eq 'Running')",
-            "source_repository -ne 'f3arif/afz-engineering'"
+            'edge-backup-interactive-carrier',
+            'Restore-CarrierTask',
+            'Restore-LegacySiteTask',
+            'Disable-ScheduledTask -TaskName $legacySiteTaskName',
+            'Set-ScheduledTask -TaskName $carrierTaskName -Action $newAction',
+            'Start-ScheduledTask -TaskName $carrierTaskName'
           ]
           for marker in required_watcher: assert marker in watcher, marker
           assert "Set-ScheduledTask -TaskName $legacySiteTaskName -Action $newAction" not in watcher
-          assert "Disable-ScheduledTask -TaskName $carrierTaskName | Out-Null\n      Save-State" not in watcher
-          assert "AFZ Website Git Deploy Request Watcher" in updater
-          print('R5 NATIVE ARGS + CARRIER CONTRACT PASS')
+          assert 'AFZ Website Git Deploy Request Watcher' in updater
+          print('R6 STAGED + BOUNDED TRANSPORT CONTRACT PASS')
 
       - name: Syntax-check embedded Pi Bash
         shell: python
@@ -135,7 +137,11 @@ jobs:
           text=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           m=re.search(r"\$bash=@'\n(.*?)\n'@",text,re.S)
           assert m, 'literal Bash template not found'
-          bash=m.group(1).replace('__JOB_ID__','validate-job').replace('__EXPECTED_SHA__','c38576741ce2d379723fde038300363429845656').replace('__REMOTE_ARCHIVE__','/tmp/site.tar.gz').replace('__REMOTE_SCRIPT__','/tmp/site.sh')
+          bash=(m.group(1)
+                .replace('__JOB_ID__','validate-job')
+                .replace('__EXPECTED_SHA__','c38576741ce2d379723fde038300363429845656')
+                .replace('__REMOTE_ARCHIVE__','/tmp/site.tar.gz')
+                .replace('__REMOTE_SCRIPT__','/tmp/site.sh'))
           Path('/tmp/afz-site-deploy.sh').write_text(bash)
 
       - name: Bash parser
@@ -165,13 +171,32 @@ jobs:
           print('SITE COMMIT CONTRACT PASS')
           PY
 
-  windows-native-archive-selftest:
+  windows-native-selftest:
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
 
-      - name: Execute exact native archive helpers under Windows PowerShell
+      - name: Verify bounded native helper and timeout behavior
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          . .\afz-openai-agent\AFZ-Native-Process.ps1
+          $powershell="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+          $ok=Invoke-AFZBoundedNative -FilePath $powershell -ArgumentList @('-NoProfile','-NonInteractive','-Command',"Write-Output 'AFZ ARG PASS'") -TimeoutSeconds 10
+          if($ok.TimedOut){throw 'Argument-preservation self-test timed out'}
+          if($ok.ExitCode -ne 0){throw "Argument-preservation self-test failed exit=$($ok.ExitCode) stderr=$($ok.StdErr)"}
+          if($ok.StdOut -notmatch 'AFZ ARG PASS'){throw "Argument-preservation output mismatch: $($ok.StdOut)"}
+
+          $sw=[Diagnostics.Stopwatch]::StartNew()
+          $slow=Invoke-AFZBoundedNative -FilePath $powershell -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 5') -TimeoutSeconds 1
+          $sw.Stop()
+          if(-not $slow.TimedOut){throw 'Forced timeout self-test did not report TimedOut'}
+          if($sw.Elapsed.TotalSeconds -gt 5){throw "Forced timeout exceeded bounded wall clock: $($sw.Elapsed.TotalSeconds)s"}
+          Write-Host "BOUNDED NATIVE SELFTEST PASS timeoutElapsed=$([math]::Round($sw.Elapsed.TotalSeconds,2))s"
+
+      - name: Execute exact archive helpers under Windows PowerShell
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -188,7 +213,7 @@ jobs:
           }
           Invoke-Expression ($defs -join "`r`n`r`n")
 
-          $TempRoot=Join-Path $env:RUNNER_TEMP 'afz-r5-native-archive'
+          $TempRoot=Join-Path $env:RUNNER_TEMP 'afz-r6-native-archive'
           Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
           $repo=Join-Path $TempRoot 'repo'
           $site=Join-Path $repo 'production-site'
@@ -201,10 +226,8 @@ jobs:
           New-VerifiedProductionArchive $repo $archive
           if(-not(Test-Path -LiteralPath $archive -PathType Leaf)){throw 'Archive self-test did not create an archive'}
           if((Get-Item -LiteralPath $archive).Length -le 0){throw 'Archive self-test created an empty archive'}
-
           $listed=Invoke-Tar @('-tzf',$archive)
           if($listed.ExitCode -ne 0){throw "Invoke-Tar list failed: $($listed.StdErr)"}
           if($listed.StdOut -notmatch '(?m)^production-site/managed\.sha256\r?$'){throw 'Invoke-Tar list did not contain managed.sha256'}
-
           Invoke-External 'tar.exe' @('-tzf',$archive) 'Invoke-External tar list failed.'
-          Write-Host "WINDOWS NATIVE ARCHIVE SELFTEST PASS attempts=$archiveAttempts bytes=$((Get-Item -LiteralPath $archive).Length)"
+          Write-Host "WINDOWS ARCHIVE SELFTEST PASS attempts=$archiveAttempts bytes=$((Get-Item -LiteralPath $archive).Length)"

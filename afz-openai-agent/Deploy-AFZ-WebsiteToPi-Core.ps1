@@ -13,7 +13,9 @@ $ExpectedSiteSha=$ExpectedSiteSha.ToLowerInvariant()
 if($JobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid JobId'}
 
 $RepoZip="https://codeload.github.com/f3arif/afz-engineering/zip/$ExpectedSiteSha"
-$Pi='coolyo@192.168.50.68'
+$PiCandidates=@('coolyo@192.168.50.68','coolyo@100.91.50.9')
+$Pi=$null
+$piRoute=$null
 $Target='/opt/edge/afz-site/html'
 $RemoteRoot='/opt/edge/afz-site/git-deploy'
 # This is the same dedicated key used by the established AFZ edge/site sync path.
@@ -36,6 +38,7 @@ $archiveAttempts=0
 $started=Get-Date
 
 New-Item -ItemType Directory -Force -Path $ResultRoot,$TempBase,$TempRoot,$ExtractRoot | Out-Null
+. (Join-Path $PSScriptRoot 'AFZ-Native-Process.ps1')
 
 function Save-Result([bool]$Ok,[string]$Status,[string]$Message,[hashtable]$Extra=@{}){
   $o=[ordered]@{
@@ -50,8 +53,45 @@ function Invoke-External([string]$Exe,[string[]]$ArgumentList,[string]$Failure){
   & $Exe @ArgumentList
   if($LASTEXITCODE -ne 0){throw "$Failure Exit code: $LASTEXITCODE"}
 }
-function Invoke-Ssh([string]$Command,[string]$Failure){
-  Invoke-External 'ssh.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new',$Pi,$Command) $Failure
+function Get-SshOptions {
+  return @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new','-o','LogLevel=ERROR')
+}
+function Assert-BoundedResult($Result,[string]$Failure,[int]$TimeoutSeconds){
+  if($Result.TimedOut){
+    throw "$Failure Native process timeout after ${TimeoutSeconds}s; pid=$($Result.Pid)."
+  }
+  if($Result.ExitCode -ne 0){
+    $stderr=([string]$Result.StdErr).Trim()
+    if($stderr.Length -gt 600){$stderr=$stderr.Substring(0,600)}
+    throw "$Failure Exit code: $($Result.ExitCode). stderr=$stderr"
+  }
+}
+function Select-PiEndpoint {
+  $errors=New-Object System.Collections.Generic.List[string]
+  foreach($candidate in $PiCandidates){
+    $route=$(if($candidate -match '@192\.168\.50\.68$'){'lan'}else{'tailscale'})
+    $r=Invoke-AFZBoundedNative -FilePath 'ssh.exe' -ArgumentList @((Get-SshOptions)+$candidate+"printf 'AFZ_SSH_READY\\n'") -TimeoutSeconds 20
+    if(-not $r.TimedOut -and $r.ExitCode -eq 0 -and ([string]$r.StdOut) -match 'AFZ_SSH_READY'){
+      $script:Pi=$candidate
+      $script:piRoute=$route
+      return
+    }
+    $detail=$(if($r.TimedOut){'timeout'}else{"exit=$($r.ExitCode) stderr=$(([string]$r.StdErr).Trim())"})
+    $errors.Add("${route}:$detail")
+  }
+  throw ('No bounded Pi SSH endpoint succeeded. '+($errors -join ' | '))
+}
+function Invoke-Ssh([string]$Command,[string]$Failure,[int]$TimeoutSeconds=45){
+  if(-not $Pi){throw 'Pi endpoint has not been selected.'}
+  $r=Invoke-AFZBoundedNative -FilePath 'ssh.exe' -ArgumentList @((Get-SshOptions)+$Pi+$Command) -TimeoutSeconds $TimeoutSeconds
+  Assert-BoundedResult $r $Failure $TimeoutSeconds
+  return $r
+}
+function Invoke-Scp([string]$LocalPath,[string]$RemotePath,[string]$Failure,[int]$TimeoutSeconds=60){
+  if(-not $Pi){throw 'Pi endpoint has not been selected.'}
+  $r=Invoke-AFZBoundedNative -FilePath 'scp.exe' -ArgumentList @((Get-SshOptions)+$LocalPath+"${Pi}:$RemotePath") -TimeoutSeconds $TimeoutSeconds
+  Assert-BoundedResult $r $Failure $TimeoutSeconds
+  return $r
 }
 function Invoke-Tar([string[]]$TarArguments){
   # Do not name this parameter Args: $args is an automatic PowerShell variable and
@@ -95,7 +135,7 @@ function New-VerifiedProductionArchive([string]$RepoRoot,[string]$ArchivePath){
 }
 function Rollback-Remote {
   if(-not $remotePromoted){return}
-  Invoke-Ssh "bash '$RemoteBackup/rollback.sh'" 'Remote rollback failed.'
+  Invoke-Ssh "timeout --signal=TERM --kill-after=10s 60s bash '$RemoteBackup/rollback.sh'" 'Remote rollback failed.' 75 | Out-Null
   $script:remotePromoted=$false
 }
 function Require-Marker([string]$Base,[string]$Rel,[string[]]$Markers){
@@ -223,11 +263,13 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
   [IO.File]::WriteAllText($localRemoteScript,$bash,(New-Object Text.UTF8Encoding($false)))
 
   # Pi contact begins only after local archive creation + integrity verification passes.
-  Invoke-Ssh "mkdir -p '$RemoteRoot/stage' '$RemoteRoot/backups'" 'Failed to prepare Pi deployment root.'
-  $scpOptions=@('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=3','-o','StrictHostKeyChecking=accept-new')
-  Invoke-External 'scp.exe' @($scpOptions+$Archive+"${Pi}:$RemoteArchive") 'Failed to upload production archive.'
-  Invoke-External 'scp.exe' @($scpOptions+$localRemoteScript+"${Pi}:$RemoteScript") 'Failed to upload Pi deployment script.'
-  Invoke-Ssh "chmod 700 '$RemoteScript' && bash '$RemoteScript'" 'Pi deployment failed.'
+  # R6 additionally enforces an outer process timeout because R5 proved Windows OpenSSH
+  # can remain alive beyond its own ConnectTimeout under host/network pressure.
+  Select-PiEndpoint
+  Invoke-Ssh "command -v timeout >/dev/null && mkdir -p '$RemoteRoot/stage' '$RemoteRoot/backups'" 'Failed to prepare Pi deployment root.' 30 | Out-Null
+  Invoke-Scp $Archive $RemoteArchive 'Failed to upload production archive.' 75 | Out-Null
+  Invoke-Scp $localRemoteScript $RemoteScript 'Failed to upload Pi deployment script.' 45 | Out-Null
+  Invoke-Ssh "chmod 700 '$RemoteScript' && timeout --signal=TERM --kill-after=10s 120s bash '$RemoteScript'" 'Pi deployment failed.' 150 | Out-Null
   $remotePromoted=$true
 
   $publicHeaders=@{'Cache-Control'='no-cache';'Pragma'='no-cache'}
@@ -245,13 +287,13 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
 
   $remotePromoted=$false
   Save-Result $true 'completed' 'Git-authoritative AFZ website deployed to Pi and public WebChat verified.' @{
-    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup;sourceTransport='github-codeload-exact-sha';archiveAttempts=$archiveAttempts;archiveVerified=$true
+    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup;sourceTransport='github-codeload-exact-sha';archiveAttempts=$archiveAttempts;archiveVerified=$true;piEndpoint=$Pi;piRoute=$piRoute;boundedNativeTransport=$true
   }
   exit 0
 }catch{
   $err=$_.Exception.Message
   if($remotePromoted){try{Rollback-Remote}catch{$err=$err+' | rollback failed: '+$_.Exception.Message}}
-  Save-Result $false 'failed' $err @{archiveAttempts=$archiveAttempts}
+  Save-Result $false 'failed' $err @{archiveAttempts=$archiveAttempts;piEndpoint=$Pi;piRoute=$piRoute;boundedNativeTransport=$true}
   throw
 }finally{
   Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
