@@ -77,19 +77,37 @@ jobs:
           foreach($forbidden in @('.click(','.fill(','.press(','keyboard.','mouse.click','Edit listing','Renew listing','Delete listing')){
             if($collector.Contains($forbidden)){throw "Write-capable browser behavior found in read-only collector: $forbidden"}
           }
-      - name: Enforce SSH credential boundary
+      - name: Enforce SSH credential and OTP boundary
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $wrapper=Get-Content 'afz-openai-agent/marketplace/Invoke-Marketplace-SSH-Login.ps1' -Raw
-          foreach($required in @('Read-Host ''Facebook password'' -AsSecureString','RedirectStandardInput=$true','SecureStringToBSTR','ZeroFreeBSTR')){
-            if(-not $wrapper.Contains($required)){throw "SSH credential transport guard missing: $required"}
+          foreach($required in @(
+            'Read-Host ''Facebook password'' -AsSecureString',
+            'Read-Host ''Facebook verification code'' -AsSecureString',
+            'RedirectStandardInput=$true',
+            'SecureStringToBSTR',
+            'ZeroFreeBSTR',
+            'otp_required',
+            '--verify-code'
+          )){
+            if(-not $wrapper.Contains($required)){throw "SSH credential/OTP transport guard missing: $required"}
           }
           foreach($forbidden in @('Set-Content -LiteralPath $payload','Out-File','Add-Content','--password','--username')){
             if($wrapper.Contains($forbidden)){throw "Credential persistence/argument leak risk found: $forbidden"}
           }
           $login=Get-Content 'afz-openai-agent/marketplace/marketplace_browser_login.py' -Raw
-          foreach($required in @('sys.stdin.readline()','input[name="email"]','input[name="pass"]','needs_interactive_verification','facebook_writes')){
+          foreach($required in @(
+            'sys.stdin.readline()',
+            'input[name="email"]',
+            'input[name="pass"]',
+            'input[autocomplete="one-time-code"]',
+            'otp_required',
+            'needs_interactive_verification',
+            'approve from another device',
+            'captcha',
+            'facebook_writes'
+          )){
             if(-not $login.Contains($required)){throw "Authentication-only helper guard missing: $required"}
           }
           foreach($forbidden in @('--password','--username','os.environ','/marketplace/item/','Edit listing','Renew listing','Delete listing','Relist listing','Reprice')){
