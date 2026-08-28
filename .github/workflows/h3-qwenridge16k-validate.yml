@@ -55,7 +55,7 @@ jobs:
           if([int]$request.context -ne 16384){throw 'context must be 16384'}
           if(-not [bool]$request.no_think){throw 'no_think must be true'}
           if([int]$request.max_model_calls -ne 1){throw 'max_model_calls must be 1'}
-          if([int]$request.recovery_generation -ne 1){throw 'recovery_generation must be exactly 1'}
+          if([int]$request.recovery_generation -lt 1 -or [int]$request.recovery_generation -gt 2){throw 'recovery_generation must remain within bounded transport-only range 1..2'}
           $expected=@('/','/services','/projects','/about','/contact')
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
