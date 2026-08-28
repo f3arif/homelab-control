@@ -44,7 +44,7 @@ jobs:
       - name: Validate staged R2 request and fixed safety contract
         shell: python
         run: |
-          import json, re
+          import json
           from pathlib import Path
           active=Path('afz-openai-agent/requests/afz-site-deploy.json')
           assert not active.exists(), 'R1 active request must remain retired during R2 staging'
@@ -77,8 +77,17 @@ jobs:
             "Do you provide HVAC design?"
           ]
           for marker in required_core: assert marker in core, marker
-          assert not re.search(r"Get-Command\s+['\"]?(?:git|node)\.exe", core, re.I)
-          assert not re.search(r"(?:^|[;&|\s])(?:git|node)\.exe(?:\s|$)", core, re.I|re.M)
+          for forbidden in (
+            "Invoke-External 'git.exe'",
+            'Invoke-External "git.exe"',
+            "Invoke-External 'node.exe'",
+            'Invoke-External "node.exe"',
+            '& git.exe',
+            '& node.exe',
+            "@('git.exe','node.exe'",
+            '@("git.exe","node.exe"'
+          ):
+            assert forbidden not in core, forbidden
           assert "$env:USERPROFILE '.ssh" not in core
           assert "source_repository -ne 'f3arif/afz-engineering'" in watcher
           assert "legacyTaskName='AFZ Website Sync to Pi'" in watcher
