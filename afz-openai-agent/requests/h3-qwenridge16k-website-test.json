@@ -6,7 +6,7 @@
   "context": 16384,
   "no_think": true,
   "max_model_calls": 1,
-  "recovery_generation": 3,
+  "recovery_generation": 4,
   "project_root": "C:\\Projects\\Qwen38-Ridge16K-Website-Test-20260828-r1",
   "required_routes": ["/", "/services", "/projects", "/about", "/contact"]
 }
