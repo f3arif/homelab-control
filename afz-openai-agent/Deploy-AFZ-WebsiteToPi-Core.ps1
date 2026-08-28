@@ -12,15 +12,19 @@ if($ExpectedSiteSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSiteSha must b
 $ExpectedSiteSha=$ExpectedSiteSha.ToLowerInvariant()
 if($JobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid JobId'}
 
-$RepoUrl='https://github.com/f3arif/afz-engineering.git'
+$RepoZip="https://codeload.github.com/f3arif/afz-engineering/zip/$ExpectedSiteSha"
 $Pi='coolyo@192.168.50.68'
 $Target='/opt/edge/afz-site/html'
 $RemoteRoot='/opt/edge/afz-site/git-deploy'
-$KeyPath=Join-Path $env:USERPROFILE '.ssh\afz_pi_sync'
-$ResultRoot=Join-Path $env:LOCALAPPDATA 'AFZ\WebsiteGitDeploy'
+# This is the same dedicated key used by the established AFZ edge/site sync path.
+# Do not derive it from the scheduled-task environment's USERPROFILE.
+$KeyPath='C:\Users\Faiz\.ssh\afz_pi_sync'
+# Keep the result path fixed so the SYSTEM watcher can read the user-context task result.
+$ResultRoot='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy'
 $ResultFile=Join-Path $ResultRoot 'latest.json'
 $TempRoot=Join-Path $env:TEMP ('afz-site-git-deploy-'+$JobId+'-'+[guid]::NewGuid().ToString('n'))
-$RepoDir=Join-Path $TempRoot 'repo'
+$ZipFile=Join-Path $TempRoot 'site-source.zip'
+$ExtractRoot=Join-Path $TempRoot 'source'
 $Archive=Join-Path $TempRoot 'production-site.tar.gz'
 $RemoteArchive="/tmp/afz-site-$JobId.tar.gz"
 $RemoteScript="/tmp/afz-site-$JobId.sh"
@@ -28,7 +32,7 @@ $RemoteBackup="$RemoteRoot/backups/$JobId"
 $remotePromoted=$false
 $started=Get-Date
 
-New-Item -ItemType Directory -Force -Path $ResultRoot,$TempRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $ResultRoot,$TempRoot,$ExtractRoot | Out-Null
 
 function Save-Result([bool]$Ok,[string]$Status,[string]$Message,[hashtable]$Extra=@{}){
   $o=[ordered]@{
@@ -39,7 +43,10 @@ function Save-Result([bool]$Ok,[string]$Status,[string]$Message,[hashtable]$Extr
   foreach($k in $Extra.Keys){$o[$k]=$Extra[$k]}
   $o|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $ResultFile -Encoding UTF8
 }
-function Invoke-External([string]$Exe,[string[]]$Args,[string]$Failure){& $Exe @Args;if($LASTEXITCODE -ne 0){throw "$Failure Exit code: $LASTEXITCODE"}}
+function Invoke-External([string]$Exe,[string[]]$Args,[string]$Failure){
+  & $Exe @Args
+  if($LASTEXITCODE -ne 0){throw "$Failure Exit code: $LASTEXITCODE"}
+}
 function Invoke-Ssh([string]$Command,[string]$Failure){
   Invoke-External 'ssh.exe' @('-i',$KeyPath,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new',$Pi,$Command) $Failure
 }
@@ -48,30 +55,42 @@ function Rollback-Remote {
   Invoke-Ssh "bash '$RemoteBackup/rollback.sh'" 'Remote rollback failed.'
   $script:remotePromoted=$false
 }
+function Require-Marker([string]$Base,[string]$Rel,[string[]]$Markers){
+  $path=Join-Path $Base ($Rel -replace '/','\')
+  if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "Required production file missing: $Rel"}
+  $text=Get-Content -LiteralPath $path -Raw -Encoding UTF8
+  foreach($marker in $Markers){if(-not $text.Contains($marker)){throw "Required production marker missing in ${Rel}: $marker"}}
+}
 
 try{
-  foreach($cmd in @('git.exe','node.exe','tar.exe','ssh.exe','scp.exe')){if(-not(Get-Command $cmd -ErrorAction SilentlyContinue)){throw "Required command missing: $cmd"}}
+  foreach($cmd in @('tar.exe','ssh.exe','scp.exe')){
+    if(-not(Get-Command $cmd -ErrorAction SilentlyContinue)){throw "Required Windows command missing: $cmd"}
+  }
   if(-not(Test-Path -LiteralPath $KeyPath -PathType Leaf)){throw "Dedicated Pi SSH key missing: $KeyPath"}
 
-  New-Item -ItemType Directory -Force -Path $RepoDir | Out-Null
-  Invoke-External 'git.exe' @('-C',$RepoDir,'init','--quiet') 'git init failed.'
-  Invoke-External 'git.exe' @('-C',$RepoDir,'remote','add','origin',$RepoUrl) 'git remote add failed.'
-  Invoke-External 'git.exe' @('-C',$RepoDir,'fetch','--quiet','--depth','1','origin',$ExpectedSiteSha) 'Exact-site commit fetch failed.'
-  Invoke-External 'git.exe' @('-C',$RepoDir,'checkout','--quiet','--detach','FETCH_HEAD') 'Exact-site commit checkout failed.'
-  $actualSha=(& git.exe -C $RepoDir rev-parse HEAD).Trim().ToLowerInvariant()
-  if($LASTEXITCODE -ne 0 -or $actualSha -ne $ExpectedSiteSha){throw "Checked-out SHA mismatch: $actualSha"}
+  $headers=@{'User-Agent'='AFZ-Website-Git-Deploy';'Cache-Control'='no-cache';'Pragma'='no-cache'}
+  Invoke-WebRequest -Uri $RepoZip -Headers $headers -OutFile $ZipFile -UseBasicParsing -TimeoutSec 120
+  Expand-Archive -LiteralPath $ZipFile -DestinationPath $ExtractRoot -Force
+  $repoRoot=Get-ChildItem -LiteralPath $ExtractRoot -Directory | Select-Object -First 1
+  if(-not $repoRoot){throw 'Exact-SHA website archive contained no repository root.'}
+  $siteRoot=Join-Path $repoRoot.FullName 'production-site'
+  $manifestPath=Join-Path $siteRoot 'manifest.json'
+  if(-not(Test-Path -LiteralPath $manifestPath -PathType Leaf)){throw 'Production manifest missing from exact-SHA website archive.'}
 
-  $guard=Join-Path $RepoDir 'scripts\afz-production-deploy-guard.mjs'
-  & node.exe $guard
-  if($LASTEXITCODE -ne 0){throw "Production deploy guard failed with exit $LASTEXITCODE"}
-
-  $siteRoot=Join-Path $RepoDir 'production-site'
-  $manifest=Get-Content -LiteralPath (Join-Path $siteRoot 'manifest.json') -Raw|ConvertFrom-Json
+  $manifest=Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8|ConvertFrom-Json
   if(-not [bool]$manifest.reconciled){throw 'Production manifest is not reconciled.'}
   if([string]$manifest.deployment.target -ne $Target){throw 'Manifest target does not match fixed Pi target.'}
   if([bool]$manifest.deployment.deleteExtraneousFiles){throw 'Manifest attempts destructive deleteExtraneousFiles mode.'}
   if([string]$manifest.webchat.backendOwner -ne 'hpenvy'){throw 'WebChat backend owner changed unexpectedly.'}
   if([string]$manifest.webchat.endpoint -ne '/api/ai-chat'){throw 'WebChat endpoint changed unexpectedly.'}
+
+  # Reproduce the production/WebChat fail-closed contract in Windows PowerShell so
+  # deployment does not depend on node.exe being present in a scheduled-task PATH.
+  Require-Marker $siteRoot 'index.html' @('afz-ai-widget.js','afz-ai-widget.css')
+  Require-Marker $siteRoot 'contact.html' @('AFZ AI PROJECT QUESTION PREFILL','AFZ LEAD SOURCE TRACKING')
+  Require-Marker $siteRoot 'services.html' @('afz-ai-widget.js','afz-ai-widget.css')
+  Require-Marker $siteRoot 'afz-ai-widget.js' @('AFZ CHAT SESSION PERSISTENCE','/api/ai-chat')
+  Require-Marker $siteRoot 'afz-ai-widget.css' @('#afz-ai-launcher','#afz-ai-panel')
 
   $checksumLines=New-Object System.Collections.Generic.List[string]
   $managed=New-Object System.Collections.Generic.List[string]
@@ -82,12 +101,13 @@ try{
     if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Managed production file missing: $rel"}
     $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
     $wanted=([string]$p.Value.sha256).ToLowerInvariant()
+    if($wanted -notmatch '^[0-9a-f]{64}$'){throw "Invalid manifest SHA-256 for $rel"}
     if($actual -ne $wanted){throw "Managed production hash mismatch: $rel"}
     $managed.Add($rel);$checksumLines.Add("$actual  $rel")
   }
   if($managed.Count -lt 8){throw "Unexpectedly small managed production set: $($managed.Count)"}
   [IO.File]::WriteAllLines((Join-Path $siteRoot 'managed.sha256'),$checksumLines,(New-Object Text.UTF8Encoding($false)))
-  Invoke-External 'tar.exe' @('-czf',$Archive,'-C',$RepoDir,'production-site') 'Production archive creation failed.'
+  Invoke-External 'tar.exe' @('-czf',$Archive,'-C',$repoRoot.FullName,'production-site') 'Production archive creation failed.'
 
   $bash=@'
 #!/usr/bin/env bash
@@ -165,22 +185,22 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
   Invoke-Ssh "chmod 700 '$RemoteScript' && bash '$RemoteScript'" 'Pi deployment failed.'
   $remotePromoted=$true
 
-  $headers=@{'Cache-Control'='no-cache';'Pragma'='no-cache'}
+  $publicHeaders=@{'Cache-Control'='no-cache';'Pragma'='no-cache'}
   $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-  $home=Invoke-WebRequest -Uri ("https://afzeng.ca/?afz_git_deploy="+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 20
+  $home=Invoke-WebRequest -Uri ("https://afzeng.ca/?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
   if($home.StatusCode -ne 200 -or $home.Content -notmatch 'afz-ai-widget\.js'){throw 'Public home-page verification failed.'}
-  $widget=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-ai-widget.js?afz_git_deploy="+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 20
+  $widget=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-ai-widget.js?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
   if($widget.StatusCode -ne 200 -or $widget.Content -notmatch 'AFZ CHAT SESSION PERSISTENCE' -or $widget.Content -notmatch '/api/ai-chat'){throw 'Public WebChat asset verification failed.'}
-  $meta=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-git-deploy.json?afz_git_deploy="+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 20
+  $meta=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-git-deploy.json?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
   if($meta.StatusCode -ne 200 -or $meta.Content -notmatch [regex]::Escape($ExpectedSiteSha)){throw 'Public Git deployment marker verification failed.'}
-  $chat=Invoke-WebRequest -Uri 'https://afzeng.ca/api/ai-chat' -Method Post -ContentType 'application/json' -Body '{"message":"Do you provide HVAC design?"}' -Headers $headers -UseBasicParsing -TimeoutSec 30
+  $chat=Invoke-WebRequest -Uri 'https://afzeng.ca/api/ai-chat' -Method Post -ContentType 'application/json' -Body '{"message":"Do you provide HVAC design?"}' -Headers $publicHeaders -UseBasicParsing -TimeoutSec 30
   if($chat.StatusCode -ne 200){throw "Public AFZ AI chat returned HTTP $($chat.StatusCode)"}
   $chatData=$chat.Content|ConvertFrom-Json
   if(-not $chatData.answer){throw 'Public AFZ AI chat response contained no answer.'}
 
   $remotePromoted=$false
   Save-Result $true 'completed' 'Git-authoritative AFZ website deployed to Pi and public WebChat verified.' @{
-    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup
+    publicHomeStatus=200;publicWidgetStatus=200;publicChatStatus=200;deploymentMarkerVerified=$true;managedFileCount=$managed.Count;backupPath=$RemoteBackup;sourceTransport='github-codeload-exact-sha'
   }
   exit 0
 }catch{
