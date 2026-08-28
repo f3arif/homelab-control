@@ -13,6 +13,7 @@ on:
       - 'afz-openai-agent/tools/Enable-H3-GitHub-DirectAuth.ps1'
       - 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
       - 'afz-openai-agent/tools/Resume-H3-Qwen27B-Benchmark-ViaGitHubApi.ps1'
+      - 'afz-openai-agent/tools/Switch-H3-Qwen27B-ToApiResume.ps1'
       - '.github/workflows/h3-qwen27b-website-benchmark.yml'
       - '.github/workflows/h3-qwen27b-benchmark-validate.yml'
 
@@ -40,7 +41,8 @@ jobs:
             'afz-openai-agent/tools/Start-H3-GitHub-Direct-Benchmark.ps1',
             'afz-openai-agent/tools/Enable-H3-GitHub-DirectAuth.ps1',
             'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1',
-            'afz-openai-agent/tools/Resume-H3-Qwen27B-Benchmark-ViaGitHubApi.ps1'
+            'afz-openai-agent/tools/Resume-H3-Qwen27B-Benchmark-ViaGitHubApi.ps1',
+            'afz-openai-agent/tools/Switch-H3-Qwen27B-ToApiResume.ps1'
           )
           $failed = $false
           foreach ($file in $files) {
@@ -68,9 +70,10 @@ jobs:
           $authHelper = Get-Content 'afz-openai-agent/tools/Enable-H3-GitHub-DirectAuth.ps1' -Raw
           $runner = Get-Content 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
           $apiResume = Get-Content 'afz-openai-agent/tools/Resume-H3-Qwen27B-Benchmark-ViaGitHubApi.ps1' -Raw
+          $switch = Get-Content 'afz-openai-agent/tools/Switch-H3-Qwen27B-ToApiResume.ps1' -Raw
           $workflow = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
-          $all = $bootstrap + "`n" + $winWatcher + "`n" + $h3Watcher + "`n" + $launcher + "`n" + $authHelper + "`n" + $runner + "`n" + $apiResume
-          $benchmarkOnly = $bootstrap + "`n" + $h3Watcher + "`n" + $launcher + "`n" + $authHelper + "`n" + $runner + "`n" + $apiResume
+          $all = $bootstrap + "`n" + $winWatcher + "`n" + $h3Watcher + "`n" + $launcher + "`n" + $authHelper + "`n" + $runner + "`n" + $apiResume + "`n" + $switch
+          $benchmarkOnly = $bootstrap + "`n" + $h3Watcher + "`n" + $launcher + "`n" + $authHelper + "`n" + $runner + "`n" + $apiResume + "`n" + $switch
 
           foreach ($needle in @(
             'DESKTOP-H3R6CQN',
@@ -100,6 +103,9 @@ jobs:
           }
           if ($apiResume -notmatch 'repos/\$repo/contents' -or $apiResume -notmatch 'Controller-Running' -or $apiResume -notmatch 'AFZ queue/claim') {
             throw 'Authenticated API resume path is missing required direct-H3 safeguards.'
+          }
+          if ($switch -notmatch 'Disable-ScheduledTask' -or $switch -notmatch 'Resume-H3-Qwen27B-Benchmark-ViaGitHubApi.ps1') {
+            throw 'H3 API switch must disable the legacy watcher and launch the authenticated API resume path.'
           }
           foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c')) {
             if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden primitive found: $forbidden" }
