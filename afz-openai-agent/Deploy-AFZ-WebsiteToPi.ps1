@@ -19,7 +19,46 @@ if($JobId -eq $retiredR3Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq 
   exit 42
 }
 
-$core=Join-Path $PSScriptRoot 'Deploy-AFZ-WebsiteToPi-Core.ps1'
-if(-not(Test-Path -LiteralPath $core -PathType Leaf)){throw "AFZ website deployment core missing: $core"}
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $core -ExpectedSiteSha $ExpectedSiteSha -JobId $JobId
-exit $LASTEXITCODE
+# Executor overlap guard. The scheduled-task carrier can end before an orphaned
+# deploy core exits, so carrier/task state alone is not sufficient to prove that
+# another deployment is absent. Serialize new wrappers with a global mutex and
+# independently refuse to launch while any existing deploy-core process is alive.
+$executorMutex=New-Object Threading.Mutex($false,'Global\AFZSiteDeployExecutor')
+$executorLocked=$false
+try{
+  $executorLocked=$executorMutex.WaitOne(0)
+  if(-not $executorLocked){
+    Write-Error 'AFZ_SITE_DEPLOY_OVERLAP: another deploy wrapper owns the executor mutex.'
+    exit 43
+  }
+
+  $isWindowsHost=([string]$env:OS -eq 'Windows_NT')
+  $cim=Get-Command Get-CimInstance -ErrorAction SilentlyContinue
+  if($isWindowsHost -and -not $cim){
+    Write-Error 'AFZ_SITE_DEPLOY_PROCESS_GUARD_UNAVAILABLE: Get-CimInstance is unavailable on Windows.'
+    exit 45
+  }
+  $existingCore=@()
+  if($cim){
+    $existingCore=@(
+      Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object {
+          [int]$_.ProcessId -ne $PID -and
+          ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core\.ps1'
+        }
+    )
+  }
+  if($existingCore.Count -gt 0){
+    $pids=($existingCore | ForEach-Object {[string]$_.ProcessId}) -join ','
+    Write-Error "AFZ_SITE_DEPLOY_ORPHAN_CORE_PRESENT: refusing new deploy while core PID(s) $pids remain alive."
+    exit 44
+  }
+
+  $core=Join-Path $PSScriptRoot 'Deploy-AFZ-WebsiteToPi-Core.ps1'
+  if(-not(Test-Path -LiteralPath $core -PathType Leaf)){throw "AFZ website deployment core missing: $core"}
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $core -ExpectedSiteSha $ExpectedSiteSha -JobId $JobId
+  exit $LASTEXITCODE
+} finally {
+  if($executorLocked){try{$executorMutex.ReleaseMutex()}catch{}}
+  $executorMutex.Dispose()
+}
