@@ -1,0 +1,82 @@
+name: Validate H3 OpenWebUI Bootstrap Transport
+
+on:
+  push:
+    branches:
+      - fix/h3-openwebui-bootstrap-transport-20260828
+    paths:
+      - 'afz-openai-agent/Bootstrap-H3-OpenWebUI-AFZ-Pipe.ps1'
+      - 'afz-openai-agent/openwebui/Run-H3-OpenWebUI-AFZ-Pipe.ps1'
+      - 'afz-openai-agent/openwebui/install_afz_agent_pipe.py'
+      - 'afz-openai-agent/openwebui/smoke_afz_agent_pipe.py'
+      - '.github/workflows/h3-openwebui-transport-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Bootstrap-H3-OpenWebUI-AFZ-Pipe.ps1'
+      - 'afz-openai-agent/openwebui/Run-H3-OpenWebUI-AFZ-Pipe.ps1'
+      - 'afz-openai-agent/openwebui/install_afz_agent_pipe.py'
+      - 'afz-openai-agent/openwebui/smoke_afz_agent_pipe.py'
+      - '.github/workflows/h3-openwebui-transport-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell with Windows PowerShell 5.1 AST
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/Bootstrap-H3-OpenWebUI-AFZ-Pipe.ps1',
+            'afz-openai-agent/openwebui/Run-H3-OpenWebUI-AFZ-Pipe.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){
+              $errors|ForEach-Object{Write-Host $_.Message -ForegroundColor Red}
+              throw "PowerShell parse failed: $file"
+            }
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Compile Python helpers
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile `
+            afz-openai-agent/openwebui/install_afz_agent_pipe.py `
+            afz-openai-agent/openwebui/smoke_afz_agent_pipe.py
+          if($LASTEXITCODE -ne 0){throw 'Python helper compile failed'}
+          Write-Host 'PYTHON COMPILE PASS'
+
+      - name: Validate bounded strict-host transport contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $bootstrap=Get-Content 'afz-openai-agent/Bootstrap-H3-OpenWebUI-AFZ-Pipe.ps1' -Raw
+          $runner=Get-Content 'afz-openai-agent/openwebui/Run-H3-OpenWebUI-AFZ-Pipe.ps1' -Raw
+          foreach($required in @(
+            'StrictHostKeyChecking=yes',
+            'Invoke-NativeCapture',
+            'encoded.Length -gt 6000',
+            'Run-H3-OpenWebUI-AFZ-Pipe.ps1',
+            'DESKTOP-H3R6CQN',
+            'Faiz@100.106.186.118'
+          )){if(-not $bootstrap.Contains($required)){throw "Bootstrap marker missing: $required"}}
+          if($bootstrap.Contains('StrictHostKeyChecking=accept-new')){throw 'accept-new must not be used'}
+          if($bootstrap.Contains('$installerCode') -or $bootstrap.Contains('$smokeCode')){throw 'Large inline payload reintroduced'}
+          foreach($required in @(
+            'install_afz_agent_pipe.py',
+            'smoke_afz_agent_pipe.py',
+            'Invoke-NativeCapture',
+            'OpenWebUI Server',
+            'h3-exact-sha-remote-runner'
+          )){if(-not $runner.Contains($required)){throw "Runner marker missing: $required"}}
+          Write-Host 'BOUNDED STRICT-HOST TRANSPORT CONTRACT PASS'
