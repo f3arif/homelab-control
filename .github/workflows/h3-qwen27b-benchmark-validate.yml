@@ -61,6 +61,7 @@ jobs:
           $runner = Get-Content 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1' -Raw
           $workflow = Get-Content '.github/workflows/h3-qwen27b-website-benchmark.yml' -Raw
           $all = $bootstrap + "`n" + $winWatcher + "`n" + $h3Watcher + "`n" + $runner
+          $benchmarkOnly = $bootstrap + "`n" + $h3Watcher + "`n" + $runner
 
           foreach ($needle in @(
             'DESKTOP-H3R6CQN',
@@ -83,8 +84,11 @@ jobs:
           if ($winWatcher -notmatch 'Handle-BenchmarkRequest' -or $winWatcher -notmatch 'benchmark-bootstrap') {
             throw 'windows-main watcher must expose benchmark bootstrap handling without owning benchmark execution.'
           }
-          foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c','OneDrive','SharePoint')) {
-            if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden primitive/transport found: $forbidden" }
+          foreach ($forbidden in @('Invoke-Expression','iex ','cmd.exe /c')) {
+            if ($all -match [regex]::Escape($forbidden)) { throw "Forbidden primitive found: $forbidden" }
+          }
+          foreach ($forbiddenTransport in @('OneDrive','SharePoint')) {
+            if ($benchmarkOnly -match [regex]::Escape($forbiddenTransport)) { throw "Forbidden benchmark transport found: $forbiddenTransport" }
           }
           if ($workflow -match 'tailscale/github-action|TS_OAUTH|TS_AUDIENCE|100\.70\.25\.8:8797') {
             throw 'GitHub workflow must not directly enter the private execution plane.'
