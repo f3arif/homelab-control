@@ -22,6 +22,19 @@ function Publish-SiteDeployAck {
     }
   } catch {}
 }
+function Invoke-H3ReturnRecovery([string]$Sha){
+  try {
+    $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-DirectReturn-Generation.ps1'
+    if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){
+      return [ordered]@{ok=$false;status='helper-missing';syncedSha=$Sha}
+    }
+    $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -SyncedSha $Sha | Select-Object -Last 1
+    $code=$LASTEXITCODE
+    if($code -ne 0){return [ordered]@{ok=$false;status='helper-process-failed';syncedSha=$Sha;exit=$code}}
+    if($raw -is [string]){try{return $raw|ConvertFrom-Json}catch{return [ordered]@{ok=$false;status='helper-result-invalid';syncedSha=$Sha;raw=[string]$raw}}}
+    return $raw
+  }catch{return [ordered]@{ok=$false;status='helper-exception';syncedSha=$Sha;error=$_.Exception.Message}}
+}
 $headers=@{
   'User-Agent'='AFZ-OpenAI-Agent-Updater'
   'Cache-Control'='no-cache'
@@ -133,7 +146,8 @@ try{
 
   $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
+  $h3ReturnRecovery=Invoke-H3ReturnRecovery $remoteSha
   Publish-SiteDeployAck
   # Only agent-tree file changes require a service restart. A branch-head-only signal commit must not restart services.
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
