@@ -63,29 +63,30 @@ function Invoke-OneShotSshDiagnostic([int]$Generation){
   return $o
 }
 function Invoke-OneShotPublisherDiagnostic([int]$Generation){
-  $diagState=Join-Path $stateRoot ("publisher-diagnostic-g$Generation-v1.json")
+  $diagState=Join-Path $stateRoot ("publisher-diagnostic-g$Generation-v2.json")
   $existing=Read-Json $diagState
   if($existing){return $existing}
   $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
   $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
   $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
   $target='Faiz@100.106.186.118'
-  $stdinFile=Join-Path $env:TEMP ('afz-h3-pubdiag-in-'+[guid]::NewGuid().ToString('n')+'.ps1')
-  $stdoutFile=Join-Path $env:TEMP ('afz-h3-pubdiag-out-'+[guid]::NewGuid().ToString('n')+'.txt')
-  $stderrFile=Join-Path $env:TEMP ('afz-h3-pubdiag-err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stdoutFile=Join-Path $env:TEMP ('afz-h3-pubdiag2-out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stderrFile=Join-Path $env:TEMP ('afz-h3-pubdiag2-err-'+[guid]::NewGuid().ToString('n')+'.txt')
   $remote=@'
 $ErrorActionPreference='Stop'
 $taskName='AFZ H3 GitHub Direct Return Publisher'
 $publisher='C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1'
 $statePath='C:\ProgramData\AFZ\H3GitHubDirect\return-publisher-v3.json'
+$returnEnvelope='C:\ProgramData\AFZ\H3GitHubDirect\return-envelope.json'
 $t=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $i=$null
 if($t){$i=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}
 $stateRaw=$null
 $stateObj=$null
-if(Test-Path -LiteralPath $statePath -PathType Leaf){
-  try{$stateRaw=[IO.File]::ReadAllText($statePath);$stateObj=$stateRaw|ConvertFrom-Json}catch{}
-}
+if(Test-Path -LiteralPath $statePath -PathType Leaf){try{$stateRaw=[IO.File]::ReadAllText($statePath);$stateObj=$stateRaw|ConvertFrom-Json}catch{}}
+$envelopeRaw=$null
+$envelopeObj=$null
+if(Test-Path -LiteralPath $returnEnvelope -PathType Leaf){try{$envelopeRaw=[IO.File]::ReadAllText($returnEnvelope);$envelopeObj=$envelopeRaw|ConvertFrom-Json}catch{}}
 $controllerCount=0
 try{
   foreach($p in Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"){
@@ -94,7 +95,12 @@ try{
   }
 }catch{}
 $legacy=Get-ScheduledTask -TaskName 'AFZ H3 GitHub Direct Benchmark Watcher' -ErrorAction SilentlyContinue
-[ordered]@{
+$action=$null;$principal=$null
+if($t){
+  $action=@($t.Actions|ForEach-Object {[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})
+  $principal=[ordered]@{userId=[string]$t.Principal.UserId;logonType=[string]$t.Principal.LogonType;runLevel=[string]$t.Principal.RunLevel}
+}
+$o=[ordered]@{
   host=$env:COMPUTERNAME
   readOnly=$true
   taskExists=[bool]$t
@@ -102,24 +108,31 @@ $legacy=Get-ScheduledTask -TaskName 'AFZ H3 GitHub Direct Benchmark Watcher' -Er
   taskLastResult=$(if($i){[int]$i.LastTaskResult}else{$null})
   taskLastRunTime=$(if($i){$i.LastRunTime.ToString('o')}else{$null})
   taskNextRunTime=$(if($i){$i.NextRunTime.ToString('o')}else{$null})
+  taskActions=$action
+  taskPrincipal=$principal
   publisherExists=(Test-Path -LiteralPath $publisher -PathType Leaf)
   publisherSha256=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){(Get-FileHash -LiteralPath $publisher -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})
+  publisherLastWrite=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){(Get-Item -LiteralPath $publisher).LastWriteTime.ToString('o')}else{$null})
   stateFileExists=(Test-Path -LiteralPath $statePath -PathType Leaf)
   publisherState=$stateObj
   publisherStateRaw=$(if($stateObj){$null}else{$stateRaw})
+  returnEnvelopeExists=(Test-Path -LiteralPath $returnEnvelope -PathType Leaf)
+  returnEnvelope=$envelopeObj
+  returnEnvelopeRaw=$(if($envelopeObj){$null}else{$envelopeRaw})
   controllerCount=$controllerCount
   legacyWatcherState=$(if($legacy){[string]$legacy.State}else{$null})
   capturedAt=(Get-Date -Format o)
-}|ConvertTo-Json -Depth 15 -Compress
+}
+Write-Output ($o|ConvertTo-Json -Depth 20 -Compress)
 '@
   $exit=$null;$timedOut=$false;$stdout='';$stderr='';$parsed=$null;$exception=$null
   try{
     if(-not(Test-Path -LiteralPath $ssh -PathType Leaf)){throw "ssh.exe missing: $ssh"}
     if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "SYSTEM H3 key missing: $key"}
     if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts missing: $known"}
-    [IO.File]::WriteAllText($stdinFile,$remote,[Text.Encoding]::ASCII)
-    $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-Command','-')
-    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $stdinFile -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru -NoNewWindow
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
+    $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
+    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru -NoNewWindow
     if(-not $p.WaitForExit(30000)){$timedOut=$true;try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
     if(-not $timedOut){$p.WaitForExit();$exit=[int]$p.ExitCode}
     if(Test-Path -LiteralPath $stdoutFile){$stdout=[IO.File]::ReadAllText($stdoutFile)}
@@ -127,12 +140,12 @@ $legacy=Get-ScheduledTask -TaskName 'AFZ H3 GitHub Direct Benchmark Watcher' -Er
     $jsonLine=@(($stdout -split '\r?\n')|Where-Object {$_ -match '^\{.*\}$'}|Select-Object -Last 1)
     if($jsonLine){try{$parsed=$jsonLine|ConvertFrom-Json}catch{}}
   }catch{$exception=$_.Exception.Message}
-  finally{Remove-Item -LiteralPath $stdinFile,$stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue}
+  finally{Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue}
   $o=[ordered]@{
-    schema=1;generation=$Generation;diagnosticVersion=1;readOnly=$true;target=$target;exitCode=$exit;timedOut=$timedOut;
+    schema=1;generation=$Generation;diagnosticVersion=2;readOnly=$true;transport='ssh-encoded-command';target=$target;exitCode=$exit;timedOut=$timedOut;
     remote=$parsed;stdout=$(if($parsed){$null}else{$stdout});stderr=$stderr.Trim();exception=$exception;capturedAt=(Get-Date -Format o)
   }
-  [IO.File]::WriteAllText($diagState,($o|ConvertTo-Json -Depth 20 -Compress),$utf8)
+  [IO.File]::WriteAllText($diagState,($o|ConvertTo-Json -Depth 30 -Compress),$utf8)
   return $o
 }
 function Publish-Diagnostic($Object){
