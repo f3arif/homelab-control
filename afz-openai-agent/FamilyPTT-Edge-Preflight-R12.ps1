@@ -50,7 +50,7 @@ printf 'NPM_CONTAINER='; docker ps --filter name=^/npm-pi$ --format '{{.Names}}'
 printf 'NPM_PORTS='; docker port npm-pi 2>/dev/null | tr '\n' ';' || true; echo
 printf 'PI_TO_API='; if curl -fsS --max-time 6 http://100.71.26.69:7883/health >/dev/null; then echo true; else echo false; fi
 printf 'PI_TO_LIVEKIT='; if timeout 6 bash -lc '</dev/tcp/100.71.26.69/7880' 2>/dev/null; then echo true; else echo false; fi
-printf 'NPM_HTTP_CUSTOM_INCLUDE='; if docker exec npm-pi sh -lc "grep -Rqs '/data/nginx/custom/http.conf' /etc/nginx/nginx.conf /etc/nginx/conf.d 2>/dev/null"; then echo true; else echo false; fi
+printf 'NPM_HTTP_CUSTOM_INCLUDE='; if docker exec npm-pi sh -lc "grep -RqsE '/data/nginx/custom/http(\\[\\.\\]|\\.)conf' /etc/nginx/nginx.conf /etc/nginx/conf.d 2>/dev/null"; then echo true; else echo false; fi
 printf 'NPM_HTTP_CUSTOM_EXISTS='; if [ -f /opt/edge/npm/data/nginx/custom/http.conf ]; then echo true; else echo false; fi
 printf 'CERTBOT='; docker exec npm-pi sh -lc 'command -v certbot >/dev/null 2>&1 && echo true || echo false'
 printf 'CERTBOT_ACCOUNT='; docker exec npm-pi sh -lc 'test -d /etc/letsencrypt/accounts && find /etc/letsencrypt/accounts -mindepth 3 -maxdepth 3 -type d 2>/dev/null | head -n 1 | grep -q . && echo true || echo false'
