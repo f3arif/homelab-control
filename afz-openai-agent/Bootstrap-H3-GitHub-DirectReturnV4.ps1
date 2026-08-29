@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 if($ExpectedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSha required'}
 $ExpectedSha=$ExpectedSha.ToLowerInvariant()
 
-$key='C:\Users\Faiz\.ssh\afz_h3_worker'
+$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $h3='Faiz@100.106.186.118'
 $publisherName='Publish-H3-GitHub-DirectReturn-V3.ps1'
@@ -35,8 +35,12 @@ function Save-State([string]$Status,[string]$Message,$Extra=$null){
 }
 
 try{
-  if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "H3 SSH key missing: $key"}
+  if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "SYSTEM H3 SSH key missing: $key"}
   if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts file missing: $known"}
+  $acl=Get-Acl -LiteralPath $key -ErrorAction Stop
+  if(-not $acl.AreAccessRulesProtected){throw 'SYSTEM H3 SSH key still inherits ACLs'}
+  $unexpected=@($acl.Access | Where-Object {[string]$_.IdentityReference -ne 'NT AUTHORITY\SYSTEM'})
+  if($unexpected.Count -gt 0){throw 'SYSTEM H3 SSH key has non-SYSTEM ACL entries'}
   $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
 
   Save-State 'running' 'Installing H3 return publisher through stdin transport; Qwen is not launched.'
@@ -111,9 +115,6 @@ if(Test-Path -LiteralPath `$pubStatePath){
 } | ConvertTo-Json -Compress
 "@
 
-  # Stream the remote script through redirected stdin so Windows PowerShell never
-  # treats ssh.exe stderr as a terminating NativeCommandError. Success is based
-  # solely on ssh.exe's real exit code; stdout/stderr are captured explicitly.
   $stdinFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-In-'+[guid]::NewGuid().ToString('n')+'.ps1')
   $stdoutFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-Out-'+[guid]::NewGuid().ToString('n')+'.txt')
   $stderrFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-Err-'+[guid]::NewGuid().ToString('n')+'.txt')
@@ -135,9 +136,7 @@ if(Test-Path -LiteralPath `$pubStatePath){
     $line=@(($stdout -split "`r?`n") | Where-Object {$_ -match '^\{.*\}$'} | Select-Object -Last 1)
     $extra=$null
     if($line){try{$extra=$line | ConvertFrom-Json}catch{}}
-    if($extra){
-      $extra | Add-Member -NotePropertyName sshStderr -NotePropertyValue $stderr.Trim() -Force
-    }
+    if($extra){$extra | Add-Member -NotePropertyName sshStderr -NotePropertyValue $stderr.Trim() -Force}
   }finally{
     Remove-Item -LiteralPath $stdinFile,$stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
   }
