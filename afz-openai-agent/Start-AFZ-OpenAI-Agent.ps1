@@ -68,10 +68,9 @@ if(-not $pushTask -and (Test-Path $watcherSrc)){
   Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 }
 
-# Secretless, narrowly typed queue-orphan request watcher. It reads only the fixed
-# GitHub request document, verifies that request.expected_agent_sha exactly equals
-# the deployed source-state SHA, then delegates to the guarded audit/apply runner.
-# It exposes no arbitrary command execution and never reads OneDrive as control input.
+# Secretless, narrowly typed queue-orphan request watcher. The request is deployed
+# atomically inside afz-openai-agent/requests with the exact GitHub source bundle.
+# OneDrive is diagnostic output only; it is never request/control input.
 if(Test-Path $queueOrphanWatcher){
   $queueOrphanTaskName='AFZ Queue Orphan Remediation Request Watcher'
   $queueOrphanTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$queueOrphanWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
@@ -83,8 +82,22 @@ if(Test-Path $queueOrphanWatcher){
     $queueOrphanSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $queueOrphanTaskName -Action $queueOrphanTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $queueOrphanSettings -Principal $queueOrphanPrincipal -Force | Out-Null
   }
+
+  # Reload the watcher after a source deployment so its in-memory code matches the
+  # newly installed exact source. Never interrupt a repair already marked running.
+  $queueOrphanStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\queue-orphan-remediation\request-watcher.json'
+  $queueOrphanBusy=$false
+  if(Test-Path -LiteralPath $queueOrphanStatePath -PathType Leaf){
+    try{$queueOrphanState=Get-Content -LiteralPath $queueOrphanStatePath -Raw|ConvertFrom-Json;$queueOrphanBusy=([string]$queueOrphanState.status -eq 'running')}catch{}
+  }
   $queueOrphanTask=Get-ScheduledTask -TaskName $queueOrphanTaskName -ErrorAction Stop
-  if($queueOrphanTask.State -ne 'Running'){Start-ScheduledTask -TaskName $queueOrphanTaskName}
+  if($queueOrphanTask.State -eq 'Running' -and -not $queueOrphanBusy){
+    Stop-ScheduledTask -TaskName $queueOrphanTaskName -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 400
+    Start-ScheduledTask -TaskName $queueOrphanTaskName
+  }elseif($queueOrphanTask.State -ne 'Running'){
+    Start-ScheduledTask -TaskName $queueOrphanTaskName
+  }
 }
 
 if(Test-Path $familyPttAuditWatcher){
