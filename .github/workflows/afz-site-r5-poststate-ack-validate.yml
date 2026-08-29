@@ -6,11 +6,69 @@ on:
     paths:
       - afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1
       - .github/workflows/afz-site-r5-poststate-ack-validate.yml
+permissions:
+  contents: write
 jobs:
   validate:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/afz-site-r5-poststate-ack
+      - name: Patch diagnostic publisher
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1')
+          s=p.read_text(encoding='utf-8-sig')
+          if 'r5OrphanReleaseStatus' in s:
+              print('R5_POSTSTATE_ACK_ALREADY_PATCHED')
+              raise SystemExit(0)
+          a1="$activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\\requests\\afz-site-deploy.json'\n"
+          r1=a1+"$r5ReleasePath='C:\\ProgramData\\AFZ\\OpenAIAgent\\jobs\\afz-site-deploy\\r5-orphan-release.json'\n$r5JobId='afz-site-git-cutover-r5-20260828T1151'\n"
+          if s.count(a1)!=1: raise SystemExit('active request anchor mismatch')
+          s=s.replace(a1,r1)
+          a2="  $legacyAction=First-TaskAction $legacy\n"
+          r2=a2+'''  $r5Release=Read-SafeJson $r5ReleasePath
+  $r5Core=@();$r5CorePids=@();$r5Ssh=@()
+  try {
+    $all=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $r5Core=@($all | Where-Object {
+      [string]$_.Name -ieq 'powershell.exe' -and
+      ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core[.]ps1' -and
+      ([string]$_.CommandLine) -match [regex]::Escape($r5JobId)
+    })
+    $r5CorePids=@($r5Core | ForEach-Object {[int]$_.ProcessId})
+    $r5Ssh=@($all | Where-Object {
+      [string]$_.Name -ieq 'ssh.exe' -and
+      $r5CorePids -contains [int]$_.ParentProcessId -and
+      ([string]$_.CommandLine) -match [regex]::Escape('192.168.50.68') -and
+      ([string]$_.CommandLine) -match '(?i)mkdir -p' -and
+      ([string]$_.CommandLine) -match [regex]::Escape('/opt/edge/afz-site/git-deploy/stage')
+    })
+  } catch {}
+'''
+          if s.count(a2)!=1: raise SystemExit('legacy action anchor mismatch')
+          s=s.replace(a2,r2)
+          a3="    component='AFZ Website Deploy Post-State ACK'\n"
+          r3=a3+'''    r5OrphanReleaseStateExists=(Test-Path -LiteralPath $r5ReleasePath -PathType Leaf)
+    r5OrphanReleasePurpose=$(if($r5Release){[string]$r5Release.purpose}else{$null})
+    r5OrphanReleaseStatus=$(if($r5Release){[string]$r5Release.status}else{$null})
+    r5OrphanReleaseMessage=$(if($r5Release){[string]$r5Release.message}else{$null})
+    r5OrphanReleaseCorePid=$(if($r5Release -and $null -ne $r5Release.corePid){[int]$r5Release.corePid}else{$null})
+    r5OrphanReleaseSshPid=$(if($r5Release -and $null -ne $r5Release.sshPid){[int]$r5Release.sshPid}else{$null})
+    r5OrphanReleaseCoreStillAlive=$(if($r5Release -and $null -ne $r5Release.coreStillAliveAfterObservation){[bool]$r5Release.coreStillAliveAfterObservation}else{$null})
+    r5CoreProcessCount=@($r5Core).Count
+    r5CorePids=@($r5CorePids)
+    r5SshProcessCount=@($r5Ssh).Count
+    r5SshPids=@($r5Ssh | ForEach-Object {[int]$_.ProcessId})
+'''
+          if s.count(a3)!=1: raise SystemExit('payload anchor mismatch')
+          s=s.replace(a3,r3)
+          p.write_text(s,encoding='utf-8')
+          print('R5_POSTSTATE_ACK_PATCHED')
+          PY
       - name: Parse and verify diagnostic-only contract
         shell: powershell
         run: |
@@ -23,3 +81,15 @@ jobs:
           foreach($needle in @('r5OrphanReleaseStatus','r5CoreProcessCount','r5SshProcessCount','afz-site-git-cutover-r5-20260828T1151','R5_ORPHAN_SSH_RELEASE')){if(-not $text.Contains($needle)){throw "Missing diagnostic marker: $needle"}}
           if($text -match '(?i)Stop-Process|Start-Process|Stop-ScheduledTask|Start-ScheduledTask|Set-ScheduledTask|Disable-ScheduledTask|Enable-ScheduledTask|Remove-Item'){throw 'ACK publisher must remain read-only except its own ACK write'}
           Write-Host 'AFZ SITE R5 POSTSTATE ACK VALIDATION PASS'
+      - name: Commit publisher patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo NO_PATCH_COMMIT_NEEDED
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1
+          git commit -m 'Expose exact R5 cleanup state in website ACK'
+          git push origin HEAD:fix/afz-site-r5-poststate-ack
