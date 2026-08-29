@@ -8,8 +8,12 @@ $priority=Join-Path $shared 'AFZ Priority'
 $target=Join-Path $priority 'AFZ-Priority-Controller.ps1'
 $backups=Join-Path $priority 'Backups'
 $expectedSha256='A5AF34219AE4BE21174F50C5B6101BEA70ABEE406B6F9DC8DBE23C67F32A504D'
-$oldVersion="$controllerVersion = '5.4-hplaptop-bounded-wake-registry'"
-$newVersion="$controllerVersion = '5.5-portable-normal-lenovo-wake'"
+$oldVersion=@'
+$controllerVersion = '5.4-hplaptop-bounded-wake-registry'
+'@.Trim()
+$newVersion=@'
+$controllerVersion = '5.5-portable-normal-lenovo-wake'
+'@.Trim()
 $oldRoute='    $lenovoCandidate=Get-AFZLenovoCandidate'
 $newRoute=@'
     # Portable auto work may wake Lenovo during normal routing rather than waiting for RAM pressure.
