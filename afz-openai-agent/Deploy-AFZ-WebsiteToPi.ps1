@@ -19,6 +19,19 @@ if($JobId -eq $retiredR3Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq 
   exit 42
 }
 
+# R6 reached the Pi but failed before promotion because the Windows-generated
+# managed.sha256 carried CRLF into Bash path parsing. The failed request can
+# remain on a Windows overlay install even after it is deleted from Git. Retire
+# this exact one-time job here so loss/reset of watcher state cannot replay it.
+# Like the R3 tombstone, this is intentionally non-mutating and runs before any
+# deploy-core, SSH, SCP, archive, or Pi operation.
+$retiredR6Job='afz-site-git-cutover-r6-20260828T1602'
+$retiredR6Sha='c38576741ce2d379723fde038300363429845656'
+if($JobId -eq $retiredR6Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq $retiredR6Sha){
+  Write-Output 'AFZ_SITE_DEPLOY_RETIRED_R6: blocked before deploy core.'
+  exit 42
+}
+
 # Executor overlap guard. The scheduled-task carrier can end before an orphaned
 # deploy core exits, so carrier/task state alone is not sufficient to prove that
 # another deployment is absent. Serialize new wrappers with a global mutex and

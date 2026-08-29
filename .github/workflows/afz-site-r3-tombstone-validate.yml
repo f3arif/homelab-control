@@ -1,9 +1,10 @@
-name: AFZ Website R3 Tombstone Validate
+name: AFZ Website Retired Job Tombstone Validate
 
 on:
   push:
     branches:
       - fix/afz-site-r3-tombstone
+      - fix/afz-site-r6-tombstone
     paths:
       - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1'
       - '.github/workflows/afz-site-r3-tombstone-validate.yml'
@@ -50,7 +51,7 @@ jobs:
           test ! -e "$tmp/Deploy-AFZ-WebsiteToPi-Core.ps1"
           echo 'R3 TOMBSTONE PASS'
 
-      - name: Prove other jobs still reach normal core gate
+      - name: Prove exact retired R6 exits before deploy core
         shell: bash
         run: |
           set -euo pipefail
@@ -59,26 +60,53 @@ jobs:
           set +e
           output=$(pwsh -NoProfile -File "$tmp/Deploy-AFZ-WebsiteToPi.ps1" \
             -ExpectedSiteSha c38576741ce2d379723fde038300363429845656 \
-            -JobId afz-site-git-cutover-r4-validation 2>&1)
+            -JobId afz-site-git-cutover-r6-20260828T1602 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$rc" -eq 42
+          grep -Fq 'AFZ_SITE_DEPLOY_RETIRED_R6: blocked before deploy core.' <<<"$output"
+          test ! -e "$tmp/Deploy-AFZ-WebsiteToPi-Core.ps1"
+          echo 'R6 TOMBSTONE PASS'
+
+      - name: Prove R7 still reaches normal core gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1 "$tmp/Deploy-AFZ-WebsiteToPi.ps1"
+          set +e
+          output=$(pwsh -NoProfile -File "$tmp/Deploy-AFZ-WebsiteToPi.ps1" \
+            -ExpectedSiteSha c38576741ce2d379723fde038300363429845656 \
+            -JobId afz-site-git-cutover-r7-20260829T0030 2>&1)
           rc=$?
           set -e
           printf '%s\n' "$output"
           test "$rc" -ne 0
           test "$rc" -ne 42
           grep -Fq 'AFZ website deployment core missing' <<<"$output"
-          echo 'NON-R3 FORWARD PATH PASS'
+          echo 'R7 FORWARD PATH PASS'
 
-      - name: Verify tombstone is exact and non-mutating
+      - name: Verify tombstones are exact and non-mutating
         shell: python
         run: |
           from pathlib import Path
           p=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1').read_text()
-          assert "afz-site-git-cutover-r3-20260827T2138" in p
-          assert "c38576741ce2d379723fde038300363429845656" in p
-          assert "exit 42" in p
-          assert "latest.json" in p
-          assert "Set-Content" not in p
-          assert "Remove-Item" not in p
-          assert "ssh.exe" not in p
-          assert "scp.exe" not in p
-          print('EXACT NON-MUTATING TOMBSTONE PASS')
+          for marker in [
+            'afz-site-git-cutover-r3-20260827T2138',
+            'AFZ_SITE_DEPLOY_RETIRED_R3: blocked before deploy core.',
+            'afz-site-git-cutover-r6-20260828T1602',
+            'AFZ_SITE_DEPLOY_RETIRED_R6: blocked before deploy core.',
+            'c38576741ce2d379723fde038300363429845656',
+            'exit 42'
+          ]:
+            assert marker in p, marker
+          first_core=p.index("$core=Join-Path $PSScriptRoot 'Deploy-AFZ-WebsiteToPi-Core.ps1'")
+          assert p.index('AFZ_SITE_DEPLOY_RETIRED_R3') < first_core
+          assert p.index('AFZ_SITE_DEPLOY_RETIRED_R6') < first_core
+          pre_core=p[:first_core]
+          assert 'Remove-Item' not in pre_core
+          assert 'Set-Content' not in pre_core
+          assert 'ssh.exe' not in pre_core
+          assert 'scp.exe' not in pre_core
+          print('EXACT NON-MUTATING RETIRED-JOB TOMBSTONES PASS')
