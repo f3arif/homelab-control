@@ -1,0 +1,32 @@
+name: AFZ R5 Orphan Action Validate
+on:
+  push:
+    branches:
+      - test/r5-orphan-ssh-release-validate
+    paths:
+      - tests/afz-r5-orphan-action-validate.ps1
+      - .github/workflows/afz-r5-orphan-action-validate.yml
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse exact recovery function
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=(Resolve-Path 'tests/afz-r5-orphan-action-validate.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          $text=Get-Content -LiteralPath $p -Raw
+          foreach($needle in @(
+            "afz-site-git-cutover-r5-20260828T1151",
+            "c38576741ce2d379723fde038300363429845656",
+            "Carrier task ended without a matching deployment result file.",
+            "192.168.50.68",
+            "mkdir -p",
+            "Stop-Process -Id ([int]$ssh[0].ProcessId)"
+          )){if(-not $text.Contains($needle)){throw "Missing required safety marker: $needle"}}
+          if($text -match 'Stop-Process\s+-Id\s+\(\[int\]\$core'){throw 'Function must not directly stop the R5 core'}
+          Write-Host 'R5 ORPHAN SSH RELEASE VALIDATION PASS'
