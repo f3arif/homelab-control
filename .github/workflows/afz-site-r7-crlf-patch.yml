@@ -1,0 +1,87 @@
+name: Patch AFZ Site R7 CRLF Boundary
+
+on:
+  push:
+    branches: [fix/afz-site-cutover-r7-crlf]
+    paths: ['.github/workflows/afz-site-r7-crlf-patch.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/afz-site-cutover-r7-crlf
+          fetch-depth: 0
+
+      - name: Patch exact CRLF boundary and stage R7
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1')
+          s=core.read_text(encoding='utf-8')
+          old="[IO.File]::WriteAllLines((Join-Path $siteRoot 'managed.sha256'),$checksumLines,(New-Object Text.UTF8Encoding($false)))"
+          new="$managedShaPath=Join-Path $siteRoot 'managed.sha256'\n  [IO.File]::WriteAllText($managedShaPath,(($checksumLines -join \"`n\")+\"`n\"),(New-Object Text.UTF8Encoding($false)))"
+          assert old in s, 'managed.sha256 Windows writer anchor missing'
+          s=s.replace(old,new,1)
+          bash_anchor='cd "$STAGE/production-site"\nsha256sum -c managed.sha256'
+          bash_new='cd "$STAGE/production-site"\nsed -i \'s/\\r$//\' managed.sha256\nsha256sum -c managed.sha256'
+          assert bash_anchor in s, 'Pi managed.sha256 validation anchor missing'
+          s=s.replace(bash_anchor,bash_new,1)
+          core.write_text(s,encoding='utf-8',newline='\n')
+
+          req=Path('afz-openai-agent/requests/afz-site-deploy-next.json')
+          d=json.loads(req.read_text(encoding='utf-8'))
+          d['job_id']='afz-site-git-cutover-r7-20260829T0001'
+          d['status']='staged-not-active'
+          req.write_text(json.dumps(d,indent=2)+'\n',encoding='utf-8',newline='\n')
+
+          active=Path('afz-openai-agent/requests/afz-site-deploy.json')
+          assert active.exists(), 'Expected terminal R6 active request missing before retirement'
+          active.unlink()
+
+          wf=Path('.github/workflows/afz-site-pi-deploy-r1-validate.yml')
+          w=wf.read_text(encoding='utf-8')
+          w=w.replace("      - activate/afz-site-cutover-r6\n", "      - activate/afz-site-cutover-r6\n      - fix/afz-site-cutover-r7-crlf\n",1)
+          w=w.replace('Validate staged or exact active R6 and bounded transport contract','Validate staged or exact active R7 and bounded transport contract',1)
+          w=w.replace("'job_id':'afz-site-git-cutover-r6-20260828T1602'","'job_id':'afz-site-git-cutover-r7-20260829T0001'",1)
+          w=w.replace("print('R6 ACTIVE REQUEST CONTRACT PASS')","print('R7 ACTIVE REQUEST CONTRACT PASS')",1)
+          w=w.replace("print('R6 STAGED-NOT-ACTIVE CONTRACT PASS')","print('R7 STAGED-NOT-ACTIVE CONTRACT PASS')",1)
+          w=w.replace("print('R6 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')","print('R7 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')",1)
+          wf.write_text(w,encoding='utf-8',newline='\n')
+
+      - name: Validate patch under Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'Core parse failed'}
+          $text=Get-Content -LiteralPath $file -Raw
+          if(-not $text.Contains('WriteAllText($managedShaPath')){throw 'LF-only writer missing'}
+          if(-not $text.Contains("sed -i 's/\r$//' managed.sha256")){throw 'Pi CR stripping guard missing'}
+          $req=Get-Content 'afz-openai-agent/requests/afz-site-deploy-next.json' -Raw|ConvertFrom-Json
+          if($req.job_id -ne 'afz-site-git-cutover-r7-20260829T0001' -or $req.status -ne 'staged-not-active'){throw 'R7 staged request mismatch'}
+          if(Test-Path 'afz-openai-agent/requests/afz-site-deploy.json'){throw 'Terminal R6 active request must be retired'}
+          Write-Host 'R7 CRLF PATCH CONTRACT PASS'
+
+      - name: Commit patched files and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1 \
+                  afz-openai-agent/requests/afz-site-deploy-next.json \
+                  .github/workflows/afz-site-pi-deploy-r1-validate.yml
+          git rm afz-openai-agent/requests/afz-site-deploy.json
+          git rm .github/workflows/afz-site-r7-crlf-patch.yml
+          git commit -m 'Normalize AFZ site checksum paths and stage R7'
+          git push origin HEAD:fix/afz-site-cutover-r7-crlf
