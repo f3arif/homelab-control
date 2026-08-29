@@ -2,8 +2,8 @@
   "schema": 1,
   "project": "ops",
   "action": "audit-then-quarantine-proven-orphan",
-  "request_id": "queue-orphan-opscpu-20260828-r1",
+  "request_id": "queue-orphan-opscpu-20260828-r2",
   "task_id": "000-000-000-critical-opscpu-live-telemetry-fix-v1-20260828T2142",
-  "expected_agent_sha": "17166053cfd05e4548a0e3ebdc924346f900deb4",
+  "expected_agent_sha": "f84996bd52bf7bc7ebfee5c02afdf2b3041ac98e",
   "enabled": true
 }
