@@ -1,0 +1,80 @@
+name: Home Assistant Runtime Discovery
+
+on:
+  push:
+    branches:
+      - homeassistant-runtime-discovery
+    paths:
+      - '.github/workflows/homeassistant-runtime-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: homeassistant-runtime-discovery
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet read-only discovery lane
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Home Assistant default endpoint on known AFZ nodes
+        shell: bash
+        run: |
+          set -u
+          nodes=(
+            'windows-main|100.70.25.8'
+            'h3|100.106.186.118'
+            'hp|100.71.26.69'
+            'lenovo|100.99.242.89'
+            'pi|100.91.50.9'
+          )
+
+          found=0
+          printf 'HOME_ASSISTANT_DISCOVERY_V1\n'
+          for entry in "${nodes[@]}"; do
+            name="${entry%%|*}"
+            ip="${entry##*|}"
+            url="http://${ip}:8123/"
+            headers="$(mktemp)"
+            body="$(mktemp)"
+            code=$(curl --silent --show-error --location \
+              --connect-timeout 2 --max-time 6 \
+              --dump-header "$headers" --output "$body" \
+              --write-out '%{http_code}' "$url" 2>/dev/null || true)
+            server=$(awk 'BEGIN{IGNORECASE=1} /^server:/{sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}' "$headers")
+            location=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}' "$headers")
+            title=$(python - "$body" <<'PY'
+import re,sys
+p=sys.argv[1]
+try:
+    text=open(p,'r',encoding='utf-8',errors='ignore').read(300000)
+except Exception:
+    text=''
+m=re.search(r'<title[^>]*>(.*?)</title>', text, re.I|re.S)
+print(re.sub(r'\s+',' ',m.group(1)).strip()[:160] if m else '')
+PY
+)
+            signature='none'
+            if grep -Eiq 'home-assistant|home assistant|hass-loading-screen|ha-panel-lovelace|frontend_latest' "$body"; then
+              signature='home-assistant'
+              found=$((found+1))
+            fi
+            printf 'node=%s ip=%s port=8123 http=%s signature=%s server=%q location=%q title=%q\n' \
+              "$name" "$ip" "${code:-000}" "$signature" "$server" "$location" "$title"
+            rm -f "$headers" "$body"
+          done
+          printf 'matches=%s\n' "$found"
+
+          # Discovery is informational. Zero matches is a valid result, not a CI failure.
+          exit 0
