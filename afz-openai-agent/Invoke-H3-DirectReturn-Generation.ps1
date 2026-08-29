@@ -63,17 +63,21 @@ function Invoke-OneShotSshDiagnostic([int]$Generation){
   return $o
 }
 function Invoke-OneShotPublisherDiagnostic([int]$Generation){
-  $diagState=Join-Path $stateRoot ("publisher-diagnostic-g$Generation-v2.json")
+  $diagState=Join-Path $stateRoot ("publisher-diagnostic-g$Generation-v3.json")
   $existing=Read-Json $diagState
   if($existing){return $existing}
   $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
   $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
   $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
   $target='Faiz@100.106.186.118'
-  $stdoutFile=Join-Path $env:TEMP ('afz-h3-pubdiag2-out-'+[guid]::NewGuid().ToString('n')+'.txt')
-  $stderrFile=Join-Path $env:TEMP ('afz-h3-pubdiag2-err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stdoutFile=Join-Path $env:TEMP ('afz-h3-pubdiag3-out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stderrFile=Join-Path $env:TEMP ('afz-h3-pubdiag3-err-'+[guid]::NewGuid().ToString('n')+'.txt')
   $remote=@'
 $ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$VerbosePreference='SilentlyContinue'
+$InformationPreference='SilentlyContinue'
+function Fmt-Date($v){if($null -eq $v){return $null};try{return ([datetime]$v).ToString('o')}catch{return [string]$v}}
 $taskName='AFZ H3 GitHub Direct Return Publisher'
 $publisher='C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1'
 $statePath='C:\ProgramData\AFZ\H3GitHubDirect\return-publisher-v3.json'
@@ -81,47 +85,24 @@ $returnEnvelope='C:\ProgramData\AFZ\H3GitHubDirect\return-envelope.json'
 $t=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $i=$null
 if($t){$i=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}
-$stateRaw=$null
-$stateObj=$null
+$stateRaw=$null;$stateObj=$null
 if(Test-Path -LiteralPath $statePath -PathType Leaf){try{$stateRaw=[IO.File]::ReadAllText($statePath);$stateObj=$stateRaw|ConvertFrom-Json}catch{}}
-$envelopeRaw=$null
-$envelopeObj=$null
+$envelopeRaw=$null;$envelopeObj=$null
 if(Test-Path -LiteralPath $returnEnvelope -PathType Leaf){try{$envelopeRaw=[IO.File]::ReadAllText($returnEnvelope);$envelopeObj=$envelopeRaw|ConvertFrom-Json}catch{}}
 $controllerCount=0
-try{
-  foreach($p in Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"){
-    $cmd=[string]$p.CommandLine
-    if($cmd -and $cmd.Contains('Run-H3-Qwen27B-WebsiteBenchmark.ps1') -and $cmd.Contains('Qwen38-27B-Website-Benchmark-20260826-174739')){$controllerCount++}
-  }
-}catch{}
+try{foreach($p in Get-CimInstance Win32_Process -Filter "Name='powershell.exe'"){$cmd=[string]$p.CommandLine;if($cmd -and $cmd.Contains('Run-H3-Qwen27B-WebsiteBenchmark.ps1') -and $cmd.Contains('Qwen38-27B-Website-Benchmark-20260826-174739')){$controllerCount++}}}catch{}
 $legacy=Get-ScheduledTask -TaskName 'AFZ H3 GitHub Direct Benchmark Watcher' -ErrorAction SilentlyContinue
 $action=$null;$principal=$null
-if($t){
-  $action=@($t.Actions|ForEach-Object {[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})
-  $principal=[ordered]@{userId=[string]$t.Principal.UserId;logonType=[string]$t.Principal.LogonType;runLevel=[string]$t.Principal.RunLevel}
-}
+if($t){$action=@($t.Actions|ForEach-Object {[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}});$principal=[ordered]@{userId=[string]$t.Principal.UserId;logonType=[string]$t.Principal.LogonType;runLevel=[string]$t.Principal.RunLevel}}
 $o=[ordered]@{
-  host=$env:COMPUTERNAME
-  readOnly=$true
-  taskExists=[bool]$t
-  taskState=$(if($t){[string]$t.State}else{$null})
-  taskLastResult=$(if($i){[int]$i.LastTaskResult}else{$null})
-  taskLastRunTime=$(if($i){$i.LastRunTime.ToString('o')}else{$null})
-  taskNextRunTime=$(if($i){$i.NextRunTime.ToString('o')}else{$null})
-  taskActions=$action
-  taskPrincipal=$principal
-  publisherExists=(Test-Path -LiteralPath $publisher -PathType Leaf)
-  publisherSha256=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){(Get-FileHash -LiteralPath $publisher -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})
-  publisherLastWrite=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){(Get-Item -LiteralPath $publisher).LastWriteTime.ToString('o')}else{$null})
-  stateFileExists=(Test-Path -LiteralPath $statePath -PathType Leaf)
-  publisherState=$stateObj
-  publisherStateRaw=$(if($stateObj){$null}else{$stateRaw})
-  returnEnvelopeExists=(Test-Path -LiteralPath $returnEnvelope -PathType Leaf)
-  returnEnvelope=$envelopeObj
-  returnEnvelopeRaw=$(if($envelopeObj){$null}else{$envelopeRaw})
-  controllerCount=$controllerCount
-  legacyWatcherState=$(if($legacy){[string]$legacy.State}else{$null})
-  capturedAt=(Get-Date -Format o)
+  host=$env:COMPUTERNAME;readOnly=$true;taskExists=[bool]$t;taskState=$(if($t){[string]$t.State}else{$null});
+  taskLastResult=$(if($i){[int]$i.LastTaskResult}else{$null});taskLastRunTime=$(if($i){Fmt-Date $i.LastRunTime}else{$null});taskNextRunTime=$(if($i){Fmt-Date $i.NextRunTime}else{$null});
+  taskActions=$action;taskPrincipal=$principal;publisherExists=(Test-Path -LiteralPath $publisher -PathType Leaf);
+  publisherSha256=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){(Get-FileHash -LiteralPath $publisher -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null});
+  publisherLastWrite=$(if(Test-Path -LiteralPath $publisher -PathType Leaf){Fmt-Date (Get-Item -LiteralPath $publisher).LastWriteTime}else{$null});
+  stateFileExists=(Test-Path -LiteralPath $statePath -PathType Leaf);publisherState=$stateObj;publisherStateRaw=$(if($stateObj){$null}else{$stateRaw});
+  returnEnvelopeExists=(Test-Path -LiteralPath $returnEnvelope -PathType Leaf);returnEnvelope=$envelopeObj;returnEnvelopeRaw=$(if($envelopeObj){$null}else{$envelopeRaw});
+  controllerCount=$controllerCount;legacyWatcherState=$(if($legacy){[string]$legacy.State}else{$null});capturedAt=(Get-Date -Format o)
 }
 Write-Output ($o|ConvertTo-Json -Depth 20 -Compress)
 '@
@@ -141,20 +122,11 @@ Write-Output ($o|ConvertTo-Json -Depth 20 -Compress)
     if($jsonLine){try{$parsed=$jsonLine|ConvertFrom-Json}catch{}}
   }catch{$exception=$_.Exception.Message}
   finally{Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue}
-  $o=[ordered]@{
-    schema=1;generation=$Generation;diagnosticVersion=2;readOnly=$true;transport='ssh-encoded-command';target=$target;exitCode=$exit;timedOut=$timedOut;
-    remote=$parsed;stdout=$(if($parsed){$null}else{$stdout});stderr=$stderr.Trim();exception=$exception;capturedAt=(Get-Date -Format o)
-  }
+  $o=[ordered]@{schema=1;generation=$Generation;diagnosticVersion=3;readOnly=$true;transport='ssh-encoded-command';target=$target;exitCode=$exit;timedOut=$timedOut;remote=$parsed;stdout=$(if($parsed){$null}else{$stdout});stderr=$stderr.Trim();exception=$exception;capturedAt=(Get-Date -Format o)}
   [IO.File]::WriteAllText($diagState,($o|ConvertTo-Json -Depth 30 -Compress),$utf8)
   return $o
 }
-function Publish-Diagnostic($Object){
-  try{
-    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
-    $d=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github';observedAt=(Get-Date -Format o);state=$Object}
-    [IO.File]::WriteAllText($diagFile,($d|ConvertTo-Json -Depth 30 -Compress),$utf8)
-  }catch{}
-}
+function Publish-Diagnostic($Object){try{if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return};$d=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github';observedAt=(Get-Date -Format o);state=$Object};[IO.File]::WriteAllText($diagFile,($d|ConvertTo-Json -Depth 30 -Compress),$utf8)}catch{}}
 function Emit($Object){Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 30 -Compress);exit 0}
 
 $generation=0
@@ -168,20 +140,12 @@ try{
   if([string]$r.benchmark_job_id -ne 'qwen27b-website-20260827-i02'){throw 'Unexpected benchmark job id in return generation request'}
   $generation=[int]$r.generation
   if($generation -lt 1){throw 'Return generation must be >= 1'}
-
   $prior=Read-Json $stateFile
-  if($prior -and [int]$prior.generation -ge $generation){
-    $sshDiagnostic=$null
-    $publisherDiagnostic=$null
-    if($generation -le 4){$sshDiagnostic=Invoke-OneShotSshDiagnostic $generation}
-    if($generation -ge 5){$publisherDiagnostic=Invoke-OneShotPublisherDiagnostic $generation}
-    Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior;bootstrapLogTail=(Read-LogTail);sshDiagnostic=$sshDiagnostic;publisherDiagnostic=$publisherDiagnostic})
-  }
+  if($prior -and [int]$prior.generation -ge $generation){$sshDiagnostic=$null;$publisherDiagnostic=$null;if($generation -le 4){$sshDiagnostic=Invoke-OneShotSshDiagnostic $generation};if($generation -ge 5){$publisherDiagnostic=Invoke-OneShotPublisherDiagnostic $generation};Emit ([ordered]@{ok=([bool]$prior.ok);status='already-attempted';generation=$generation;priorStatus=[string]$prior.status;syncedSha=$SyncedSha;prior=$prior;bootstrapLogTail=(Read-LogTail);sshDiagnostic=$sshDiagnostic;publisherDiagnostic=$publisherDiagnostic})}
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){throw "Return bootstrap missing: $bootstrap"}
   $text=Get-Content -LiteralPath $bootstrap -Raw
   if($text -notmatch [regex]::Escape('Return-only recovery: this script never launches Qwen or creates a benchmark iteration.')){throw 'Return-only bootstrap safety marker missing'}
   if($text -notmatch 'Bootstrap-H3-GitHub-DirectReturnV4\.ps1'){throw 'Return bootstrap is not wired to stdin/V4 transport'}
-
   $running=[ordered]@{ok=$false;status='running';generation=$generation;syncedSha=$SyncedSha;benchmarkJobId=[string]$r.benchmark_job_id;mode='return-only-v4';startedAt=(Get-Date -Format o)}
   Write-State $running
   Remove-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
@@ -189,19 +153,7 @@ try{
   $code=$LASTEXITCODE
   $bs=Read-Json $bootstrapState
   $completed=($code -eq 0 -and $bs -and [string]$bs.status -eq 'completed')
-  $terminal=[ordered]@{
-    ok=$completed
-    status=$(if($completed){'completed'}else{'failed'})
-    generation=$generation
-    syncedSha=$SyncedSha
-    benchmarkJobId=[string]$r.benchmark_job_id
-    mode='return-only-v4'
-    bootstrapExit=$code
-    bootstrapStatus=$(if($bs){[string]$bs.status}else{$null})
-    bootstrapMessage=$(if($bs){[string]$bs.message}else{$null})
-    bootstrapLogTail=(Read-LogTail)
-    finishedAt=(Get-Date -Format o)
-  }
+  $terminal=[ordered]@{ok=$completed;status=$(if($completed){'completed'}else{'failed'});generation=$generation;syncedSha=$SyncedSha;benchmarkJobId=[string]$r.benchmark_job_id;mode='return-only-v4';bootstrapExit=$code;bootstrapStatus=$(if($bs){[string]$bs.status}else{$null});bootstrapMessage=$(if($bs){[string]$bs.message}else{$null});bootstrapLogTail=(Read-LogTail);finishedAt=(Get-Date -Format o)}
   Write-State $terminal
   Emit $terminal
 }catch{
