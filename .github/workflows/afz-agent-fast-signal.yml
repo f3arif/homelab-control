@@ -18,37 +18,62 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Publish exact pushed SHA
+      - name: Publish current-main exact source SHA
         uses: actions/github-script@v7
         with:
           script: |
             const path = '.github/afz-agent-deploy-signal.txt';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const content = Buffer.from(`${context.sha}\n`).toString('base64');
-            for (let attempt = 1; attempt <= 4; attempt++) {
-              let currentSha;
+
+            // A push workflow can finish after a newer push. Never let such a stale
+            // run publish a sibling/off-main commit into the Windows deploy signal.
+            // We first prove the triggering SHA is still in main's ancestry, then
+            // publish the current main head snapshot rather than blindly context.sha.
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              const branch = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
+              const headBefore = branch.data.commit.sha;
+
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${context.sha}...${headBefore}`
+              });
+              if (!['ahead', 'identical'].includes(cmp.data.status)) {
+                core.info(`Skipping stale fast-signal run: trigger=${context.sha} main=${headBefore} status=${cmp.data.status}`);
+                return;
+              }
+
+              let signalBlobSha;
               try {
                 const r = await github.rest.repos.getContent({ owner, repo, path, ref: 'main' });
-                if (!Array.isArray(r.data)) currentSha = r.data.sha;
+                if (!Array.isArray(r.data)) signalBlobSha = r.data.sha;
               } catch (e) {
                 if (e.status !== 404) throw e;
               }
+
+              const content = Buffer.from(`${headBefore}\n`).toString('base64');
               try {
-                await github.rest.repos.createOrUpdateFileContents({
+                const write = await github.rest.repos.createOrUpdateFileContents({
                   owner,
                   repo,
                   path,
                   branch: 'main',
-                  message: `AFZ deploy signal ${context.sha.slice(0,12)}`,
+                  message: `AFZ deploy signal ${headBefore.slice(0,12)}`,
                   content,
-                  ...(currentSha ? { sha: currentSha } : {})
+                  ...(signalBlobSha ? { sha: signalBlobSha } : {})
                 });
-                core.info(`Published AFZ deploy signal ${context.sha}`);
-                return;
+                const signalCommit = write.data.commit.sha;
+                const verify = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
+                if (verify.data.commit.sha === signalCommit) {
+                  core.info(`Published race-safe AFZ deploy signal ${headBefore}; signal commit=${signalCommit}`);
+                  return;
+                }
+                core.warning(`Main advanced after signal write; retrying from newest main head.`);
               } catch (e) {
-                if (attempt === 4) throw e;
-                core.warning(`Signal update race on attempt ${attempt}; retrying...`);
-                await new Promise(r => setTimeout(r, 500 * attempt));
+                if (attempt === 6) throw e;
+                core.warning(`Signal update race on attempt ${attempt}; retrying from current main...`);
               }
+              await new Promise(r => setTimeout(r, 500 * attempt));
             }
+            throw new Error('Unable to publish a stable AFZ deploy signal after retries.');
