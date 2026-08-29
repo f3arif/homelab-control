@@ -4,6 +4,6 @@
   "target": "DESKTOP-H3R6CQN",
   "lane": "h3-direct-github-benchmark",
   "benchmark_job_id": "qwen27b-website-20260827-i02",
-  "generation": 3,
-  "note": "Restores the verified Faiz+SYSTEM+Administrators ACL on the existing H3 SSH private key, proves strict host-key SSH, then installs H3 return-only V3 and republishes recovered status/result without launching or duplicating Qwen."
+  "generation": 4,
+  "note": "Return-only generation 4. Uses hardened Start-Process SSH preflight and stdin transport with explicit exit-code/stdout/stderr capture, then installs H3 return publisher V3 to republish recoverable status/result. Never launches or duplicates Qwen or creates a benchmark iteration."
 }
