@@ -13,6 +13,7 @@ $stateFile=Join-Path $stateRoot 'latest.json'
 $logFile=Join-Path $stateRoot 'watcher.log'
 $resultFile='C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTEdgePreflight\latest.json'
 $carrierTaskName='AFZ Edge Backup'
+$staleCarrierSeconds=180
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
@@ -22,6 +23,46 @@ function Valid-Request($r){return ($r -and [int]$r.schema -eq 1 -and [string]$r.
 function Task-IsEnabled($t){return ($t -and [string]$t.State -ne 'Disabled')}
 function New-RestoreAction($s){$p=@{Execute=[string]$s.originalExecute};if($s.originalArguments){$p.Argument=[string]$s.originalArguments};if($s.originalWorkingDirectory){$p.WorkingDirectory=[string]$s.originalWorkingDirectory};New-ScheduledTaskAction @p}
 function Restore-Carrier($s){if(-not $s -or -not $s.originalExecute){throw 'Carrier restore metadata missing'};$a=New-RestoreAction $s;Set-ScheduledTask -TaskName $carrierTaskName -Action $a|Out-Null;if([bool]$s.carrierWasEnabled){Enable-ScheduledTask -TaskName $carrierTaskName|Out-Null}else{Disable-ScheduledTask -TaskName $carrierTaskName|Out-Null}}
+function State-AgeSeconds($s){
+  if(-not $s -or -not $s.updatedAt){return [double]::PositiveInfinity}
+  try{return [math]::Max(0,((Get-Date)-([datetimeoffset]::Parse([string]$s.updatedAt)).LocalDateTime).TotalSeconds)}catch{return [double]::PositiveInfinity}
+}
+function Carrier-IsR12ForJob($carrier,[string]$job){
+  if(-not $carrier){return $false}
+  $a=$carrier.Actions|Select-Object -First 1
+  if(-not $a){return $false}
+  $args=[string]$a.Arguments
+  return ($args -and $args.IndexOf($executor,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $args.IndexOf($job,[StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+function Recover-SupersededCarrier($state,[string]$newJob){
+  if(-not $state -or [string]$state.jobId -eq $newJob -or [string]$state.status -notin @('arming','running')){return $true}
+  $oldJob=[string]$state.jobId
+  $age=State-AgeSeconds $state
+  if($age -lt $staleCarrierSeconds){Log "DEFER new=$newJob prior=$oldJob age=$([int]$age)s";return $false}
+  $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
+  if(-not $carrier){throw 'AFZ Edge Backup carrier missing during stale recovery'}
+  if(-not(Carrier-IsR12ForJob $carrier $oldJob)){
+    Log "REFUSE_STALE_RECOVERY prior=$oldJob reason=carrier-action-mismatch"
+    return $false
+  }
+  if($carrier.State -eq 'Running'){
+    Log "STOP_STALE prior=$oldJob age=$([int]$age)s"
+    Stop-ScheduledTask -TaskName $carrierTaskName -ErrorAction Stop
+    for($i=0;$i -lt 20;$i++){
+      Start-Sleep -Milliseconds 500
+      $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
+      if($carrier -and $carrier.State -ne 'Running'){break}
+    }
+    if($carrier -and $carrier.State -eq 'Running'){
+      Log "REFUSE_STALE_RECOVERY prior=$oldJob reason=carrier-did-not-stop"
+      return $false
+    }
+  }
+  Restore-Carrier $state
+  Save-State ([ordered]@{jobId=$oldJob;status='failed';message=('Superseded stale R12 carrier recovered before '+$newJob);supersededBy=$newJob;updatedAt=(Get-Date -Format o)})
+  Log "RECOVERED_STALE prior=$oldJob next=$newJob"
+  return $true
+}
 function Publish-Issue($r){
   $gh=Get-Command gh.exe -ErrorAction SilentlyContinue;if(-not $gh){return $false}
   $pi=$r.pi;$hp=$r.hp
@@ -30,6 +71,7 @@ function Publish-Issue($r){
 
 Read-only preflight completed through the established Windows-main -> AFZ Edge Backup -> Pi/HP path.
 
+Job: ``$($r.jobId)``
 Pi -> token/API reachable: $($pi.reachesApi)
 Pi -> LiveKit 7880 reachable: $($pi.reachesLiveKit)
 NPM container: $($pi.npmContainer)
@@ -58,6 +100,7 @@ function Handle-Request{
   $req=Read-Json $requestFile;if(-not(Valid-Request $req)){return}
   $job=[string]$req.job_id;$state=Read-Json $stateFile
   if($state -and [string]$state.jobId -eq $job -and [string]$state.status -eq 'completed'){return}
+  if($state -and [string]$state.jobId -ne $job){if(-not(Recover-SupersededCarrier $state $job)){return};$state=Read-Json $stateFile}
   if($state -and [string]$state.jobId -eq $job -and [string]$state.status -eq 'running'){
     $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
     if($carrier -and $carrier.State -eq 'Running'){return}
