@@ -24,7 +24,7 @@ function Read-LogTail{
   try{return @(Get-Content -LiteralPath $logFile -Tail 80 -ErrorAction Stop|ForEach-Object {[string]$_})}catch{return @('LOG_READ_FAILED: '+$_.Exception.Message)}
 }
 function Invoke-OneShotSshDiagnostic([int]$Generation){
-  $diagState=Join-Path $stateRoot ("ssh-diagnostic-g$Generation.json")
+  $diagState=Join-Path $stateRoot ("ssh-diagnostic-g$Generation-v2.json")
   $existing=Read-Json $diagState
   if($existing){return $existing}
   $key='C:\Users\Faiz\.ssh\afz_h3_worker'
@@ -55,7 +55,7 @@ function Invoke-OneShotSshDiagnostic([int]$Generation){
   }catch{$err=('DIAGNOSTIC_EXCEPTION: '+$_.Exception.Message)}
   finally{Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue}
   $o=[ordered]@{
-    schema=1;generation=$Generation;readOnly=$true;remoteCommand='hostname';identityName=[string]$identity.Name;identitySid=[string]$identity.User.Value;
+    schema=1;generation=$Generation;diagnosticVersion=2;readOnly=$true;remoteCommand='hostname';identityName=[string]$identity.Name;identitySid=[string]$identity.User.Value;
     keyPath=$key;aclOwner=$aclOwner;aclProtected=$aclProtected;aclPrincipals=$aclPrincipals;strictHostKeyChecking=$true;target=$target;
     exitCode=$exit;timedOut=$timedOut;stdout=$out;stderr=$err;capturedAt=(Get-Date -Format o)
   }
