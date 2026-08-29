@@ -1,0 +1,5 @@
+AFZ guarded queue orphan remediation
+reason=shared-queue-orphan-after-terminal-result
+target=windows-main
+mode=audit-then-quarantine-only-if-proven-orphan
+requested_at=2026-08-28T22:43:00-04:00
