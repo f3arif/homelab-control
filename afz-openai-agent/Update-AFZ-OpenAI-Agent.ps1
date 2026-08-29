@@ -84,7 +84,9 @@ function Write-TransportDiagnosticAck {
       h3ReturnPostmortem=$h3PostMarker
       time=(Get-Date -Format o)
     }
-    $diag | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json') -Encoding UTF8
+    $diagJson=$diag | ConvertTo-Json -Depth 30
+    $diagJson | Set-Content -LiteralPath (Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json') -Encoding UTF8
+    $diagJson | Set-Content -LiteralPath (Join-Path $diagRoot 'AFZ-R5-PROCESS-PROOF-LATEST.txt') -Encoding UTF8
   } catch {}
 }
 
