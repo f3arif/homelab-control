@@ -85,3 +85,5 @@ jobs:
           git rm .github/workflows/afz-site-r7-crlf-patch.yml
           git commit -m 'Normalize AFZ site checksum paths and stage R7'
           git push origin HEAD:fix/afz-site-cutover-r7-crlf
+
+# retrigger after workflow exists in branch parent
