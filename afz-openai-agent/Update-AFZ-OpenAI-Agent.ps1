@@ -8,6 +8,7 @@ $ErrorActionPreference='Stop'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 $statusFile=Join-Path $stateRoot 'last-update.json'
+$pushWatcherHashMarker=Join-Path $stateRoot 'push-watcher-source.sha256'
 $started=Get-Date
 $mutex=New-Object Threading.Mutex($false,'Global\AFZOpenAIAgentUpdater')
 $locked=$false
@@ -131,6 +132,17 @@ try{
   $prospectUi=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\index.html'
   foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$familyPttEdgeWatcher,$familyPttProvisionWatcher,$familyPttProvisionExecutor,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
+  # The push watcher is a long-lived PowerShell process. Updating its script on disk
+  # does not update the already-running AST. Track the installed watcher hash and let
+  # only the independent fallback updater restart it when the source hash changes.
+  # Exact-SHA updater passes invoked by the watcher itself must never stop their parent.
+  $pushWatcherSourceHash=(Get-FileHash -LiteralPath $pushWatcher -Algorithm SHA256).Hash.ToLowerInvariant()
+  $pushWatcherAppliedHash=''
+  if(Test-Path -LiteralPath $pushWatcherHashMarker -PathType Leaf){
+    try{$pushWatcherAppliedHash=([string](Get-Content -LiteralPath $pushWatcherHashMarker -Raw -Encoding ASCII)).Trim().ToLowerInvariant()}catch{}
+  }
+  $pushWatcherNeedsRefresh=([string]::IsNullOrWhiteSpace($ExpectedSha) -and $pushWatcherAppliedHash -ne $pushWatcherSourceHash)
+
   $ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
   if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}
 
@@ -197,7 +209,14 @@ try{
   }
   Ensure-Running $agentTaskName $changed
   Ensure-Running $controlTaskName $changed
-  Ensure-Running $pushWatcherTaskName $false
+  $pushWatcherRestarted=$false
+  if($pushWatcherNeedsRefresh){
+    Ensure-Running $pushWatcherTaskName $true
+    Set-Content -LiteralPath $pushWatcherHashMarker -Value $pushWatcherSourceHash -Encoding ASCII
+    $pushWatcherRestarted=$true
+  }else{
+    Ensure-Running $pushWatcherTaskName $false
+  }
   Ensure-Running $benchmarkWatcherTaskName $changed
   Ensure-Running $siteWatcherTaskName $changed
   $familyPttCarrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
@@ -212,7 +231,7 @@ try{
   $familyPttProvisionTaskState=[string](Get-ScheduledTask -TaskName $familyPttProvisionTaskName -ErrorAction SilentlyContinue).State
   Write-TransportDiagnosticAck $remoteSha $ExpectedSha $trigger $pushTaskState $siteTaskState
 
-  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;familyPttEdgeProvisionWatcherTask=$familyPttProvisionTaskName;familyPttEdgeProvisionWatcherState=$familyPttProvisionTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
+  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;pushWatcherSourceHash=$pushWatcherSourceHash;pushWatcherAppliedHash=$pushWatcherAppliedHash;pushWatcherRestarted=$pushWatcherRestarted;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;familyPttEdgeProvisionWatcherTask=$familyPttProvisionTaskName;familyPttEdgeProvisionWatcherState=$familyPttProvisionTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
   $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
 } catch {
   $result=[ordered]@{ok=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});error=$_.Exception.Message}
