@@ -90,7 +90,20 @@ function Handle-Request{
   }
 
   $pre=Read-Json $preflightFile
-  if(-not $pre -or [string]$pre.jobId -ne $preflightJob){return}
+  if(-not $pre -or [string]$pre.jobId -ne $preflightJob){
+    $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
+    if($carrier -and $carrier.State -eq 'Running'){return}
+    if(-not(Test-Path -LiteralPath $preflightExecutor -PathType Leaf)){throw 'R12 preflight executor missing'}
+    Log "PREFLIGHT_REFRESH_START job=$job preflight=$preflightJob"
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $preflightExecutor -JobId $preflightJob -ResultFile $preflightFile *> $null
+    $pre=Read-Json $preflightFile
+    if(-not $pre -or [string]$pre.jobId -ne $preflightJob){
+      Save-State ([ordered]@{jobId=$job;preflightJobId=$preflightJob;status='failed';classification='PREFLIGHT_REFRESH_FAILED';message='R12 preflight refresh produced no matching result';updatedAt=(Get-Date -Format o)})
+      Log "PREFLIGHT_REFRESH_FAILED job=$job"
+      return
+    }
+    Log "PREFLIGHT_REFRESH_DONE job=$job class=$($pre.classification)"
+  }
 
   if([string]$pre.classification -eq 'EDGE_PREFLIGHT_RTC_PUBLIC_MEDIA_ROUTE_REQUIRED'){
     $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
@@ -124,7 +137,11 @@ function Handle-Request{
     }
   }
 
-  if(-not [bool]$pre.ok -or [string]$pre.classification -ne 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'){return}
+  if(-not [bool]$pre.ok -or [string]$pre.classification -ne 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'){
+    Save-State ([ordered]@{jobId=$job;preflightJobId=$preflightJob;status='failed';classification=[string]$pre.classification;message='Preflight classification is not eligible for R17 provisioning';updatedAt=(Get-Date -Format o)})
+    Log "PREFLIGHT_NOT_ELIGIBLE job=$job class=$($pre.classification)"
+    return
+  }
   if(-not(Test-Path -LiteralPath $executor -PathType Leaf)){throw 'R17 executor missing'}
   $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue;if(-not $carrier){throw 'AFZ Edge Backup carrier missing'}
   if($carrier.State -eq 'Running'){return}
