@@ -12,6 +12,7 @@ $sourceState=Join-Path $stateRoot 'source-state.json'
 $watchState=Join-Path $stateRoot 'push-watcher.json'
 $logRoot=Join-Path $stateRoot 'logs'
 $logFile=Join-Path $logRoot 'push-watcher.log'
+$r17RefreshMarker=Join-Path $stateRoot 'familyptt-r17-watcher-source.txt'
 $signalBase='https://raw.githubusercontent.com/f3arif/homelab-control/main/.github/afz-agent-deploy-signal.txt'
 $compareBase='https://api.github.com/repos/f3arif/homelab-control/compare'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
@@ -53,6 +54,33 @@ function Save-State([string]$signal,[string]$status,[string]$message){
 function Read-DiagJson([string]$path){
   if(-not(Test-Path -LiteralPath $path -PathType Leaf)){return $null}
   try{return Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message}}
+}
+function Refresh-FamilyPttR17IfSafe{
+  try{
+    $requestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-edge-provision-r17.json'
+    if(-not(Test-Path -LiteralPath $requestPath -PathType Leaf)){return}
+    $req=Get-Content -LiteralPath $requestPath -Raw -Encoding UTF8|ConvertFrom-Json
+    if([string]$req.action -ne 'edge-provision' -or [string]$req.job_id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){return}
+    $r17State=Read-DiagJson 'C:\ProgramData\AFZ\OpenAIAgent\jobs\familyptt-edge-provision-r17\latest.json'
+    if($r17State -and [string]$r17State.jobId -eq [string]$req.job_id -and [string]$r17State.status -in @('arming','rtc-remediating','running','completed','failed')){return}
+    $sha=Current-Sha
+    if($sha -notmatch '^[0-9a-f]{40}$'){return}
+    $prior='';if(Test-Path -LiteralPath $r17RefreshMarker -PathType Leaf){$prior=([string](Get-Content -LiteralPath $r17RefreshMarker -Raw -Encoding UTF8)).Trim().ToLowerInvariant()}
+    if($prior -eq $sha){return}
+    $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
+    if($carrier -and [string]$carrier.State -eq 'Running'){return}
+    $taskName='AFZ FamilyPTT Edge Provision Watcher R17'
+    $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if(-not $task){return}
+    if([string]$task.State -eq 'Running'){
+      Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+      Start-Sleep -Milliseconds 600
+    }
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    Set-Content -LiteralPath $r17RefreshMarker -Value $sha -Encoding ASCII
+    Log "FAMILYPTT_R17_REFRESH job=$($req.job_id) source=$sha"
+    Save-DiagnosticAck '' 'familyptt-r17-refreshed' "R17 watcher refreshed for job=$($req.job_id) source=$sha"
+  }catch{Log "FAMILYPTT_R17_REFRESH_ERROR $($_.Exception.Message)"}
 }
 function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
   # OneDrive is emergency observability only. It is never read as a control/request
@@ -163,6 +191,7 @@ try{
         Save-State $sha 'idle' 'Deploy signal already handled.'
         $lastAttemptSha=''
       }
+      Refresh-FamilyPttR17IfSafe
       $lastError=''
     }catch{
       $msg=$_.Exception.Message
