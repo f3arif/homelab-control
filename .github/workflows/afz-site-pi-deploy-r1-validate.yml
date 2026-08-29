@@ -5,6 +5,8 @@ on:
     branches:
       - fix/afz-site-cutover-r6-bounded-pi-transport
       - activate/afz-site-cutover-r6
+      - stage/afz-site-cutover-r7
+      - activate/afz-site-cutover-r7
   pull_request:
     branches:
       - main
@@ -44,7 +46,7 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate staged or exact active R6 and bounded transport contract
+      - name: Validate staged or exact active R7 and bounded transport contract
         shell: python
         run: |
           import json
@@ -54,7 +56,7 @@ jobs:
             'schema':1,
             'project':'afz-website',
             'action':'deploy-pi-static-site',
-            'job_id':'afz-site-git-cutover-r6-20260828T1602',
+            'job_id':'afz-site-git-cutover-r7-20260829T0030',
             'source_repository':'f3arif/afz-engineering',
             'expected_sha':'c38576741ce2d379723fde038300363429845656'
           }
@@ -64,9 +66,9 @@ jobs:
           if active.exists():
             active_req=json.loads(active.read_text())
             assert active_req == {**expected_base,'status':'active'}
-            print('R6 ACTIVE REQUEST CONTRACT PASS')
+            print('R7 ACTIVE REQUEST CONTRACT PASS')
           else:
-            print('R6 STAGED-NOT-ACTIVE CONTRACT PASS')
+            print('R7 STAGED-NOT-ACTIVE CONTRACT PASS')
 
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           helper=Path('afz-openai-agent/AFZ-Native-Process.ps1').read_text()
@@ -95,7 +97,10 @@ jobs:
             "piRoute",
             "timeout --signal=TERM --kill-after=10s 120s bash",
             "Native process timeout after",
-            "Pi contact begins only after local archive creation + integrity verification passes."
+            "Pi contact begins only after local archive creation + integrity verification passes.",
+            '$managedShaText=($checksumLines -join "`n")+"`n"',
+            'managed.sha256 contains CR characters; Pi transport requires LF-only lines.',
+            '$bash=$bash.Replace("`r`n","`n").Replace("`r","`n")'
           ]
           for marker in required_core: assert marker in core, marker
           archive_call='New-VerifiedProductionArchive $repoRoot.FullName $Archive'
@@ -106,6 +111,7 @@ jobs:
           assert "Invoke-External 'scp.exe'" not in core
           assert '[string[]]$Args' not in core
           assert '& tar.exe @Args' not in core
+          assert "WriteAllLines((Join-Path $siteRoot 'managed.sha256')" not in core
 
           required_helper=[
             'ConvertTo-AFZWindowsCommandLineArgument',
@@ -133,7 +139,7 @@ jobs:
           for marker in required_watcher: assert marker in watcher, marker
           assert "Set-ScheduledTask -TaskName $legacySiteTaskName -Action $newAction" not in watcher
           assert 'AFZ Website Git Deploy Request Watcher' in updater
-          print('R6 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')
+          print('R7 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')
 
       - name: Syntax-check embedded Pi Bash
         shell: python
@@ -219,7 +225,7 @@ jobs:
           }
           Invoke-Expression ($defs -join "`r`n`r`n")
 
-          $TempRoot=Join-Path $env:RUNNER_TEMP 'afz-r6-native-archive'
+          $TempRoot=Join-Path $env:RUNNER_TEMP 'afz-r7-native-archive'
           Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
           $repo=Join-Path $TempRoot 'repo'
           $site=Join-Path $repo 'production-site'
