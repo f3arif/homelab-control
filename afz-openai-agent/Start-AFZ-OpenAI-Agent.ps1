@@ -13,6 +13,7 @@ $uiSrc=Join-Path $sourceRoot 'AFZ-Agent-UI.html'
 $toolsSrc=Join-Path $sourceRoot 'tools'
 $prospectSrc=Join-Path $sourceRoot 'prospect-engine'
 $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
+$queueOrphanWatcher=Join-Path $sourceRoot 'Queue-Orphan-Request-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $familyPttEdgeWatcher=Join-Path $sourceRoot 'FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
@@ -32,7 +33,6 @@ $replacement='$AllowedClients = @('+(($vals|ForEach-Object {"'$_'"}) -join ',')+
 $patched=[regex]::Replace($text,'(?m)^\$AllowedClients\s*=\s*@\([^\r\n]*\)\s*$',[System.Text.RegularExpressions.MatchEvaluator]{param($m)$replacement},1)
 if($patched -eq $text){throw 'Could not inject AFZ client allowlist into runtime copy'}
 
-# Windows PowerShell 5.1 compatibility and current Responses API normalization.
 $patched=$patched.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
 $patched=$patched.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
 $patched=$patched.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]')
@@ -41,8 +41,6 @@ if($patched -match '\[System\.Security\.Cryptography\.ProtectedData\]' -and $pat
   $patched=$patched.Replace("`$ErrorActionPreference = 'Stop'","`$ErrorActionPreference = 'Stop'`r`nAdd-Type -AssemblyName System.Security -ErrorAction Stop")
 }
 
-# $args is an automatic PowerShell variable. Using Args as a normal tool parameter or
-# local call-argument variable can silently erase structured function-call arguments.
 $patched=$patched.Replace('param($Args)','param($ToolArgs)')
 $patched=$patched.Replace('param([string]$Name,$Args)','param([string]$Name,$ToolArgs)')
 $patched=$patched.Replace('$Args.','$ToolArgs.')
@@ -53,11 +51,8 @@ $patched=$patched.Replace('Tool-JellyfinUserViews $Args','Tool-JellyfinUserViews
 $patched=$patched.Replace('$args = [pscustomobject]@{}','$callArgs = [pscustomobject]@{}')
 $patched=$patched.Replace('$args = $call.arguments | ConvertFrom-Json','$callArgs = $call.arguments | ConvertFrom-Json')
 $patched=$patched.Replace('Invoke-Tool ([string]$call.name) $args','Invoke-Tool ([string]$call.name) $callArgs')
-
-# PowerShell 5.1 defaults can mojibake UTF-8 without BOM; read the staged HTML explicitly as UTF-8.
 $patched=$patched.Replace('Get-Content -LiteralPath $file -Raw','Get-Content -LiteralPath $file -Raw -Encoding UTF8')
 
-# The runtime script resolves the UI and typed tool scripts relative to its own path.
 Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI.html') -Force
 $runtimeTools=Join-Path $runtimeRoot 'tools'
 if(Test-Path $runtimeTools){Remove-Item -LiteralPath $runtimeTools -Recurse -Force}
@@ -66,9 +61,6 @@ $runtimeProspect=Join-Path $runtimeRoot 'prospect-engine'
 if(Test-Path $runtimeProspect){Remove-Item -LiteralPath $runtimeProspect -Recurse -Force}
 Copy-Item -LiteralPath $prospectSrc -Destination $runtimeProspect -Recurse -Force
 
-# Fast signal watcher is normally owned by its independent SYSTEM Scheduled Task.
-# Keep a compatibility fallback only for hosts that have not yet received the
-# persistent-task updater repair. The global mutex still prevents duplicates.
 $pushTaskName='AFZ OpenAI Agent Push Deploy Watcher'
 $pushTask=Get-ScheduledTask -TaskName $pushTaskName -ErrorAction SilentlyContinue
 if(-not $pushTask -and (Test-Path $watcherSrc)){
@@ -76,8 +68,25 @@ if(-not $pushTask -and (Test-Path $watcherSrc)){
   Start-Process -FilePath 'powershell.exe' -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 }
 
-# FamilyPTT reverse-pull audit gets an independent SYSTEM scheduled task so its state
-# is visible/restartable without changing the shared AFZ updater or touching other lanes.
+# Secretless, narrowly typed queue-orphan request watcher. It reads only the fixed
+# GitHub request document, verifies that request.expected_agent_sha exactly equals
+# the deployed source-state SHA, then delegates to the guarded audit/apply runner.
+# It exposes no arbitrary command execution and never reads OneDrive as control input.
+if(Test-Path $queueOrphanWatcher){
+  $queueOrphanTaskName='AFZ Queue Orphan Remediation Request Watcher'
+  $queueOrphanTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$queueOrphanWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $queueOrphanTask=Get-ScheduledTask -TaskName $queueOrphanTaskName -ErrorAction SilentlyContinue
+  if($queueOrphanTask){
+    Set-ScheduledTask -TaskName $queueOrphanTaskName -Action $queueOrphanTaskAction | Out-Null
+  }else{
+    $queueOrphanPrincipal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $queueOrphanSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName $queueOrphanTaskName -Action $queueOrphanTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $queueOrphanSettings -Principal $queueOrphanPrincipal -Force | Out-Null
+  }
+  $queueOrphanTask=Get-ScheduledTask -TaskName $queueOrphanTaskName -ErrorAction Stop
+  if($queueOrphanTask.State -ne 'Running'){Start-ScheduledTask -TaskName $queueOrphanTaskName}
+}
+
 if(Test-Path $familyPttAuditWatcher){
   $familyPttTaskName='AFZ FamilyPTT Transport Audit Watcher R3'
   $familyPttTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttAuditWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
@@ -93,9 +102,6 @@ if(Test-Path $familyPttAuditWatcher){
   if($familyPttTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttTaskName}
 }
 
-# FamilyPTT production-edge preflight is isolated from the website lane. The SYSTEM
-# watcher borrows the already-proven AFZ Edge Backup user-context task only while the
-# carrier is idle, restores its action afterwards, and performs read-only checks only.
 if(Test-Path $familyPttEdgeWatcher){
   $familyPttEdgeTaskName='AFZ FamilyPTT Edge Preflight Watcher R12'
   $familyPttEdgeTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttEdgeWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
