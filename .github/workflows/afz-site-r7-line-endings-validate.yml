@@ -1,0 +1,70 @@
+name: AFZ Website R7 Line Endings Validate
+
+on:
+  push:
+    branches:
+      - fix/afz-site-r7-lf-manifest
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+      - '.github/workflows/afz-site-r7-line-endings-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+      - '.github/workflows/afz-site-r7-line-endings-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file=(Resolve-Path 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          Write-Host 'POWERSHELL PARSE PASS'
+
+      - name: Validate LF-only transport contract
+        shell: python
+        run: |
+          from pathlib import Path
+          core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
+          required=[
+            '$managedShaText=($checksumLines -join "`n")+"`n"',
+            '[IO.File]::WriteAllText($managedShaPath,$managedShaText',
+            'managed.sha256 contains CR characters; Pi transport requires LF-only lines.',
+            '$bash=$bash.Replace("`r`n","`n").Replace("`r","`n")'
+          ]
+          for marker in required:
+            assert marker in core, marker
+          assert "WriteAllLines((Join-Path $siteRoot 'managed.sha256')" not in core
+          write_pos=core.index('[IO.File]::WriteAllText($managedShaPath,$managedShaText')
+          archive_pos=core.index('New-VerifiedProductionArchive $repoRoot.FullName $Archive')
+          assert write_pos < archive_pos, 'LF-only manifest must be written before archive creation'
+          print('R7 LF-ONLY TRANSPORT CONTRACT PASS')
+
+      - name: Execute Windows LF-only checksum self-test
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $env:RUNNER_TEMP 'managed.sha256'
+          $lines=New-Object System.Collections.Generic.List[string]
+          $lines.Add(('a'*64)+'  index.html')
+          $lines.Add(('b'*64)+'  assets/app.js')
+          $text=($lines -join "`n")+"`n"
+          [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
+          $bytes=[IO.File]::ReadAllBytes($path)
+          if($bytes -contains 13){throw 'CR byte found in managed.sha256 self-test'}
+          if($bytes[-1] -ne 10){throw 'managed.sha256 does not end with LF'}
+          $roundtrip=[IO.File]::ReadAllText($path)
+          if($roundtrip.Contains("`r")){throw 'CR character found after roundtrip'}
+          Write-Host 'WINDOWS LF-ONLY MANIFEST SELFTEST PASS'

@@ -189,7 +189,13 @@ try{
     $managed.Add($rel);$checksumLines.Add("$actual  $rel")
   }
   if($managed.Count -lt 8){throw "Unexpectedly small managed production set: $($managed.Count)"}
-  [IO.File]::WriteAllLines((Join-Path $siteRoot 'managed.sha256'),$checksumLines,(New-Object Text.UTF8Encoding($false)))
+  # managed.sha256 is consumed by Bash on the Pi. Windows WriteAllLines emits CRLF,
+  # and Bash read -r preserves the trailing CR in the relative path (for example
+  # index.html\r). Emit and verify LF-only UTF-8 so transported paths remain exact.
+  $managedShaPath=Join-Path $siteRoot 'managed.sha256'
+  $managedShaText=($checksumLines -join "`n")+"`n"
+  [IO.File]::WriteAllText($managedShaPath,$managedShaText,(New-Object Text.UTF8Encoding($false)))
+  if(([IO.File]::ReadAllText($managedShaPath)).Contains("`r")){throw 'managed.sha256 contains CR characters; Pi transport requires LF-only lines.'}
   New-VerifiedProductionArchive $repoRoot.FullName $Archive
 
   $bash=@'
@@ -259,6 +265,7 @@ rm -f "$ARCHIVE" '__REMOTE_SCRIPT__'
 printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
 '@
   $bash=$bash.Replace('__JOB_ID__',$JobId).Replace('__EXPECTED_SHA__',$ExpectedSiteSha).Replace('__REMOTE_ARCHIVE__',$RemoteArchive).Replace('__REMOTE_SCRIPT__',$RemoteScript)
+  $bash=$bash.Replace("`r`n","`n").Replace("`r","`n")
   $localRemoteScript=Join-Path $TempRoot 'deploy-on-pi.sh'
   [IO.File]::WriteAllText($localRemoteScript,$bash,(New-Object Text.UTF8Encoding($false)))
 
