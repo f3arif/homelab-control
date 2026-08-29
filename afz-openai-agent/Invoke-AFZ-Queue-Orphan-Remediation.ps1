@@ -25,10 +25,13 @@ function Get-LiveExecutors([string]$Needle){
 }
 function Get-ArtifactClass([System.IO.FileInfo]$File){
   $p=$File.FullName.ToLowerInvariant();$n=$File.Name.ToLowerInvariant()
+  # Location is authoritative: once an artifact is under Quarantine it must not
+  # become movable again merely because the preserved source filename contains
+  # a hold/queue/processing marker.
+  if($p -match '\\quarantine\\'){return 'QUARANTINED'}
   if($n -match 'hold' -or $p -match '\\hold'){return 'HELD'}
   if($p -match '\\results?\\'){return 'RESULT'}
   if($p -match '\\processing\\'){return 'PROCESSING'}
-  if($p -match '\\quarantine\\'){return 'QUARANTINED'}
   if($p -match '\\failed\\'){return 'FAILED'}
   if($p -match '\\completed\\'){return 'COMPLETED'}
   if($p -match '\\queue\\' -or $p -match '\\pending\\'){return 'QUEUED'}
