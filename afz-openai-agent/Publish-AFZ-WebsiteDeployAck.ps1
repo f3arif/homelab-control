@@ -4,11 +4,11 @@ param(
   [string]$InstallRoot='C:\AFZ\homelab-control'
 )
 
-# Emergency observability publisher. A temporary idempotent post-sync cleanup hook is
-# present for the ASUS runtime cleanup job and will be removed after its ACK is collected.
+# Emergency observability publisher. Temporary final cleanup: retire the duplicate
+# OneDrive-named AutoRunner only when it is byte-for-byte equivalent at the Task
+# Scheduler action level to the canonical Queue AutoRunner and the canonical task is healthy.
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
-$cleanupAckFile=Join-Path $diagRoot 'EMERGENCY_FALLBACK-AFZ-RUNTIME-CLEANUP-ELEVATED-LATEST.json'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
 $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
@@ -23,29 +23,55 @@ function First-TaskAction($Task){
   if($a.Count -eq 0){return $null}
   return $a[0]
 }
-function Invoke-OneShotRuntimeCleanup {
-  try {
-    $cleanup=Join-Path $InstallRoot 'afz-openai-agent\Invoke-ASUS-RuntimeCleanupElevated.ps1'
-    if(Test-Path -LiteralPath $cleanup -PathType Leaf){
-      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cleanup *> $null
+function Task-Signature($Task){
+  $a=First-TaskAction $Task
+  if(-not $a){return $null}
+  return (([string]$a.Execute).Trim().ToLowerInvariant()+'|'+([string]$a.Arguments).Trim().ToLowerInvariant())
+}
+function Invoke-FinalAutoRunnerCleanup {
+  $out=[ordered]@{attempted=$true;ok=$false;legacy='AFZ OneDrive Auto Runner';canonical='AFZ Queue AutoRunner';action=$null;message=$null}
+  try{
+    $legacy=Get-ScheduledTask -TaskName $out.legacy -ErrorAction SilentlyContinue
+    $canonical=Get-ScheduledTask -TaskName $out.canonical -ErrorAction SilentlyContinue
+    if(-not $legacy){$out.ok=$true;$out.action='already-absent';$out.message='Legacy AutoRunner is already absent.';return $out}
+    if(-not $canonical){$out.action='retained';$out.message='Canonical Queue AutoRunner is missing.';return $out}
+    if((Task-Signature $legacy) -ne (Task-Signature $canonical)){$out.action='retained';$out.message='Task actions differ; no cleanup performed.';return $out}
+    if(-not [bool]$canonical.Settings.Enabled){Enable-ScheduledTask -TaskName $out.canonical -TaskPath $canonical.TaskPath -ErrorAction Stop|Out-Null}
+    $canonical=Get-ScheduledTask -TaskName $out.canonical -ErrorAction Stop
+    if([string]$canonical.State -ne 'Running'){
+      Start-ScheduledTask -TaskName $out.canonical -TaskPath $canonical.TaskPath -ErrorAction Stop
+      Start-Sleep -Seconds 3
+      $canonical=Get-ScheduledTask -TaskName $out.canonical -ErrorAction Stop
     }
-  } catch {}
+    if([string]$canonical.State -notin @('Running','Ready')){$out.action='retained';$out.message="Canonical state is $($canonical.State).";return $out}
+    if([string]$legacy.State -eq 'Running'){
+      Stop-ScheduledTask -TaskName $out.legacy -TaskPath $legacy.TaskPath -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 2
+    }
+    Disable-ScheduledTask -TaskName $out.legacy -TaskPath $legacy.TaskPath -ErrorAction Stop|Out-Null
+    $legacy=Get-ScheduledTask -TaskName $out.legacy -ErrorAction Stop
+    $canonical=Get-ScheduledTask -TaskName $out.canonical -ErrorAction Stop
+    if([bool]$legacy.Settings.Enabled){throw 'Legacy AutoRunner remained enabled.'}
+    if(-not [bool]$canonical.Settings.Enabled){throw 'Canonical Queue AutoRunner became disabled.'}
+    $out.ok=$true;$out.action='disabled-duplicate';$out.message="Legacy disabled; canonical state=$($canonical.State)."
+    return $out
+  }catch{
+    $out.action='retained-or-partial';$out.message=$_.Exception.Message
+    return $out
+  }
 }
 
 try {
-  if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){Invoke-OneShotRuntimeCleanup;exit 0}
+  if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){exit 0}
 
-  # Run first so the existing, reliably-synced ACK carries the cleanup outcome too.
-  Invoke-OneShotRuntimeCleanup
-  $cleanupState=Read-SafeJson $cleanupAckFile
-
+  $cleanup=Invoke-FinalAutoRunnerCleanup
   $watch=Read-SafeJson $watchStatePath
   $result=Read-SafeJson $resultPath
   $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
-  $legacy=Get-ScheduledTask -TaskName 'AFZ Website Sync to Pi' -ErrorAction SilentlyContinue
+  $legacySite=Get-ScheduledTask -TaskName 'AFZ Website Sync to Pi' -ErrorAction SilentlyContinue
   $siteWatcher=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
   $carrierAction=First-TaskAction $carrier
-  $legacyAction=First-TaskAction $legacy
+  $legacySiteAction=First-TaskAction $legacySite
 
   $payload=[ordered]@{
     schema=1
@@ -71,23 +97,18 @@ try {
     edgeBackupTaskState=$(if($carrier){[string]$carrier.State}else{'missing'})
     edgeBackupExecute=$(if($carrierAction){[string]$carrierAction.Execute}else{$null})
     edgeBackupArguments=$(if($carrierAction){[string]$carrierAction.Arguments}else{$null})
-    legacySiteTaskState=$(if($legacy){[string]$legacy.State}else{'missing'})
-    legacySiteExecute=$(if($legacyAction){[string]$legacyAction.Execute}else{$null})
-    legacySiteArguments=$(if($legacyAction){[string]$legacyAction.Arguments}else{$null})
+    legacySiteTaskState=$(if($legacySite){[string]$legacySite.State}else{'missing'})
+    legacySiteExecute=$(if($legacySiteAction){[string]$legacySiteAction.Execute}else{$null})
+    legacySiteArguments=$(if($legacySiteAction){[string]$legacySiteAction.Arguments}else{$null})
     siteWatcherTaskState=$(if($siteWatcher){[string]$siteWatcher.State}else{'missing'})
-    runtimeCleanupAckExists=(Test-Path -LiteralPath $cleanupAckFile -PathType Leaf)
-    runtimeCleanup=$cleanupState
+    runtimeCleanup=$cleanup
     time=(Get-Date -Format o)
   }
-  $payload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  $payload | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ackFile -Encoding UTF8
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
-      [ordered]@{
-        schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github'
-        component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message
-        runtimeCleanupAckExists=(Test-Path -LiteralPath $cleanupAckFile -PathType Leaf);runtimeCleanup=(Read-SafeJson $cleanupAckFile);time=(Get-Date -Format o)
-      } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+      [ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github';component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message;time=(Get-Date -Format o)} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ackFile -Encoding UTF8
     }
   } catch {}
 }
