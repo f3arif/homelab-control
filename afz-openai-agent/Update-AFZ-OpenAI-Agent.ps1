@@ -35,6 +35,28 @@ function Write-TransportDiagnosticAck {
     $h3Hotfix=Read-DiagnosticJson $h3HotfixPath
     $h3PostHook=Read-DiagnosticJson $h3PostHookPath
     $h3PostMarker=Read-DiagnosticJson $h3PostMarkerPath
+
+    # Read-only R5 post-cleanup proof. This mirrors only process presence into the
+    # existing transport ACK and never stops, starts, or mutates any process/task.
+    $r5JobId='afz-site-git-cutover-r5-20260828T1151'
+    $r5Core=@();$r5CorePids=@();$r5Ssh=@()
+    try {
+      $all=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+      $r5Core=@($all | Where-Object {
+        [string]$_.Name -ieq 'powershell.exe' -and
+        ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core[.]ps1' -and
+        ([string]$_.CommandLine) -match [regex]::Escape($r5JobId)
+      })
+      $r5CorePids=@($r5Core | ForEach-Object {[int]$_.ProcessId})
+      $r5Ssh=@($all | Where-Object {
+        ([string]$_.Name) -match '(?i)^ssh[.]exe$' -and
+        $r5CorePids -contains [int]$_.ParentProcessId -and
+        ([string]$_.CommandLine) -match [regex]::Escape('192.168.50.68') -and
+        ([string]$_.CommandLine) -match '(?i)mkdir -p' -and
+        ([string]$_.CommandLine) -match [regex]::Escape('/opt/edge/afz-site/git-deploy/stage')
+      })
+    } catch {}
+
     $diag=[ordered]@{
       schema=1
       purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
@@ -49,6 +71,11 @@ function Write-TransportDiagnosticAck {
       pushWatcherTaskState=$PushTaskState
       siteWatcherTask='AFZ Website Git Deploy Request Watcher'
       siteWatcherTaskState=$SiteTaskState
+      r5ProbeReadOnly=$true
+      r5CoreProcessCount=@($r5Core).Count
+      r5CorePids=@($r5CorePids)
+      r5SshProcessCount=@($r5Ssh).Count
+      r5SshPids=@($r5Ssh | ForEach-Object {[int]$_.ProcessId})
       h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixPath -PathType Leaf)
       h3ReturnHotfix=$h3Hotfix
       h3ReturnPostmortemHookExists=(Test-Path -LiteralPath $h3PostHookPath -PathType Leaf)
