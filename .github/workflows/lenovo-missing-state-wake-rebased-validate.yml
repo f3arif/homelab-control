@@ -1,0 +1,36 @@
+name: Validate Lenovo missing-state wake rebased patcher
+
+on:
+  push:
+    branches:
+      - afz/lenovo-missing-state-wake-rebased
+    paths:
+      - afz-openai-agent/legacy-priority/Patch-AFZ-Priority-Controller-LenovoMissingWake-Rebased.ps1
+      - .github/workflows/lenovo-missing-state-wake-rebased-validate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and validate patcher contract
+        shell: powershell
+        run: |
+          $p = 'afz-openai-agent/legacy-priority/Patch-AFZ-Priority-Controller-LenovoMissingWake-Rebased.ps1'
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){ throw ((@($errors) | ForEach-Object Message) -join ' | ') }
+          $raw = Get-Content -LiteralPath $p -Raw
+          foreach($needle in @(
+            "13910DFD69C3A6539DC3BF80424780C9DCF3F28FFA82D3D194FC7EFF31B0805C",
+            "5.6-hplaptop-live-recovery",
+            "5.7-lenovo-missing-state-wake",
+            '$st.exists -and (-not $st.fresh)',
+            '$AllowWake -and (-not $st.fresh)'
+          )){
+            if(-not $raw.Contains($needle)){ throw "Missing contract marker: $needle" }
+          }
+          'PASS'
