@@ -49,9 +49,9 @@ function Invoke-OneShotSshDiagnostic([int]$Generation){
     $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),'-o','ConnectTimeout=8',$target,'hostname')
     $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -NoNewWindow
     if(-not $p.WaitForExit(15000)){$timedOut=$true;try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
-    if(-not $timedOut){$exit=[int]$p.ExitCode}
-    if(Test-Path -LiteralPath $stdout){$out=(Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue).Trim()}
-    if(Test-Path -LiteralPath $stderr){$err=(Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim()}
+    if(-not $timedOut){$p.WaitForExit();$exit=[int]$p.ExitCode}
+    if(Test-Path -LiteralPath $stdout){$out=[IO.File]::ReadAllText($stdout).Trim()}
+    if(Test-Path -LiteralPath $stderr){$err=[IO.File]::ReadAllText($stderr).Trim()}
   }catch{$err=('DIAGNOSTIC_EXCEPTION: '+$_.Exception.Message)}
   finally{Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue}
   $o=[ordered]@{
