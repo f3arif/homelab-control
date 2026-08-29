@@ -44,6 +44,18 @@ if($JobId -eq $retiredR7Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq 
   exit 42
 }
 
+# R8 completed the Git-authoritative cutover and verified the public homepage,
+# deployment marker, WebChat asset, and live /api/ai-chat response. This one-time
+# production job must never be replayed if watcher state is lost or a stale local
+# active request survives overlay-style source sync. Retire it before deploy core,
+# SSH, SCP, archive creation, or any Pi mutation.
+$retiredR8Job='afz-site-git-cutover-r8-20260829T1348'
+$retiredR8Sha='c38576741ce2d379723fde038300363429845656'
+if($JobId -eq $retiredR8Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq $retiredR8Sha){
+  Write-Output 'AFZ_SITE_DEPLOY_RETIRED_R8: blocked before deploy core.'
+  exit 42
+}
+
 # Executor overlap guard. The scheduled-task carrier can end before an orphaned
 # deploy core exits, so carrier/task state alone is not sufficient to prove that
 # another deployment is absent. Serialize new wrappers with a global mutex and
