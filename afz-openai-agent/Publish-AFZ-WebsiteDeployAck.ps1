@@ -11,6 +11,8 @@ $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
 $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
+$r5ReleasePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\r5-orphan-release.json'
+$r5JobId='afz-site-git-cutover-r5-20260828T1151'
 
 function Read-SafeJson([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
@@ -33,6 +35,24 @@ try {
   $siteWatcher=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
   $carrierAction=First-TaskAction $carrier
   $legacyAction=First-TaskAction $legacy
+  $r5Release=Read-SafeJson $r5ReleasePath
+  $r5Core=@();$r5CorePids=@();$r5Ssh=@()
+  try {
+    $all=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $r5Core=@($all | Where-Object {
+      [string]$_.Name -ieq 'powershell.exe' -and
+      ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core[.]ps1' -and
+      ([string]$_.CommandLine) -match [regex]::Escape($r5JobId)
+    })
+    $r5CorePids=@($r5Core | ForEach-Object {[int]$_.ProcessId})
+    $r5Ssh=@($all | Where-Object {
+      ([string]$_.Name) -match '(?i)^ssh[.]exe$' -and
+      $r5CorePids -contains [int]$_.ParentProcessId -and
+      ([string]$_.CommandLine) -match [regex]::Escape('192.168.50.68') -and
+      ([string]$_.CommandLine) -match '(?i)mkdir -p' -and
+      ([string]$_.CommandLine) -match [regex]::Escape('/opt/edge/afz-site/git-deploy/stage')
+    })
+  } catch {}
 
   $payload=[ordered]@{
     schema=1
@@ -40,6 +60,17 @@ try {
     source='windows-main'
     controlPlane='github'
     component='AFZ Website Deploy Post-State ACK'
+    r5OrphanReleaseStateExists=(Test-Path -LiteralPath $r5ReleasePath -PathType Leaf)
+    r5OrphanReleasePurpose=$(if($r5Release){[string]$r5Release.purpose}else{$null})
+    r5OrphanReleaseStatus=$(if($r5Release){[string]$r5Release.status}else{$null})
+    r5OrphanReleaseMessage=$(if($r5Release){[string]$r5Release.message}else{$null})
+    r5OrphanReleaseCorePid=$(if($r5Release -and $null -ne $r5Release.corePid){[int]$r5Release.corePid}else{$null})
+    r5OrphanReleaseSshPid=$(if($r5Release -and $null -ne $r5Release.sshPid){[int]$r5Release.sshPid}else{$null})
+    r5OrphanReleaseCoreStillAlive=$(if($r5Release -and $null -ne $r5Release.coreStillAliveAfterObservation){[bool]$r5Release.coreStillAliveAfterObservation}else{$null})
+    r5CoreProcessCount=@($r5Core).Count
+    r5CorePids=@($r5CorePids)
+    r5SshProcessCount=@($r5Ssh).Count
+    r5SshPids=@($r5Ssh | ForEach-Object {[int]$_.ProcessId})
     activeRequestExists=(Test-Path -LiteralPath $activeRequestPath -PathType Leaf)
     watcherStateExists=(Test-Path -LiteralPath $watchStatePath -PathType Leaf)
     watcherStatus=$(if($watch){[string]$watch.status}else{$null})
