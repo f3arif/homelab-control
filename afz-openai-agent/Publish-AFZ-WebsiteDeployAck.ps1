@@ -22,6 +22,16 @@ function First-TaskAction($Task){
   if($a.Count -eq 0){return $null}
   return $a[0]
 }
+function Invoke-OneShotRuntimeAudit {
+  # Temporary audit hook. The child script is read-only except for its own
+  # sanitized local marker/output and exits immediately after its one job id is complete.
+  try {
+    $audit=Join-Path $InstallRoot 'afz-openai-agent\Publish-WindowsRuntimeAuditAck.ps1'
+    if(Test-Path -LiteralPath $audit -PathType Leaf){
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $audit *> $null
+    }
+  } catch {}
+}
 
 try {
   if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){exit 0}
@@ -65,6 +75,7 @@ try {
     time=(Get-Date -Format o)
   }
   $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  Invoke-OneShotRuntimeAudit
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
@@ -74,5 +85,6 @@ try {
       } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ackFile -Encoding UTF8
     }
   } catch {}
+  Invoke-OneShotRuntimeAudit
 }
 exit 0
