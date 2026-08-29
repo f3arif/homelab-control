@@ -189,7 +189,8 @@ try{
     $managed.Add($rel);$checksumLines.Add("$actual  $rel")
   }
   if($managed.Count -lt 8){throw "Unexpectedly small managed production set: $($managed.Count)"}
-  [IO.File]::WriteAllLines((Join-Path $siteRoot 'managed.sha256'),$checksumLines,(New-Object Text.UTF8Encoding($false)))
+  $managedShaPath=Join-Path $siteRoot 'managed.sha256'
+  [IO.File]::WriteAllText($managedShaPath,(($checksumLines -join "`n")+"`n"),(New-Object Text.UTF8Encoding($false)))
   New-VerifiedProductionArchive $repoRoot.FullName $Archive
 
   $bash=@'
@@ -209,6 +210,7 @@ rm -rf "$STAGE" "$BACKUP"
 mkdir -p "$STAGE" "$BACKUP/files"
 tar -xzf "$ARCHIVE" -C "$STAGE"
 cd "$STAGE/production-site"
+sed -i 's/\r$//' managed.sha256
 sha256sum -c managed.sha256
 cp managed.sha256 "$BACKUP/managed.sha256"
 : > "$BACKUP/existed.txt"
