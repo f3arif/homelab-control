@@ -1,13 +1,19 @@
 {
-  "schema": "afz-github-ops-v1",
+  "schema": "afz-github-primary-v1",
   "repository": "f3arif/homelab-control",
-  "control_branch": "github-ops",
+  "source_branch": "main",
+  "coordination_branch": "github-ops",
   "transport_priority": [
     "direct-fabric",
-    "github",
-    "onedrive-fallback",
+    "github-coordination",
+    "onedrive-emergency-fallback",
     "manual"
   ],
+  "planes": {
+    "live_execution": "Control Hub / Direct Fabric / typed AFZ agent APIs",
+    "durable_coordination": "GitHub",
+    "emergency_handoff": "OneDrive / SharePoint"
+  },
   "workers": [
     "windows-main",
     "h3",
@@ -16,16 +22,12 @@
     "hpenvy",
     "pi"
   ],
-  "paths": {
-    "queue": "afz-ops/queue/{worker}",
-    "processing": "afz-ops/processing/{worker}",
-    "results": "afz-ops/results/{worker}",
-    "heartbeat": "afz-ops/heartbeat/{worker}.json",
-    "state": "afz-ops/state"
-  },
-  "migration": {
-    "onedrive_role": "fallback-only-after-cutover",
+  "rules": {
+    "github_is_scheduler": false,
+    "github_is_lease_database": false,
+    "github_is_worker_liveness_authority": false,
+    "onedrive_normal_polling_allowed": false,
     "delete_legacy_branches": false,
-    "disable_onedrive_during_validation": false
+    "disable_onedrive_before_validation": false
   }
 }
