@@ -50,6 +50,26 @@ try{
   $runnerText=$runnerText.Replace('"repos/$repo/contents/$Path?ref=$Ref"','"repos/$repo/contents/${Path}?ref=${Ref}"')
   $runnerText=$runnerText.Replace('"repos/$repo/contents/$Path?ref=$resultBranch"','"repos/$repo/contents/${Path}?ref=${resultBranch}"')
   if($runnerText -eq $before){throw 'Ridge16K GitHub contents URL compatibility patch did not match the exact-SHA runner.'}
+
+  # Add durable phase evidence around the one allowed Ollama POST. This does not
+  # change the request, model, prompt, context, or call count. It only makes future
+  # interrupted runs distinguishable as pre-call, call-started, or call-returned.
+  $phaseBefore=$runnerText
+  $runnerText=$runnerText.Replace(
+    'Write-Json $requestFile $body',
+    "$state.phase='pre_ollama'`r`n$state.model_call_attempted=$false`r`n$state.ollama_request_written_at=(Get-Date).ToString('o')`r`nWrite-Json $stateFile $state`r`nWrite-Json $requestFile $body"
+  )
+  $runnerText=$runnerText.Replace(
+    '$modelStart=Get-Date',
+    "$state.phase='ollama_post_started'`r`n$state.model_call_attempted=$true`r`n$state.ollama_post_started_at=(Get-Date).ToString('o')`r`nWrite-Json $stateFile $state`r`n$modelStart=Get-Date"
+  )
+  $runnerText=$runnerText.Replace(
+    '$curlExit=$LASTEXITCODE',
+    "$curlExit=$LASTEXITCODE`r`n$state.phase='ollama_post_returned'`r`n$state.ollama_post_returned_at=(Get-Date).ToString('o')`r`n$state.ollama_curl_exit=$curlExit`r`nWrite-Json $stateFile $state"
+  )
+  if($runnerText -eq $phaseBefore -or $runnerText -notmatch 'ollama_post_started' -or $runnerText -notmatch 'ollama_post_returned'){
+    throw 'Ridge16K phase-evidence compatibility patch did not match the exact-SHA runner.'
+  }
   [IO.File]::WriteAllText($tmp,$runnerText,$utf8)
 
   $tokens=$null;$errors=$null
