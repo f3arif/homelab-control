@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "project": "afz-website",
+  "action": "deploy-pi-static-site",
+  "job_id": "afz-site-git-cutover-r7-20260829T0030",
+  "source_repository": "f3arif/afz-engineering",
+  "expected_sha": "c38576741ce2d379723fde038300363429845656",
+  "status": "active"
+}
