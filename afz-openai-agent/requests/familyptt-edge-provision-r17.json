@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "project": "familyptt",
-  "action": "edge-provision-staged",
+  "action": "edge-provision",
   "issue": 17,
-  "job_id": "familyptt-edge-provision-17-r17a",
+  "job_id": "familyptt-edge-provision-17-r17b",
   "preflight_job_id": "familyptt-edge-preflight-17-r12d"
 }
