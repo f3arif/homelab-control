@@ -7,6 +7,8 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+$diagnosticRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$diagnosticPath=Join-Path $diagnosticRoot 'AFZ-QUEUE-ORPHAN-RUNNER-LATEST.json'
 
 function Get-LiveExecutors([string]$Needle){
   $rows=@()
@@ -85,6 +87,13 @@ function Get-JanitorState{
     return [ordered]@{exists=$true;state=[string]$t.State;lastRun=$i.LastRunTime;lastResult=$i.LastTaskResult;nextRun=$i.NextRunTime}
   }catch{return [ordered]@{exists=$false;state='MISSING';error=$_.Exception.Message}}
 }
+function Write-Diagnostic($Object){
+  try{
+    if(Test-Path -LiteralPath $diagnosticRoot -PathType Container){
+      $Object|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $diagnosticPath -Encoding UTF8
+    }
+  }catch{}
+}
 
 $started=Get-Date
 $searchRoots=@(Get-SearchRoots)
@@ -101,13 +110,25 @@ elseif($terminal.Count -gt 0 -and $movable.Count -gt 0){$diagnosis='ORPHAN_AFTER
 elseif($terminal.Count -gt 0){$diagnosis='TERMINAL_RESULT_NO_ORPHAN'}
 elseif($movable.Count -gt 0){$diagnosis='NONTERMINAL_ARTIFACT_REQUIRES_REVIEW'}
 
+$auditResult=[ordered]@{
+  ok=$true;action='audit';taskId=$TaskId;diagnosis=$diagnosis
+  counts=[ordered]@{liveExecutors=$live.Count;terminal=$terminal.Count;movable=$movable.Count}
+  janitor=$janitor;liveExecutorProcesses=$live;terminalEvidence=$terminalSummary;movableArtifacts=$movableSummary;searchRoots=$searchRoots;generatedAt=(Get-Date).ToString('o')
+}
 if($Action -eq 'audit'){
-  [ordered]@{ok=$true;action='audit';taskId=$TaskId;diagnosis=$diagnosis;counts=[ordered]@{liveExecutors=$live.Count;terminal=$terminal.Count;movable=$movable.Count};janitor=$janitor;liveExecutorProcesses=$live;terminalEvidence=$terminalSummary;movableArtifacts=$movableSummary;searchRoots=$searchRoots;generatedAt=(Get-Date).ToString('o')}|ConvertTo-Json -Depth 10 -Compress
+  Write-Diagnostic $auditResult
+  $auditResult|ConvertTo-Json -Depth 10 -Compress
   exit 0
 }
-if($diagnosis -ne 'ORPHAN_AFTER_TERMINAL_RESULT'){throw "Refusing apply: diagnosis is '$diagnosis', expected ORPHAN_AFTER_TERMINAL_RESULT."}
+if($diagnosis -ne 'ORPHAN_AFTER_TERMINAL_RESULT'){
+  Write-Diagnostic $auditResult
+  throw "Refusing apply: diagnosis is '$diagnosis', expected ORPHAN_AFTER_TERMINAL_RESULT."
+}
 $liveBeforeApply=@(Get-LiveExecutors $TaskId)
-if($liveBeforeApply.Count -gt 0){throw 'Refusing apply: a live executor appeared before quarantine.'}
+if($liveBeforeApply.Count -gt 0){
+  Write-Diagnostic $auditResult
+  throw 'Refusing apply: a live executor appeared before quarantine.'
+}
 
 $stamp=$started.ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
 $safeTask=($TaskId -replace '[^A-Za-z0-9._-]','_')
@@ -122,8 +143,13 @@ foreach($entry in $movableSummary){
   Move-Item -LiteralPath $entry.path -Destination $dest -ErrorAction Stop
   $moved += [ordered]@{source=$entry.path;destination=$dest;classification=$entry.classification;sha256Before=$entry.sha256;sha256After=(Get-SafeHash $dest)}
 }
-$manifest=[ordered]@{schemaVersion='1.0';action='apply';taskId=$TaskId;diagnosis='ORPHAN_AFTER_TERMINAL_RESULT';repairedAt=(Get-Date).ToString('o');safety=[ordered]@{liveExecutorsInitial=$live.Count;liveExecutorsBeforeApply=$liveBeforeApply.Count;terminalEvidenceCount=$terminal.Count;deletedFiles=0;terminalResultMoved=$false};janitor=$janitor;terminalEvidence=$terminalSummary;quarantinedArtifacts=$moved}
+$manifest=[ordered]@{
+  schemaVersion='1.0';action='apply';taskId=$TaskId;diagnosis='ORPHAN_AFTER_TERMINAL_RESULT';repairedAt=(Get-Date).ToString('o')
+  safety=[ordered]@{liveExecutorsInitial=$live.Count;liveExecutorsBeforeApply=$liveBeforeApply.Count;terminalEvidenceCount=$terminal.Count;deletedFiles=0;terminalResultMoved=$false}
+  janitor=$janitor;terminalEvidence=$terminalSummary;quarantinedArtifacts=$moved
+}
 $manifestPath=Join-Path $destinationRoot 'quarantine-manifest.json'
 $manifest|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $manifestPath -Encoding UTF8
 $manifest['manifestPath']=$manifestPath;$manifest['ok']=$true
+Write-Diagnostic $manifest
 $manifest|ConvertTo-Json -Depth 10 -Compress
