@@ -4,6 +4,6 @@
   "target": "DESKTOP-H3R6CQN",
   "lane": "h3-direct-github-benchmark",
   "benchmark_job_id": "qwen27b-website-20260827-i02",
-  "generation": 4,
-  "note": "Return-only generation 4. Uses hardened Start-Process SSH preflight and stdin transport with explicit exit-code/stdout/stderr capture, then installs H3 return publisher V3 to republish recoverable status/result. Never launches or duplicates Qwen or creates a benchmark iteration."
+  "generation": 5,
+  "note": "Return-only generation 5. Windows exact-SHA source includes the dedicated SYSTEM-only ProgramData SSH key copy plus hardened Start-Process preflight/stdin transport. Installs H3 return publisher V3 only to republish recoverable status/result. Never launches or duplicates Qwen and never creates a benchmark iteration."
 }
