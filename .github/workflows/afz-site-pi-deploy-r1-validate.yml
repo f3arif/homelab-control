@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/afz-site-cutover-r6-bounded-pi-transport
+      - activate/afz-site-cutover-r6
   pull_request:
     branches:
       - main
@@ -43,24 +44,29 @@ jobs:
             Write-Host "PARSE PASS $file"
           }
 
-      - name: Validate staged R6 and bounded transport contract
+      - name: Validate staged or exact active R6 and bounded transport contract
         shell: python
         run: |
           import json
           from pathlib import Path
 
-          expected={
+          expected_base={
             'schema':1,
             'project':'afz-website',
             'action':'deploy-pi-static-site',
             'job_id':'afz-site-git-cutover-r6-20260828T1602',
             'source_repository':'f3arif/afz-engineering',
-            'expected_sha':'c38576741ce2d379723fde038300363429845656',
-            'status':'staged-not-active'
+            'expected_sha':'c38576741ce2d379723fde038300363429845656'
           }
           staged=json.loads(Path('afz-openai-agent/requests/afz-site-deploy-next.json').read_text())
-          assert staged == expected
-          assert not Path('afz-openai-agent/requests/afz-site-deploy.json').exists(), 'R6 must remain staged and inactive during validation'
+          assert staged == {**expected_base,'status':'staged-not-active'}
+          active=Path('afz-openai-agent/requests/afz-site-deploy.json')
+          if active.exists():
+            active_req=json.loads(active.read_text())
+            assert active_req == {**expected_base,'status':'active'}
+            print('R6 ACTIVE REQUEST CONTRACT PASS')
+          else:
+            print('R6 STAGED-NOT-ACTIVE CONTRACT PASS')
 
           core=Path('afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').read_text()
           helper=Path('afz-openai-agent/AFZ-Native-Process.ps1').read_text()
@@ -127,7 +133,7 @@ jobs:
           for marker in required_watcher: assert marker in watcher, marker
           assert "Set-ScheduledTask -TaskName $legacySiteTaskName -Action $newAction" not in watcher
           assert 'AFZ Website Git Deploy Request Watcher' in updater
-          print('R6 STAGED + BOUNDED TRANSPORT CONTRACT PASS')
+          print('R6 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')
 
       - name: Syntax-check embedded Pi Bash
         shell: python
