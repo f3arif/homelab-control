@@ -32,6 +32,18 @@ if($JobId -eq $retiredR6Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq 
   exit 42
 }
 
+# R7 reached the Pi promotion path, then Windows public verification failed when
+# the deploy core assigned to the read-only automatic $HOME variable. The catch
+# path rolled the remote promotion back and the watcher restored both carrier and
+# legacy publisher. Permanently retire this exact failed job before any deploy
+# core/SSH/SCP activity so a stale overlay request can never replay it.
+$retiredR7Job='afz-site-git-cutover-r7-20260829T0030'
+$retiredR7Sha='c38576741ce2d379723fde038300363429845656'
+if($JobId -eq $retiredR7Job -and $ExpectedSiteSha.Trim().ToLowerInvariant() -eq $retiredR7Sha){
+  Write-Output 'AFZ_SITE_DEPLOY_RETIRED_R7: blocked before deploy core.'
+  exit 42
+}
+
 # Executor overlap guard. The scheduled-task carrier can end before an orphaned
 # deploy core exits, so carrier/task state alone is not sufficient to prove that
 # another deployment is absent. Serialize new wrappers with a global mutex and
