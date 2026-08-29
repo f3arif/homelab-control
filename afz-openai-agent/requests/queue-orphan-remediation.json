@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "project": "ops",
-  "action": "audit-then-quarantine-proven-orphan",
-  "request_id": "queue-orphan-opscpu-20260828-r6-postfix-verify1",
-  "task_id": "000-000-000-critical-opscpu-live-telemetry-fix-v1-20260828T2142",
-  "enabled": true
-}
