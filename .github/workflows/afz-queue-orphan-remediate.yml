@@ -1,0 +1,154 @@
+name: AFZ Queue Orphan Remediate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/afz-queue-orphan-remediate.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-queue-orphan-remediate
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      TASK_ID: 000-000-000-critical-opscpu-live-telemetry-fix-v1-20260828T2142
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Deploy exact remediation source to Windows-main
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(python - <<'PY'
+          import json, os
+          print(json.dumps({"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":os.environ["AFZ_SHA"]}))
+          PY
+          )
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 15 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy >/dev/null
+
+      - name: Wait for typed remediation endpoint at exact SHA
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 8 http://100.70.25.8:8797/health 2>/dev/null); then
+              if HEALTH="$health" python - <<'PY'
+          import json, os
+          h=json.loads(os.environ['HEALTH'])
+          assert (h.get('commit') or '').lower() == os.environ['AFZ_SHA'].lower()
+          assert h.get('version') == '1.7.0'
+          q=h.get('queueOrphanRemediation') or {}
+          assert q.get('typed') is True
+          assert q.get('route') == '/api/queue-orphan-remediation'
+          assert q.get('arbitraryShell') is False
+          PY
+              then
+                echo 'Typed queue remediation endpoint is ready at exact source SHA.'
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo 'Windows-main did not reach the exact typed remediation source in time.' >&2
+          exit 1
+
+      - name: Audit affected task without mutation
+        id: audit
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(python - <<'PY'
+          import json, os
+          print(json.dumps({"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":os.environ['AFZ_SHA'],"action":"audit","taskId":os.environ['TASK_ID']}))
+          PY
+          )
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 30 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/queue-orphan-remediation > audit.json
+          python - <<'PY'
+          import json
+          a=json.load(open('audit.json'))
+          c=a.get('counts') or {}
+          print(f"diagnosis={a.get('diagnosis')} live={c.get('liveExecutors')} terminal={c.get('terminal')} movable={c.get('movable')}")
+          assert a.get('ok') is True
+          assert a.get('diagnosis') == 'ORPHAN_AFTER_TERMINAL_RESULT'
+          assert c.get('liveExecutors') == 0
+          assert int(c.get('terminal') or 0) >= 1
+          assert int(c.get('movable') or 0) >= 1
+          PY
+
+      - name: Quarantine only the proven orphan artifacts
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(python - <<'PY'
+          import json, os
+          print(json.dumps({"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":os.environ['AFZ_SHA'],"action":"apply","taskId":os.environ['TASK_ID']}))
+          PY
+          )
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 30 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/queue-orphan-remediation > apply.json
+          python - <<'PY'
+          import json
+          a=json.load(open('apply.json'))
+          s=a.get('safety') or {}
+          q=a.get('quarantinedArtifacts') or []
+          print(f"quarantined={len(q)} diagnosis={a.get('diagnosis')}")
+          assert a.get('ok') is True
+          assert a.get('diagnosis') == 'ORPHAN_AFTER_TERMINAL_RESULT'
+          assert s.get('deletedFiles') == 0
+          assert s.get('terminalResultMoved') is False
+          assert int(s.get('liveExecutorsBeforeApply') or 0) == 0
+          assert len(q) >= 1
+          PY
+
+      - name: Verify runnable orphan is gone
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(python - <<'PY'
+          import json, os
+          print(json.dumps({"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":os.environ['AFZ_SHA'],"action":"audit","taskId":os.environ['TASK_ID']}))
+          PY
+          )
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 30 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/queue-orphan-remediation > post.json
+          python - <<'PY'
+          import json
+          a=json.load(open('post.json'))
+          c=a.get('counts') or {}
+          print(f"post_diagnosis={a.get('diagnosis')} live={c.get('liveExecutors')} terminal={c.get('terminal')} movable={c.get('movable')}")
+          assert a.get('ok') is True
+          assert c.get('liveExecutors') == 0
+          assert c.get('movable') == 0
+          assert a.get('diagnosis') in ('TERMINAL_RESULT_NO_ORPHAN','NO_MATCHING_ARTIFACT')
+          PY
