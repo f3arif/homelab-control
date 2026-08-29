@@ -1,0 +1,31 @@
+{
+  "schema": "afz-github-ops-v1",
+  "repository": "f3arif/homelab-control",
+  "control_branch": "github-ops",
+  "transport_priority": [
+    "direct-fabric",
+    "github",
+    "onedrive-fallback",
+    "manual"
+  ],
+  "workers": [
+    "windows-main",
+    "h3",
+    "lenovo",
+    "hplaptop",
+    "hpenvy",
+    "pi"
+  ],
+  "paths": {
+    "queue": "afz-ops/queue/{worker}",
+    "processing": "afz-ops/processing/{worker}",
+    "results": "afz-ops/results/{worker}",
+    "heartbeat": "afz-ops/heartbeat/{worker}.json",
+    "state": "afz-ops/state"
+  },
+  "migration": {
+    "onedrive_role": "fallback-only-after-cutover",
+    "delete_legacy_branches": false,
+    "disable_onedrive_during_validation": false
+  }
+}
