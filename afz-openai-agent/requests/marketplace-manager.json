@@ -1,6 +1,6 @@
 {
   "schema": 1,
   "project": "marketplace-manager",
-  "job_id": "marketplace-manager-20260828-r1",
+  "job_id": "marketplace-manager-20260829-worker-ack-r2",
   "action": "install-validate-dryrun"
 }
