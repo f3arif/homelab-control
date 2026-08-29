@@ -1,0 +1,55 @@
+name: Validate Lenovo Direct GitHub portable canary
+
+on:
+  push:
+    branches: [afz/lenovo-direct-portable-canary]
+    paths:
+      - afz-openai-agent/portable-jobs/**
+      - afz-openai-agent/direct-portable/**
+      - .github/workflows/lenovo-direct-portable-canary-validate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell and validate direct contract
+        shell: powershell
+        run: |
+          $files=@(
+            'afz-openai-agent/portable-jobs/lenovo-direct-canary-r1.ps1',
+            'afz-openai-agent/direct-portable/Patch-Lenovo-DirectWorker-GitHubPortableCanary.ps1'
+          )
+          foreach($p in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+            if(@($errors).Count){ throw "$p parse failed: $((@($errors)|ForEach-Object Message)-join ' | ')" }
+          }
+          $canary=Get-Content 'afz-openai-agent/portable-jobs/lenovo-direct-canary-r1.ps1' -Raw
+          foreach($m in @('# AFZ_PORTABLE_WINDOWS=1','# AFZ_LENOVO_ALLOWED=1','# AFZ_DIRECT_PORTABLE=1','# AFZ_DIRECT_RISK=A0')){if(-not $canary.Contains($m)){throw "missing canary marker $m"}}
+          $patch=Get-Content 'afz-openai-agent/direct-portable/Patch-Lenovo-DirectWorker-GitHubPortableCanary.ps1' -Raw
+          foreach($m in @('B89D762864943F775434CCB03752B2507C90077D1F1A2127CEA7163704344BA6','raw.githubusercontent.com','65536','AFZ_GITHUB_PORTABLE_CANARY_V1','portable-powershell-github')){if(-not $patch.Contains($m)){throw "missing worker guard $m"}}
+          if($patch -match '(?i)encodedcommand\s+\$Payload|command\s*=\s*\[string\]\$Payload'){throw 'raw command payload path detected'}
+          'WINDOWS_VALIDATION=PASS'
+
+  validate-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate HP patch and contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n afz-openai-agent/direct-portable/Deploy-ControlHub-Lenovo-GitHubPortableCanary.sh
+          p=afz-openai-agent/direct-portable/Deploy-ControlHub-Lenovo-GitHubPortableCanary.sh
+          grep -q 'b1b2c4e1299c2d90febc93e8aca84e6540fae3794e091d0748cd520d5ed935e5' "$p"
+          grep -q '32768b2795ff0a955ace008c006bd305da5587dd78661b09b972dba24fc273a6' "$p"
+          grep -q 'portable-powershell-github' "$p"
+          grep -q 'AFZ-Direct-Canary' "$p"
+          grep -q 'lenovo-direct-canary-r1.ps1' "$p"
+          grep -q "if e.code!=422" "$p"
+          if grep -Eqi 'payload.*(command|script_text|encoded_command)' "$p"; then echo 'raw command-like payload key detected'; exit 1; fi
+          echo LINUX_VALIDATION=PASS
