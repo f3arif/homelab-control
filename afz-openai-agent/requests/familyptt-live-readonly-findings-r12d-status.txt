@@ -1,0 +1,1 @@
+Classification: SIGNALING_EDGE_FEASIBLE_RTC_PUBLIC_MEDIA_ROUTE_REQUIRED. This is read-only diagnostic state, not authorization to execute R17.
