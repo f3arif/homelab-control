@@ -11,6 +11,8 @@ $SyncedSha=$SyncedSha.ToLowerInvariant()
 $generationState='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-direct-return-generation\latest.json'
 $root='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix'
 $marker=Join-Path $root 'gh-argument-binding-v1.json'
+$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$diagFile=Join-Path $diagRoot 'H3-RETURN-PUBLISHER-HOTFIX-LATEST.json'
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
@@ -22,13 +24,22 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return $null}}
-function Save($Object){[IO.File]::WriteAllText($marker,($Object|ConvertTo-Json -Depth 30 -Compress),$utf8);Write-Output ($Object|ConvertTo-Json -Depth 30 -Compress)}
+function Publish-Diagnostic($Object){
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    $d=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github';observedAt=(Get-Date -Format o);hotfix=$Object}
+    [IO.File]::WriteAllText($diagFile,($d|ConvertTo-Json -Depth 40 -Compress),$utf8)
+  }catch{}
+}
+function Save($Object){[IO.File]::WriteAllText($marker,($Object|ConvertTo-Json -Depth 30 -Compress),$utf8);Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 30 -Compress)}
 
 $prior=Read-Json $marker
-if($prior){Write-Output ($prior|ConvertTo-Json -Depth 30 -Compress);exit 0}
+if($prior){Publish-Diagnostic $prior;Write-Output ($prior|ConvertTo-Json -Depth 30 -Compress);exit 0}
 $g=Read-Json $generationState
 if(-not $g -or [int]$g.generation -ne 5 -or [string]$g.status -ne 'completed' -or -not [bool]$g.ok){
-  Write-Output ([ordered]@{schema=1;status='not-applicable';reason='generation-5-not-completed';syncedSha=$SyncedSha}|ConvertTo-Json -Compress)
+  $na=[ordered]@{schema=1;status='not-applicable';reason='generation-5-not-completed';syncedSha=$SyncedSha}
+  Publish-Diagnostic $na
+  Write-Output ($na|ConvertTo-Json -Compress)
   exit 0
 }
 if(-not(Test-Path -LiteralPath $key -PathType Leaf)){throw "SYSTEM H3 key missing: $key"}
