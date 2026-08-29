@@ -1,0 +1,71 @@
+name: AFZ Queue Orphan Local Watcher Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - '.github/workflows/afz-queue-orphan-local-watcher-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - '.github/workflows/afz-queue-orphan-local-watcher-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+      - name: Validate bounded request contract
+        shell: python
+        run: |
+          from pathlib import Path
+          watcher=Path('afz-openai-agent/Queue-Orphan-Request-Watcher.ps1').read_text()
+          start=Path('afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1').read_text()
+          repair=Path('afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1').read_text()
+          for marker in [
+            'afz-queue-orphan-local-request.json',
+            'audit-then-quarantine-proven-orphan',
+            'expected_agent_sha',
+            'ORPHAN_AFTER_TERMINAL_RESULT',
+            "Invoke-Runner 'audit'",
+            "Invoke-Runner 'apply'",
+            'APPLY_DELETED_FILES=',
+            'POST_MOVABLE='
+          ]:
+            assert marker in watcher, marker
+          for marker in [
+            'AFZ Queue Orphan Remediation Request Watcher',
+            'Queue-Orphan-Request-Watcher.ps1',
+            "-UserId 'SYSTEM'"
+          ]:
+            assert marker in start, marker
+          for marker in ['deletedFiles=0','terminalResultMoved=$false','Get-LiveExecutors','Move-Item']:
+            assert marker in repair, marker
+          assert 'Remove-Item' not in watcher
+          assert 'Invoke-Expression' not in watcher
+          assert 'Invoke-Expression' not in repair
+          print('LOCAL QUEUE ORPHAN WATCHER CONTRACT PASS')
