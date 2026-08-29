@@ -25,6 +25,16 @@ function Write-TransportDiagnosticAck {
   try {
     $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
     if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    function Read-DiagnosticJson([string]$Path){
+      if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+      try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message;path=$Path}}
+    }
+    $h3HotfixPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\gh-argument-binding-v1.json'
+    $h3PostHookPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\postmortem-hook-latest.json'
+    $h3PostMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-postmortem\postmortem-v1.json'
+    $h3Hotfix=Read-DiagnosticJson $h3HotfixPath
+    $h3PostHook=Read-DiagnosticJson $h3PostHookPath
+    $h3PostMarker=Read-DiagnosticJson $h3PostMarkerPath
     $diag=[ordered]@{
       schema=1
       purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
@@ -39,9 +49,15 @@ function Write-TransportDiagnosticAck {
       pushWatcherTaskState=$PushTaskState
       siteWatcherTask='AFZ Website Git Deploy Request Watcher'
       siteWatcherTaskState=$SiteTaskState
+      h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixPath -PathType Leaf)
+      h3ReturnHotfix=$h3Hotfix
+      h3ReturnPostmortemHookExists=(Test-Path -LiteralPath $h3PostHookPath -PathType Leaf)
+      h3ReturnPostmortemHook=$h3PostHook
+      h3ReturnPostmortemMarkerExists=(Test-Path -LiteralPath $h3PostMarkerPath -PathType Leaf)
+      h3ReturnPostmortem=$h3PostMarker
       time=(Get-Date -Format o)
     }
-    $diag | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json') -Encoding UTF8
+    $diag | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json') -Encoding UTF8
   } catch {}
 }
 
