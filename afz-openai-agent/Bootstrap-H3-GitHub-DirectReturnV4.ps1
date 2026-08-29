@@ -111,15 +111,36 @@ if(Test-Path -LiteralPath `$pubStatePath){
 } | ConvertTo-Json -Compress
 "@
 
-  # Stream the remote script over stdin. This avoids Windows/OpenSSH command-line
-  # length limits while keeping the remote command itself fixed and non-interactive.
-  $out=@($remote | & $ssh -i $key -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known" $h3 powershell.exe -NoProfile -NonInteractive -Command - 2>&1)
-  $exit=$LASTEXITCODE
-  if($exit -ne 0){throw "H3 return bootstrap SSH stdin failed exit=$exit output=$($out|Out-String)"}
+  # Stream the remote script through redirected stdin so Windows PowerShell never
+  # treats ssh.exe stderr as a terminating NativeCommandError. Success is based
+  # solely on ssh.exe's real exit code; stdout/stderr are captured explicitly.
+  $stdinFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-In-'+[guid]::NewGuid().ToString('n')+'.ps1')
+  $stdoutFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-Out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stderrFile=Join-Path $env:TEMP ('AFZ-H3-ReturnV4-Err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  try{
+    [IO.File]::WriteAllText($stdinFile,$remote,[Text.Encoding]::ASCII)
+    $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=12','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),$h3,'powershell.exe','-NoProfile','-NonInteractive','-Command','-')
+    $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $stdinFile -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru -NoNewWindow
+    if(-not $p.WaitForExit(90000)){
+      try{$p.Kill()}catch{}
+      try{$p.WaitForExit()}catch{}
+      throw 'H3 return bootstrap SSH stdin timed out after 90 seconds'
+    }
+    $p.WaitForExit()
+    $exit=[int]$p.ExitCode
+    $stdout=$(if(Test-Path -LiteralPath $stdoutFile){[IO.File]::ReadAllText($stdoutFile)}else{''})
+    $stderr=$(if(Test-Path -LiteralPath $stderrFile){[IO.File]::ReadAllText($stderrFile)}else{''})
+    if($exit -ne 0){throw "H3 return bootstrap SSH stdin failed exit=$exit stdout=$stdout stderr=$stderr"}
 
-  $line=@($out | Where-Object {$_ -match '^\{.*\}$'} | Select-Object -Last 1)
-  $extra=$null
-  if($line){try{$extra=$line | ConvertFrom-Json}catch{}}
+    $line=@(($stdout -split "`r?`n") | Where-Object {$_ -match '^\{.*\}$'} | Select-Object -Last 1)
+    $extra=$null
+    if($line){try{$extra=$line | ConvertFrom-Json}catch{}}
+    if($extra){
+      $extra | Add-Member -NotePropertyName sshStderr -NotePropertyValue $stderr.Trim() -Force
+    }
+  }finally{
+    Remove-Item -LiteralPath $stdinFile,$stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
+  }
 
   Save-State 'completed' 'H3 return-only V4 installed through stdin transport; no benchmark/Qwen launch performed.' $extra
   $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
