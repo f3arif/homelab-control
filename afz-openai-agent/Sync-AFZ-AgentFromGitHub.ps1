@@ -13,8 +13,6 @@ $stateFile=Join-Path $stateRoot 'source-state.json'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 function Emit($o){$o|ConvertTo-Json -Depth 8 -Compress; exit 0}
 function Publish-SiteDeployAck {
-  # Emergency observability only. This helper is read-only except for its own ACK file,
-  # and failure to publish must never affect the GitHub source-sync control path.
   try {
     $publisher=Join-Path $InstallRoot 'afz-openai-agent\Publish-AFZ-WebsiteDeployAck.ps1'
     if(Test-Path -LiteralPath $publisher -PathType Leaf){
@@ -33,6 +31,19 @@ function Invoke-H3ReturnRecovery([string]$Sha){
     if($code -ne 0){return [ordered]@{ok=$false;status='helper-process-failed';syncedSha=$Sha;exit=$code}}
     if($raw -is [string]){try{return $raw|ConvertFrom-Json}catch{return [ordered]@{ok=$false;status='helper-result-invalid';syncedSha=$Sha;raw=[string]$raw}}}
     return $raw
+  }catch{return [ordered]@{ok=$false;status='helper-exception';syncedSha=$Sha;error=$_.Exception.Message}}
+}
+function Invoke-H3ReturnPublisherHotfix([string]$Sha){
+  try {
+    $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-ReturnPublisher-Hotfix.ps1'
+    if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){
+      return [ordered]@{ok=$false;status='helper-missing';syncedSha=$Sha}
+    }
+    $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -SyncedSha $Sha | Select-Object -Last 1
+    $code=$LASTEXITCODE
+    if($raw -is [string]){try{$parsed=$raw|ConvertFrom-Json}catch{$parsed=[ordered]@{ok=$false;status='helper-result-invalid';syncedSha=$Sha;raw=[string]$raw}}}else{$parsed=$raw}
+    if($code -ne 0){return [ordered]@{ok=$false;status='helper-process-failed';syncedSha=$Sha;exit=$code;result=$parsed}}
+    return $parsed
   }catch{return [ordered]@{ok=$false;status='helper-exception';syncedSha=$Sha;error=$_.Exception.Message}}
 }
 $headers=@{
@@ -86,7 +97,6 @@ try{
     if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
   }
 
-  # Compatibility normalization for Windows PowerShell 5.1 and current Responses API schemas.
   foreach($ps1 in @(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter '*.ps1' -ErrorAction SilentlyContinue)){
     try{
       $text=Get-Content -LiteralPath $ps1.FullName -Raw
@@ -94,9 +104,6 @@ try{
       $fixed=$fixed.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
       $fixed=$fixed.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
       $fixed=$fixed.Replace("Get-Content -LiteralPath `$file -Raw","Get-Content -LiteralPath `$file -Encoding UTF8 -Raw")
-      # PowerShell's automatic $args variable is case-insensitive. The canonical agent historically used
-      # $Args as a named tool parameter, causing JSON tool arguments such as root/path to arrive blank.
-      # Normalize only the agent runtime source so ordinary scripts that intentionally use $args are untouched.
       if($ps1.Name -eq 'AFZ-OpenAI-Agent-v2.ps1'){
         $fixed=$fixed.Replace('$Args','$ToolArgs')
       }
@@ -114,9 +121,6 @@ try{
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
   }
 
-  # One-shot transport-state migration for the Ridge16K job. The model job id is
-  # intentionally unchanged. A recovery generation may clear only a terminal
-  # pre-launch watcher failure once; the marker prevents replay on later syncs.
   $ridgeRecoveryReset=$false
   $ridgeRequest=Join-Path $dst 'requests\h3-qwenridge16k-website-test.json'
   if(Test-Path -LiteralPath $ridgeRequest -PathType Leaf){
@@ -147,7 +151,7 @@ try{
   $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   $h3ReturnRecovery=Invoke-H3ReturnRecovery $remoteSha
+  $h3ReturnPublisherHotfix=Invoke-H3ReturnPublisherHotfix $remoteSha
   Publish-SiteDeployAck
-  # Only agent-tree file changes require a service restart. A branch-head-only signal commit must not restart services.
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
