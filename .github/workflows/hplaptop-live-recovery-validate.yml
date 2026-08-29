@@ -1,0 +1,27 @@
+name: Validate HPLaptop live recovery patcher
+
+on:
+  push:
+    branches:
+      - afz/hplaptop-stale-live-probe
+    paths:
+      - 'afz-openai-agent/legacy-priority/Patch-AFZ-Priority-Controller-HPLaptopLiveRecovery.ps1'
+      - '.github/workflows/hplaptop-live-recovery-validate.yml'
+  workflow_dispatch:
+
+jobs:
+  parse:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $path = 'afz-openai-agent/legacy-priority/Patch-AFZ-Priority-Controller-HPLaptopLiveRecovery.ps1'
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){
+            @($errors) | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host 'PATCHER_PARSE_OK'
