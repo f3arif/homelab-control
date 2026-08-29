@@ -14,6 +14,7 @@ $SyncedSha=$SyncedSha.ToLowerInvariant()
 $generationState='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-direct-return-generation\latest.json'
 $root='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix'
 $marker=Join-Path $root 'gh-argument-binding-v1.json'
+$hookState=Join-Path $root 'postmortem-hook-latest.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'H3-RETURN-PUBLISHER-HOTFIX-LATEST.json'
 $postmortem=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-ReturnPublisher-Postmortem.ps1'
@@ -29,6 +30,12 @@ function Publish-Diagnostic($Object){
   }catch{}
 }
 function Save($Object){[IO.File]::WriteAllText($marker,($Object|ConvertTo-Json -Depth 30 -Compress),$utf8);Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 30 -Compress)}
+function Save-HookState($Object){
+  try{
+    $h=[ordered]@{schema=1;readOnly=$true;syncedSha=$SyncedSha;postmortem=$Object;updatedAt=(Get-Date -Format o)}
+    [IO.File]::WriteAllText($hookState,($h|ConvertTo-Json -Depth 40 -Compress),$utf8)
+  }catch{}
+}
 function Invoke-ReadOnlyPostmortem {
   if(-not(Test-Path -LiteralPath $postmortem -PathType Leaf)){
     return [ordered]@{ok=$false;status='postmortem-helper-missing';readOnly=$true;syncedSha=$SyncedSha}
@@ -47,6 +54,7 @@ function Invoke-ReadOnlyPostmortem {
 # Always allow the read-only postmortem to expose its own durable diagnostic.
 # It is independently marker-guarded and cannot run the publisher or Qwen.
 $postmortemResult=Invoke-ReadOnlyPostmortem
+Save-HookState $postmortemResult
 
 $prior=Read-Json $marker
 if($prior){Publish-Diagnostic $prior;Write-Output ($prior|ConvertTo-Json -Depth 30 -Compress);exit 0}
