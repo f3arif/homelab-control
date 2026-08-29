@@ -1,0 +1,25 @@
+name: AFZ Site R5 Poststate ACK Validate
+on:
+  push:
+    branches:
+      - fix/afz-site-r5-poststate-ack
+    paths:
+      - afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1
+      - .github/workflows/afz-site-r5-poststate-ack-validate.yml
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and verify diagnostic-only contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=(Resolve-Path 'afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          $text=Get-Content -LiteralPath $p -Raw
+          foreach($needle in @('r5OrphanReleaseStatus','r5CoreProcessCount','r5SshProcessCount','afz-site-git-cutover-r5-20260828T1151','R5_ORPHAN_SSH_RELEASE')){if(-not $text.Contains($needle)){throw "Missing diagnostic marker: $needle"}}
+          if($text -match '(?i)Stop-Process|Start-Process|Stop-ScheduledTask|Start-ScheduledTask|Set-ScheduledTask|Disable-ScheduledTask|Enable-ScheduledTask|Remove-Item'){throw 'ACK publisher must remain read-only except its own ACK write'}
+          Write-Host 'AFZ SITE R5 POSTSTATE ACK VALIDATION PASS'
