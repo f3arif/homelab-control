@@ -1,0 +1,103 @@
+name: Patch R5 Transport ACK Mirror
+
+on:
+  push:
+    branches:
+      - fix/r5-transport-ack-mirror
+    paths:
+      - .github/workflows/r5-transport-ack-mirror-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/r5-transport-ack-mirror
+          fetch-depth: 0
+
+      - name: Patch updater with read-only R5 process mirror
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1')
+          s = p.read_text(encoding='utf-8')
+
+          anchor1 = """    $h3PostMarker=Read-DiagnosticJson $h3PostMarkerPath
+    $diag=[ordered]@{
+"""
+          insert1 = """    $h3PostMarker=Read-DiagnosticJson $h3PostMarkerPath
+    # Read-only R5 post-cleanup proof. This mirrors process presence into the
+    # already-reliable transport ACK; it never stops, starts, or mutates a process.
+    $r5JobId='afz-site-git-cutover-r5-20260828T1151'
+    $r5Core=@();$r5CorePids=@();$r5Ssh=@()
+    try {
+      $all=@(Get-CimInstance Win32_Process -ErrorAction Stop)
+      $r5Core=@($all | Where-Object {
+        [string]$_.Name -ieq 'powershell.exe' -and
+        ([string]$_.CommandLine) -match '(?i)Deploy-AFZ-WebsiteToPi-Core[.]ps1' -and
+        ([string]$_.CommandLine) -match [regex]::Escape($r5JobId)
+      })
+      $r5CorePids=@($r5Core | ForEach-Object {[int]$_.ProcessId})
+      $r5Ssh=@($all | Where-Object {
+        ([string]$_.Name) -match '(?i)^ssh[.]exe$' -and
+        $r5CorePids -contains [int]$_.ParentProcessId -and
+        ([string]$_.CommandLine) -match [regex]::Escape('192.168.50.68') -and
+        ([string]$_.CommandLine) -match '(?i)mkdir -p' -and
+        ([string]$_.CommandLine) -match [regex]::Escape('/opt/edge/afz-site/git-deploy/stage')
+      })
+    } catch {}
+    $diag=[ordered]@{
+"""
+
+          anchor2 = """      siteWatcherTaskState=$SiteTaskState
+      h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixPath -PathType Leaf)
+"""
+          insert2 = """      siteWatcherTaskState=$SiteTaskState
+      r5ProbeReadOnly=$true
+      r5CoreProcessCount=@($r5Core).Count
+      r5CorePids=@($r5CorePids)
+      r5SshProcessCount=@($r5Ssh).Count
+      r5SshPids=@($r5Ssh | ForEach-Object {[int]$_.ProcessId})
+      h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixPath -PathType Leaf)
+"""
+
+          assert anchor1 in s, 'R5 mirror insertion anchor 1 missing'
+          assert anchor2 in s, 'R5 mirror insertion anchor 2 missing'
+          assert 'r5CoreProcessCount=' not in s, 'R5 mirror already present'
+
+          for forbidden in ('Stop-Process','taskkill','Start-Process','Stop-ScheduledTask','Start-ScheduledTask'):
+              assert forbidden not in insert1 + insert2, forbidden
+
+          s = s.replace(anchor1, insert1, 1).replace(anchor2, insert2, 1)
+          p.write_text(s, encoding='utf-8', newline='\n')
+
+      - name: Parse with Windows PowerShell and enforce mirror contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          $text=Get-Content -LiteralPath $file -Raw
+          foreach($required in @('r5ProbeReadOnly=$true','r5CoreProcessCount=@($r5Core).Count','r5SshProcessCount=@($r5Ssh).Count','Deploy-AFZ-WebsiteToPi-Core[.]ps1','afz-site-git-cutover-r5-20260828T1151')){
+            if(-not $text.Contains($required)){throw "Missing R5 mirror contract marker: $required"}
+          }
+          Write-Host 'R5 TRANSPORT ACK MIRROR PARSE/CONTRACT PASS'
+
+      - name: Commit updater only and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1
+          git rm .github/workflows/r5-transport-ack-mirror-patch.yml
+          git commit -m 'Mirror R5 post-cleanup process proof into transport ACK'
+          git push origin HEAD:fix/r5-transport-ack-mirror
