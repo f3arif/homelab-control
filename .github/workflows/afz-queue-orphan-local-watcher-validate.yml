@@ -7,6 +7,7 @@ on:
       - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - 'afz-openai-agent/requests/queue-orphan-remediation.json'
       - '.github/workflows/afz-queue-orphan-local-watcher-validate.yml'
   pull_request:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - 'afz-openai-agent/requests/queue-orphan-remediation.json'
       - '.github/workflows/afz-queue-orphan-local-watcher-validate.yml'
 
 permissions:
@@ -39,17 +41,18 @@ jobs:
             if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
             Write-Host "PARSE PASS $file"
           }
-      - name: Validate bounded request contract
+      - name: Validate bounded atomic request contract
         shell: python
         run: |
+          import json
           from pathlib import Path
           watcher=Path('afz-openai-agent/Queue-Orphan-Request-Watcher.ps1').read_text()
           start=Path('afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1').read_text()
           repair=Path('afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1').read_text()
           for marker in [
-            'afz-queue-orphan-local-request.json',
+            r'afz-openai-agent\requests\queue-orphan-remediation.json',
+            'atomic-local-request-from-exact-github-source',
             'audit-then-quarantine-proven-orphan',
-            'expected_agent_sha',
             'ORPHAN_AFTER_TERMINAL_RESULT',
             "Invoke-Runner 'audit'",
             "Invoke-Runner 'apply'",
@@ -57,10 +60,14 @@ jobs:
             'POST_MOVABLE='
           ]:
             assert marker in watcher, marker
+          assert 'expected_agent_sha' not in watcher
+          assert 'raw.githubusercontent.com' not in watcher
           for marker in [
             'AFZ Queue Orphan Remediation Request Watcher',
             'Queue-Orphan-Request-Watcher.ps1',
-            "-UserId 'SYSTEM'"
+            "-UserId 'SYSTEM'",
+            'queueOrphanBusy',
+            'Stop-ScheduledTask -TaskName $queueOrphanTaskName'
           ]:
             assert marker in start, marker
           for marker in ['deletedFiles=0','terminalResultMoved=$false','Get-LiveExecutors','Move-Item']:
@@ -68,4 +75,17 @@ jobs:
           assert 'Remove-Item' not in watcher
           assert 'Invoke-Expression' not in watcher
           assert 'Invoke-Expression' not in repair
-          print('LOCAL QUEUE ORPHAN WATCHER CONTRACT PASS')
+          req=Path('afz-openai-agent/requests/queue-orphan-remediation.json')
+          if req.exists():
+            r=json.loads(req.read_text())
+            assert r == {
+              'schema':1,
+              'project':'ops',
+              'action':'audit-then-quarantine-proven-orphan',
+              'request_id':r['request_id'],
+              'task_id':r['task_id'],
+              'enabled':True
+            }
+            assert r['request_id'].startswith('queue-orphan-opscpu-')
+            assert r['task_id']=='000-000-000-critical-opscpu-live-telemetry-fix-v1-20260828T2142'
+          print('ATOMIC LOCAL QUEUE ORPHAN WATCHER CONTRACT PASS')
