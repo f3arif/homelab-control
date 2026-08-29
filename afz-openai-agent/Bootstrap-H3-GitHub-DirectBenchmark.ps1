@@ -9,28 +9,36 @@ if($ExpectedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSha required'}
 $ExpectedSha=$ExpectedSha.ToLowerInvariant()
 # Trusted exact-SHA entrypoint for DESKTOP-H3R6CQN (Faiz@100.106.186.118).
 # Return-only recovery: this script never launches Qwen or creates a benchmark iteration.
-$key='C:\Users\Faiz\.ssh\afz_h3_worker'
+$sourceKey='C:\Users\Faiz\.ssh\afz_h3_worker'
+$keyRoot='C:\ProgramData\AFZ\OpenAIAgent\keys'
+$key=Join-Path $keyRoot 'afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $h3='Faiz@100.106.186.118'
-$faiz='DESKTOP-10SKF0M\Faiz'
-if(-not(Test-Path $key)){throw "H3 SSH key missing: $key"}
-if(-not(Test-Path $known)){throw "H3 known-hosts file missing: $known"}
+if(-not(Test-Path -LiteralPath $sourceKey -PathType Leaf)){throw "H3 source SSH key missing: $sourceKey"}
+if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts file missing: $known"}
 
-# Restore the last known-good Windows OpenSSH ACL. Do not bind the key to the
-# transient bootstrap identity: the request watcher may run under SYSTEM while
-# the key is owned/used by Faiz. This exact ACL was previously verified with a
-# successful public-key SSH login to DESKTOP-H3R6CQN.
-$icacls=(Get-Command icacls.exe -ErrorAction Stop).Source
-& $icacls $key '/inheritance:r' | Out-Null
-if($LASTEXITCODE -ne 0){throw "Failed to disable inheritance on H3 SSH key; exit=$LASTEXITCODE"}
-& $icacls $key '/grant:r' "${faiz}:(M)" 'NT AUTHORITY\SYSTEM:(F)' 'BUILTIN\Administrators:(F)' | Out-Null
-if($LASTEXITCODE -ne 0){throw "Failed to restore H3 SSH key ACL; exit=$LASTEXITCODE"}
-& $icacls $key '/setowner' $faiz | Out-Null
-if($LASTEXITCODE -ne 0){throw "Failed to restore H3 SSH key owner; exit=$LASTEXITCODE"}
+# OpenSSH rejects the shared user-key ACL when this exact-SHA bootstrap runs as
+# NT AUTHORITY\SYSTEM. Create a dedicated local copy for the SYSTEM control
+# plane and protect it so only SYSTEM can read it. The user's source key is not
+# modified. The copy contains the same private key bytes and never leaves this
+# Windows machine.
+New-Item -ItemType Directory -Force -Path $keyRoot | Out-Null
+Copy-Item -LiteralPath $sourceKey -Destination $key -Force
+$systemAccount=New-Object System.Security.Principal.NTAccount('NT AUTHORITY','SYSTEM')
+$secureAcl=New-Object System.Security.AccessControl.FileSecurity
+$secureAcl.SetOwner($systemAccount)
+$secureAcl.SetAccessRuleProtection($true,$false)
+$systemRule=New-Object System.Security.AccessControl.FileSystemAccessRule($systemAccount,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow)
+[void]$secureAcl.AddAccessRule($systemRule)
+Set-Acl -LiteralPath $key -AclObject $secureAcl -ErrorAction Stop
+$verifiedAcl=Get-Acl -LiteralPath $key -ErrorAction Stop
+$unexpectedRules=@($verifiedAcl.Access | Where-Object {[string]$_.IdentityReference -ne 'NT AUTHORITY\SYSTEM'})
+if($unexpectedRules.Count -gt 0){throw 'SYSTEM H3 SSH key copy still has non-SYSTEM access rules'}
+if(-not $verifiedAcl.AreAccessRulesProtected){throw 'SYSTEM H3 SSH key copy still inherits ACLs'}
 
-# Prove the repaired key without allowing Windows PowerShell to promote benign
+# Prove the SYSTEM-only key without allowing Windows PowerShell to promote
 # native stderr into a terminating NativeCommandError. Capture both streams and
-# decide success only from the real ssh.exe exit code plus expected hostname.
+# decide success from the real ssh.exe exit code plus the expected hostname.
 $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
 $probeOut=Join-Path $env:TEMP ('AFZ-H3-SSH-Probe-Out-'+[guid]::NewGuid().ToString('n')+'.txt')
 $probeErr=Join-Path $env:TEMP ('AFZ-H3-SSH-Probe-Err-'+[guid]::NewGuid().ToString('n')+'.txt')
@@ -46,7 +54,7 @@ try{
   $probeExit=[int]$p.ExitCode
   $probeStdout=$(if(Test-Path -LiteralPath $probeOut){[IO.File]::ReadAllText($probeOut).Trim()}else{''})
   $probeStderr=$(if(Test-Path -LiteralPath $probeErr){[IO.File]::ReadAllText($probeErr).Trim()}else{''})
-  if($probeExit -ne 0){throw "H3 SSH preflight failed after ACL restore: exit=$probeExit stdout=$probeStdout stderr=$probeStderr"}
+  if($probeExit -ne 0){throw "H3 SSH preflight failed with SYSTEM-only key: exit=$probeExit stdout=$probeStdout stderr=$probeStderr"}
   if($probeStdout -notmatch 'DESKTOP-H3R6CQN'){throw "H3 SSH preflight reached unexpected host: stdout=$probeStdout stderr=$probeStderr"}
 }finally{
   Remove-Item -LiteralPath $probeOut,$probeErr -Force -ErrorAction SilentlyContinue
