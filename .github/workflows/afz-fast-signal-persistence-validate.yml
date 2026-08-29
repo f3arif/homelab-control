@@ -5,6 +5,7 @@ on:
     branches:
       - fix/afz-fast-signal-persistence
       - fix/afz-direct-push-recovery
+      - fix/afz-fast-signal-monotonic
     paths:
       - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
@@ -83,8 +84,27 @@ jobs:
           assert "controlPlane='github'" in push
           assert "controlPlane='github'" in update
 
-          # No website deployment may be armed while the transport layer is repaired.
-          assert not Path('afz-openai-agent/requests/afz-site-deploy.json').exists()
+          # Fast signals are acceleration hints, not rollback authority. A delayed
+          # signal already contained by the deployed commit must be marked handled
+          # without invoking an exact-SHA updater pass.
+          required_monotonic=[
+            'Current-ContainsSignal',
+            'https://api.github.com/repos/f3arif/homelab-control/compare',
+            "@('ahead','identical')",
+            'Signal already contained by current source=',
+            'source-already-newer',
+            'DEPLOY_SKIP_ANCESTOR'
+          ]
+          for marker in required_monotonic:
+            assert marker in push, marker
+          guard=push.index('if(Current-ContainsSignal $before $sha)')
+          updater=push.index('$code=Invoke-UpdaterPass $updater $sha 1')
+          assert guard < updater, 'monotonic ancestry guard must run before exact-SHA updater'
+
+          # Transport repair must remain scope-neutral even when a separate website
+          # request exists elsewhere in the repository.
+          assert 'afz-site-deploy.json' not in push
+          assert 'deploy-pi-static-site' not in push
           print('FAST SIGNAL PERSISTENCE CONTRACT PASS')
 
       - name: Validate exact-SHA signal publisher remains GitHub-only
