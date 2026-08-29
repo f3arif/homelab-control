@@ -403,7 +403,7 @@ function Invoke-Agent {
 
 function Get-UiHtml {
   $file = Join-Path $AgentRoot 'AFZ-Agent-UI.html'
-  if (Test-Path -LiteralPath $file) { return Get-Content -LiteralPath $file -Raw }
+  if (Test-Path -LiteralPath $file) { return Get-Content -LiteralPath $file -Raw -Encoding UTF8 }
   return '<!doctype html><html><body><h1>AFZ OpenAI Agent</h1><p>UI file missing.</p></body></html>'
 }
 
