@@ -184,6 +184,15 @@ try{
   $locked=$mutex.WaitOne(0)
   if(-not $locked){exit 0}
   Log "START interval=${IntervalSeconds}s action=deploy-pi-static-site carrier='$carrierTaskName'"
+  # One-time exact R5 orphan self-heal. This helper is fail-closed and can stop only
+  # the verified R5 staging SSH child; it never touches the carrier task or deploy core.
+  try{
+    $r5Release=Join-Path $InstallRoot 'afz-openai-agent\Release-AFZ-Site-R5-OrphanSsh.ps1'
+    if(Test-Path -LiteralPath $r5Release -PathType Leaf){
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r5Release *> $null
+      if($LASTEXITCODE -ne 0){Log "R5_ORPHAN_RELEASE_HELPER_EXIT exit=$LASTEXITCODE"}
+    }
+  }catch{Log "R5_ORPHAN_RELEASE_HELPER_ERROR $($_.Exception.Message)"}
   while($true){
     try{Handle-SiteDeployRequest}catch{
       $msg=$_.Exception.Message
