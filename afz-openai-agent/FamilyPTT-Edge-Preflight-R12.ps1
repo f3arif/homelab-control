@@ -8,12 +8,28 @@ $ErrorActionPreference='Stop'
 $piTarget='coolyo@192.168.50.68'
 $piKey='C:\Users\Faiz\.ssh\afz_pi_sync'
 $hpTarget='coolyo@100.71.26.69'
+$sshExe=(Get-Command ssh.exe -ErrorAction Stop).Source
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ResultFile) | Out-Null
 
 function Save-Result($obj){$obj|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $ResultFile -Encoding UTF8}
-function Run-Ssh([string]$Target,[string[]]$Args,[string]$Command){
-  $out=& ssh.exe @Args $Target $Command 2>&1
-  return [ordered]@{exit=$LASTEXITCODE;output=(@($out)|ForEach-Object{[string]$_})}
+function Run-Ssh([string]$Target,[string[]]$SshArgs,[string]$Command,[int]$TimeoutSeconds=45){
+  $payload=[pscustomobject]@{exe=$script:sshExe;target=$Target;sshArgs=@($SshArgs);command=$Command}
+  $job=Start-Job -ScriptBlock {
+    param($p)
+    $out=& $p.exe @($p.sshArgs) $p.target $p.command 2>&1
+    [pscustomobject]@{exit=[int]$LASTEXITCODE;output=@($out|ForEach-Object{[string]$_})}
+  } -ArgumentList (,$payload)
+  try{
+    if(-not(Wait-Job -Job $job -Timeout $TimeoutSeconds)){
+      Stop-Job -Job $job -ErrorAction SilentlyContinue
+      throw "SSH overall timeout after $TimeoutSeconds seconds target=$Target"
+    }
+    $data=@(Receive-Job -Job $job -ErrorAction Stop)|Where-Object {$_ -and $_.PSObject.Properties['exit']}|Select-Object -Last 1
+    if(-not $data){throw "SSH returned no structured result target=$Target"}
+    return [ordered]@{exit=[int]$data.exit;output=@($data.output|ForEach-Object{[string]$_})}
+  } finally {
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  }
 }
 
 $result=[ordered]@{
@@ -23,7 +39,7 @@ $result=[ordered]@{
 }
 try{
   if(-not(Test-Path -LiteralPath $piKey -PathType Leaf)){throw 'Dedicated Pi SSH key missing'}
-  $piArgs=@('-i',$piKey,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new')
+  $piArgs=@('-i',$piKey,'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2','-o','StrictHostKeyChecking=accept-new')
   $piCmd=@'
 set -eu
 printf 'PI_HOST='; hostname
@@ -37,7 +53,7 @@ printf 'CERTBOT='; docker exec npm-pi sh -lc 'command -v certbot >/dev/null 2>&1
 printf 'CERTBOT_ACCOUNT='; docker exec npm-pi sh -lc 'test -d /etc/letsencrypt/accounts && find /etc/letsencrypt/accounts -mindepth 3 -maxdepth 3 -type d 2>/dev/null | head -n 1 | grep -q . && echo true || echo false'
 printf 'ACME_WEBROOT='; docker exec npm-pi sh -lc 'test -d /data/letsencrypt-acme-challenge && echo true || echo false'
 '@
-  $pi=Run-Ssh $piTarget $piArgs $piCmd
+  $pi=Run-Ssh $piTarget $piArgs $piCmd 45
   if($pi.exit -ne 0){throw ('Pi preflight SSH failed: '+(($pi.output|Select-Object -Last 3)-join ' | '))}
   $piMap=@{}
   foreach($line in $pi.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$piMap[$matches[1]]=$matches[2].Trim()}}
@@ -48,7 +64,7 @@ printf 'ACME_WEBROOT='; docker exec npm-pi sh -lc 'test -d /data/letsencrypt-acm
     certbotAvailable=($piMap.CERTBOT -eq 'true');certbotAccountPresent=($piMap.CERTBOT_ACCOUNT -eq 'true');acmeWebrootPresent=($piMap.ACME_WEBROOT -eq 'true')
   }
 
-  $hpArgs=@('-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=accept-new')
+  $hpArgs=@('-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2','-o','StrictHostKeyChecking=accept-new')
   $hpCmd=@'
 set -eu
 printf 'HP_HOST='; hostname
@@ -59,7 +75,7 @@ printf 'LK_PORTS='; docker inspect -f '{{json .HostConfig.PortBindings}}' family
 printf 'LK_RTC='; docker exec familyptt-livekit sh -lc "grep -E '^[[:space:]]*(port|tcp_port|udp_port|port_range_start|port_range_end|use_external_ip|node_ip|external_ip):' /etc/livekit.yaml 2>/dev/null | tr '\n' ';'" || true; echo
 printf 'TOKEN_URL_SCHEME='; docker exec familyptt-livekit-token sh -lc 'case "${LIVEKIT_URL:-}" in wss://*) echo wss;; ws://*) echo ws;; "") echo unset;; *) echo other;; esac'
 '@
-  $hp=Run-Ssh $hpTarget $hpArgs $hpCmd
+  $hp=Run-Ssh $hpTarget $hpArgs $hpCmd 45
   if($hp.exit -ne 0){throw ('HP preflight SSH failed: '+(($hp.output|Select-Object -Last 3)-join ' | '))}
   $hpMap=@{}
   foreach($line in $hp.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$hpMap[$matches[1]]=$matches[2].Trim()}}
