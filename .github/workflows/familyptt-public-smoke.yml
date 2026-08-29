@@ -1,0 +1,38 @@
+name: FamilyPTT public smoke
+
+on:
+  push:
+    paths:
+      - '.github/afz-familyptt-public-smoke-signal.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify FamilyPTT public transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_status="$(curl --fail --silent --show-error --output /tmp/health --write-out '%{http_code}' --max-time 15 https://ptt-api.afzeng.ca/health)"
+          test "$api_status" = "200"
+          curl --fail --silent --show-error --max-time 15 'https://ptt-api.afzeng.ca/token?identity=github-public-smoke&name=GitHubPublicSmoke&room=family-main' --output /tmp/token.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/token.json') as f:
+              d=json.load(f)
+          assert d.get('serverUrl') == 'wss://ptt-livekit.afzeng.ca', d.get('serverUrl')
+          assert bool(d.get('participantToken'))
+          print('TOKEN_SERVER_URL=wss://ptt-livekit.afzeng.ca')
+          print('TOKEN_PRESENT=true')
+          PY
+          lk_status="$(curl --fail --silent --show-error --output /tmp/livekit --write-out '%{http_code}' --max-time 15 https://ptt-livekit.afzeng.ca/)"
+          test "$lk_status" = "200"
+          timeout 8 bash -c '</dev/tcp/ptt-livekit.afzeng.ca/7881'
+          echo "API_HEALTH_STATUS=$api_status"
+          echo "LIVEKIT_HTTPS_STATUS=$lk_status"
+          echo 'LIVEKIT_TCP_7881=true'
+          echo 'FINAL=PASS_PUBLIC_TRANSPORT'
