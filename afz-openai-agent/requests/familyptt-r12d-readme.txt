@@ -1,0 +1,1 @@
+R12d gates FamilyPTT production edge readiness on backend reachability, certificate path, active NPM routing capability, and a public LiveKit RTC media candidate/path. R17 remains staged/non-executable until these gates pass and protected production-change authorization is satisfied.
