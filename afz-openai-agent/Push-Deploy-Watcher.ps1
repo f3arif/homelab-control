@@ -18,6 +18,7 @@ $signalBase='https://raw.githubusercontent.com/f3arif/homelab-control/main/.gith
 $compareBase='https://api.github.com/repos/f3arif/homelab-control/compare'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
+$runtimeProofFile=Join-Path $diagRoot 'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -121,6 +122,34 @@ function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
     } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $diagFile -Encoding UTF8
   }catch{}
 }
+function Save-RuntimeProof{
+  # Startup-only emergency observability. This file is never consumed as control
+  # input and records no secrets; it only proves which watcher script is in memory.
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    $task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Push Deploy Watcher' -ErrorAction SilentlyContinue
+    $proc=Get-Process -Id $PID -ErrorAction SilentlyContinue
+    $scriptHash=$null
+    if($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)){
+      $scriptHash=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    [ordered]@{
+      schema=1
+      purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
+      source='windows-main'
+      controlPlane='github'
+      component='AFZ OpenAI Agent Push Deploy Watcher Runtime Proof'
+      currentSha=(Current-Sha)
+      processId=$PID
+      processStartTime=$(if($proc){$proc.StartTime.ToString('o')}else{$null})
+      scriptPath=$PSCommandPath
+      scriptSha256=$scriptHash
+      intervalSeconds=$IntervalSeconds
+      taskState=$(if($task){[string]$task.State}else{'missing'})
+      time=(Get-Date -Format o)
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimeProofFile -Encoding UTF8
+  }catch{}
+}
 function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
   Log "UPDATER_PASS_START pass=$Pass signal=$Sha"
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Updater -InstallRoot $InstallRoot -ExpectedSha $Sha *> $null
@@ -137,6 +166,7 @@ try{
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
   Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true"
+  Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
     try{
