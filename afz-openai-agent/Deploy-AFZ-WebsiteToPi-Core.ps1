@@ -281,8 +281,10 @@ printf 'AFZ_PI_SITE_DEPLOY=PASS\n'
 
   $publicHeaders=@{'Cache-Control'='no-cache';'Pragma'='no-cache'}
   $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-  $home=Invoke-WebRequest -Uri ("https://afzeng.ca/?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
-  if($home.StatusCode -ne 200 -or $home.Content -notmatch 'afz-ai-widget\.js'){throw 'Public home-page verification failed.'}
+  # $HOME is a read-only automatic variable in Windows PowerShell and variable names
+  # are case-insensitive. Use a non-reserved response name for the public home probe.
+  $homeResponse=Invoke-WebRequest -Uri ("https://afzeng.ca/?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
+  if($homeResponse.StatusCode -ne 200 -or $homeResponse.Content -notmatch 'afz-ai-widget\.js'){throw 'Public home-page verification failed.'}
   $widget=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-ai-widget.js?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
   if($widget.StatusCode -ne 200 -or $widget.Content -notmatch 'AFZ CHAT SESSION PERSISTENCE' -or $widget.Content -notmatch '/api/ai-chat'){throw 'Public WebChat asset verification failed.'}
   $meta=Invoke-WebRequest -Uri ("https://afzeng.ca/afz-git-deploy.json?afz_git_deploy="+$nonce) -Headers $publicHeaders -UseBasicParsing -TimeoutSec 20
