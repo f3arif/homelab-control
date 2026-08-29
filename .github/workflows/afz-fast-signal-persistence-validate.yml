@@ -101,8 +101,10 @@ jobs:
           updater=push.index('$code=Invoke-UpdaterPass $updater $sha 1')
           assert guard < updater, 'monotonic ancestry guard must run before exact-SHA updater'
 
-          # No website deployment may be armed while the transport layer is repaired.
-          assert not Path('afz-openai-agent/requests/afz-site-deploy.json').exists()
+          # Transport repair must remain scope-neutral even when a separate website
+          # request exists elsewhere in the repository.
+          assert 'afz-site-deploy.json' not in push
+          assert 'deploy-pi-static-site' not in push
           print('FAST SIGNAL PERSISTENCE CONTRACT PASS')
 
       - name: Validate exact-SHA signal publisher remains GitHub-only
