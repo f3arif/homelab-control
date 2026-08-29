@@ -18,7 +18,9 @@ function Publish-SiteDeployAck {
     if(Test-Path -LiteralPath $publisher -PathType Leaf){
       & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $publisher -InstallRoot $InstallRoot *> $null
     }
-  } catch {}
+  } catch {
+    # failure to publish must never affect the GitHub source-sync control path
+  }
 }
 function Invoke-H3ReturnRecovery([string]$Sha){
   try {
