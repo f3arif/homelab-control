@@ -57,15 +57,15 @@ try{
   $phaseBefore=$runnerText
   $runnerText=$runnerText.Replace(
     'Write-Json $requestFile $body',
-    "$state.phase='pre_ollama'`r`n$state.model_call_attempted=$false`r`n$state.ollama_request_written_at=(Get-Date).ToString('o')`r`nWrite-Json $stateFile $state`r`nWrite-Json $requestFile $body"
+    "`$state.phase='pre_ollama'`r`n`$state.model_call_attempted=`$false`r`n`$state.ollama_request_written_at=(Get-Date).ToString('o')`r`nWrite-Json `$stateFile `$state`r`nWrite-Json `$requestFile `$body"
   )
   $runnerText=$runnerText.Replace(
     '$modelStart=Get-Date',
-    "$state.phase='ollama_post_started'`r`n$state.model_call_attempted=$true`r`n$state.ollama_post_started_at=(Get-Date).ToString('o')`r`nWrite-Json $stateFile $state`r`n$modelStart=Get-Date"
+    "`$state.phase='ollama_post_started'`r`n`$state.model_call_attempted=`$true`r`n`$state.ollama_post_started_at=(Get-Date).ToString('o')`r`nWrite-Json `$stateFile `$state`r`n`$modelStart=Get-Date"
   )
   $runnerText=$runnerText.Replace(
     '$curlExit=$LASTEXITCODE',
-    "$curlExit=$LASTEXITCODE`r`n$state.phase='ollama_post_returned'`r`n$state.ollama_post_returned_at=(Get-Date).ToString('o')`r`n$state.ollama_curl_exit=$curlExit`r`nWrite-Json $stateFile $state"
+    "`$curlExit=`$LASTEXITCODE`r`n`$state.phase='ollama_post_returned'`r`n`$state.ollama_post_returned_at=(Get-Date).ToString('o')`r`n`$state.ollama_curl_exit=`$curlExit`r`nWrite-Json `$stateFile `$state"
   )
   if($runnerText -eq $phaseBefore -or $runnerText -notmatch 'ollama_post_started' -or $runnerText -notmatch 'ollama_post_returned'){
     throw 'Ridge16K phase-evidence compatibility patch did not match the exact-SHA runner.'
