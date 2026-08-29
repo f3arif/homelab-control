@@ -8,7 +8,10 @@ $ErrorActionPreference='Stop'
 $IntervalSeconds=[math]::Max(3,[math]::Min($IntervalSeconds,30))
 $requestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-edge-provision-r17.json'
 $executor=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Provision-R17.ps1'
+$rtcHelper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-RTC-Remediate-R17b.ps1'
+$preflightExecutor=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Preflight-R12.ps1'
 $preflightFile='C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTEdgePreflight\latest.json'
+$rtcResultFile='C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTRtcRemediation\latest.json'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\familyptt-edge-provision-r17'
 $stateFile=Join-Path $stateRoot 'latest.json'
 $logFile=Join-Path $stateRoot 'watcher.log'
@@ -38,9 +41,32 @@ Token server URL: $($r.public.serverUrl)
 Public LiveKit TLS valid: $($r.public.liveKitTlsValid)
 Token service running: $($r.hp.tokenServiceRunning)
 
-No JWT, participant token, API key, private key, or credential value is included in this result. DNS and firewall configuration were not changed by R17.
+No JWT, participant token, API key, private key, or credential value is included in this result.
 "@
   $tmp=Join-Path $env:TEMP ('familyptt-r17-'+[guid]::NewGuid().ToString('n')+'.json')
+  try{[ordered]@{body=$body}|ConvertTo-Json -Depth 3|Set-Content -LiteralPath $tmp -Encoding UTF8;& $gh.Source api --method POST 'repos/f3arif/homelab-control/issues/17/comments' --input $tmp *> $null;return ($LASTEXITCODE -eq 0)}finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
+}
+function Publish-RtcIssue($r,[string]$preflightJob){
+  $gh=Get-Command gh.exe -ErrorAction SilentlyContinue;if(-not $gh){return $false}
+  $body=@"
+### FamilyPTT RTC public-media remediation R17b
+
+Job: ``$($r.jobId)``
+Preflight: ``$preflightJob``
+Classification: ``$($r.classification)``
+Success: $($r.ok)
+HP LAN target: $($r.hp.lanIp)
+LiveKit TCP 7881 listener: $($r.hp.tcp7881)
+LiveKit UDP 7882 listener: $($r.hp.udp7882)
+LiveKit external-IP discovery enabled: $($r.hp.useExternalIp)
+Router TCP 7881 mapping: $($r.router.tcp7881)
+Router UDP 7882 mapping: $($r.router.udp7882)
+Router external IP: $($r.router.externalIp)
+Error: $($r.error)
+
+No credential, LiveKit API secret, JWT, participant token, or private-key value is included.
+"@
+  $tmp=Join-Path $env:TEMP ('familyptt-rtc-r17b-'+[guid]::NewGuid().ToString('n')+'.json')
   try{[ordered]@{body=$body}|ConvertTo-Json -Depth 3|Set-Content -LiteralPath $tmp -Encoding UTF8;& $gh.Source api --method POST 'repos/f3arif/homelab-control/issues/17/comments' --input $tmp *> $null;return ($LASTEXITCODE -eq 0)}finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
 }
 
@@ -48,11 +74,8 @@ function Handle-Request{
   $req=Read-Json $requestFile;if(-not(Valid-Request $req)){return}
   $job=[string]$req.job_id;$preflightJob=[string]$req.preflight_job_id
   $state=Read-Json $stateFile
-  if($state -and [string]$state.jobId -eq $job -and [string]$state.status -eq 'completed'){return}
-  $pre=Read-Json $preflightFile
-  if(-not $pre -or [string]$pre.jobId -ne $preflightJob -or -not [bool]$pre.ok -or [string]$pre.classification -ne 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'){
-    return
-  }
+  if($state -and [string]$state.jobId -eq $job -and [string]$state.status -in @('completed','failed')){return}
+
   if($state -and [string]$state.jobId -eq $job -and [string]$state.status -eq 'running'){
     $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
     if($carrier -and $carrier.State -eq 'Running'){return}
@@ -65,6 +88,43 @@ function Handle-Request{
     }else{Save-State ([ordered]@{jobId=$job;status='failed';message='Carrier ended without matching provision result';updatedAt=(Get-Date -Format o)})}
     return
   }
+
+  $pre=Read-Json $preflightFile
+  if(-not $pre -or [string]$pre.jobId -ne $preflightJob){return}
+
+  if([string]$pre.classification -eq 'EDGE_PREFLIGHT_RTC_PUBLIC_MEDIA_ROUTE_REQUIRED'){
+    $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue
+    if($carrier -and $carrier.State -eq 'Running'){return}
+    if(-not(Test-Path -LiteralPath $rtcHelper -PathType Leaf)){throw 'R17b RTC helper missing'}
+    if(-not(Test-Path -LiteralPath $preflightExecutor -PathType Leaf)){throw 'R12 preflight executor missing'}
+    Remove-Item -LiteralPath $rtcResultFile -Force -ErrorAction SilentlyContinue
+    Save-State ([ordered]@{jobId=$job;preflightJobId=$preflightJob;status='rtc-remediating';updatedAt=(Get-Date -Format o)})
+    Log "RTC_REMEDIATE_START job=$job"
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $rtcHelper -JobId $job -ResultFile $rtcResultFile *> $null
+    $rtcExit=$LASTEXITCODE
+    $rtc=Read-Json $rtcResultFile
+    if($rtcExit -ne 0 -or -not $rtc -or -not [bool]$rtc.ok){
+      if($rtc){$null=Publish-RtcIssue $rtc $preflightJob}
+      $msg=$(if($rtc -and $rtc.error){[string]$rtc.error}else{"RTC remediation exited $rtcExit without a successful result"})
+      Save-State ([ordered]@{jobId=$job;preflightJobId=$preflightJob;status='failed';classification=$(if($rtc){[string]$rtc.classification}else{'RTC_REMEDIATION_FAILED'});message=$msg;updatedAt=(Get-Date -Format o)})
+      Log "RTC_REMEDIATE_FAILED job=$job message=$msg"
+      return
+    }
+    $null=Publish-RtcIssue $rtc $preflightJob
+    Log "RTC_REMEDIATE_OK job=$job"
+
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $preflightExecutor -JobId $preflightJob -ResultFile $preflightFile *> $null
+    $preExit=$LASTEXITCODE
+    $pre=Read-Json $preflightFile
+    if($preExit -ne 0 -or -not $pre -or -not [bool]$pre.ok -or [string]$pre.classification -ne 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'){
+      $msg="Post-RTC preflight not ready exit=$preExit class=$([string]$pre.classification)"
+      Save-State ([ordered]@{jobId=$job;preflightJobId=$preflightJob;status='failed';classification='RTC_REPAIRED_PREFLIGHT_NOT_READY';message=$msg;updatedAt=(Get-Date -Format o)})
+      Log "POST_RTC_PREFLIGHT_FAILED job=$job $msg"
+      return
+    }
+  }
+
+  if(-not [bool]$pre.ok -or [string]$pre.classification -ne 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'){return}
   if(-not(Test-Path -LiteralPath $executor -PathType Leaf)){throw 'R17 executor missing'}
   $carrier=Get-ScheduledTask -TaskName $carrierTaskName -ErrorAction SilentlyContinue;if(-not $carrier){throw 'AFZ Edge Backup carrier missing'}
   if($carrier.State -eq 'Running'){return}
