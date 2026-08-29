@@ -1,0 +1,41 @@
+name: AFZ Site R5 Poststate ACK V2 Validate
+on:
+  push:
+    branches:
+      - fix/afz-site-r5-poststate-ack-v2
+    paths:
+      - afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1
+      - .github/workflows/afz-site-r5-poststate-ack-v2-validate.yml
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse diagnostic publisher
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=(Resolve-Path 'afz-openai-agent/Publish-AFZ-WebsiteDeployAck.ps1').Path
+          $tokens=$null
+          $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count){
+            $errors | Format-List | Out-String | Write-Error
+            throw 'PowerShell parse failed'
+          }
+          $text=Get-Content -LiteralPath $path -Raw
+          $required=@(
+            'r5OrphanReleaseStatus',
+            'r5CoreProcessCount',
+            'r5SshProcessCount',
+            'afz-site-git-cutover-r5-20260828T1151',
+            'r5-orphan-release.json'
+          )
+          foreach($needle in $required){
+            if(-not $text.Contains($needle)){throw "Missing diagnostic marker: $needle"}
+          }
+          $forbidden=@('Stop-Process','Start-Process','Stop-ScheduledTask','Start-ScheduledTask','Set-ScheduledTask','Disable-ScheduledTask','Enable-ScheduledTask','Remove-Item')
+          foreach($needle in $forbidden){
+            if($text.Contains($needle)){throw "Diagnostic publisher contains forbidden mutation primitive: $needle"}
+          }
+          Write-Host 'AFZ SITE R5 POSTSTATE ACK V2 VALIDATION PASS'
