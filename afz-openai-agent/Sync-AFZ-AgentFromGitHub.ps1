@@ -105,7 +105,6 @@ try{
       $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
       $fixed=$fixed.Replace('Send-Json $ctx 200 [ordered]@{','Send-Json $ctx 200 @{')
       $fixed=$fixed.Replace('properties=[ordered]@{};required=@();additionalProperties=$false','properties=[ordered]@{};additionalProperties=$false')
-      $fixed=$fixed.Replace("Get-Content -LiteralPath `$file -Raw","Get-Content -LiteralPath `$file -Encoding UTF8 -Raw")
       if($ps1.Name -eq 'AFZ-OpenAI-Agent-v2.ps1'){
         $fixed=$fixed.Replace('$Args','$ToolArgs')
       }
@@ -115,12 +114,36 @@ try{
           $fixed=[regex]::Replace($fixed,'(?m)^(\$ErrorActionPreference\s*=\s*[''\"]Stop[''\"]\s*)$',('$1'+"`r`n"+$load),1)
         }else{$fixed=$load+"`r`n"+$fixed}
       }
+      $duplicateEncodingLine=@($fixed -split '\r?\n' | Where-Object {
+        $_ -match '(?i)\b(?:Get|Set|Add)-Content\b[^#\r\n]*-Encoding\b[^#\r\n]*-Encoding\b'
+      } | Select-Object -First 1)
+      if($duplicateEncodingLine.Count -gt 0){
+        throw "Duplicate -Encoding parameter detected in $($ps1.FullName): $($duplicateEncodingLine[0].Trim())"
+      }
       if($fixed -ne $text){
         Set-Content -LiteralPath $ps1.FullName -Value $fixed -Encoding UTF8
         $relFixed=$ps1.FullName.Substring($dst.Length).TrimStart('\')
         if($copied -notcontains $relFixed){$copied+=$relFixed}
       }
     }catch{throw "Compatibility patch failed for $($ps1.FullName): $($_.Exception.Message)"}
+  }
+
+  # Refuse to promote a runtime that Windows PowerShell 5.1 cannot parse.
+  foreach($criticalRel in @(
+    'Sync-AFZ-AgentFromGitHub.ps1',
+    'Start-AFZ-OpenAI-Agent.ps1',
+    'AFZ-OpenAI-Agent-v2.ps1',
+    'prospect-engine\ProspectEngine.ps1'
+  )){
+    $criticalPath=Join-Path $dst $criticalRel
+    if(-not(Test-Path -LiteralPath $criticalPath -PathType Leaf)){throw "Critical agent source missing: $criticalPath"}
+    $tokens=$null
+    $parseErrors=$null
+    [System.Management.Automation.Language.Parser]::ParseFile($criticalPath,[ref]$tokens,[ref]$parseErrors)|Out-Null
+    if($parseErrors.Count -gt 0){
+      $messages=($parseErrors|ForEach-Object{$_.Message}) -join '; '
+      throw "PowerShell parser rejected $criticalRel`: $messages"
+    }
   }
 
   $ridgeRecoveryReset=$false
