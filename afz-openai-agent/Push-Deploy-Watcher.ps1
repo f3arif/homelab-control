@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+# HOTRELOAD_CANARY=20260829T1838-ET behavior-neutral source-hash probe
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
