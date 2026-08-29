@@ -7,6 +7,7 @@ on:
       - fix/afz-site-r6-tombstone
       - stage/afz-site-cutover-r8
       - activate/afz-site-cutover-r8
+      - cleanup/afz-site-r8-post-success
     paths:
       - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi.ps1'
       - '.github/workflows/afz-site-r3-tombstone-validate.yml'
@@ -89,7 +90,7 @@ jobs:
           test ! -e "$tmp/Deploy-AFZ-WebsiteToPi-Core.ps1"
           echo 'R7 TOMBSTONE PASS'
 
-      - name: Prove R8 still reaches normal core gate
+      - name: Prove exact completed R8 exits before deploy core
         shell: bash
         run: |
           set -euo pipefail
@@ -102,10 +103,10 @@ jobs:
           rc=$?
           set -e
           printf '%s\n' "$output"
-          test "$rc" -ne 0
-          test "$rc" -ne 42
-          grep -Fq 'AFZ website deployment core missing' <<<"$output"
-          echo 'R8 FORWARD PATH PASS'
+          test "$rc" -eq 42
+          grep -Fq 'AFZ_SITE_DEPLOY_RETIRED_R8: blocked before deploy core.' <<<"$output"
+          test ! -e "$tmp/Deploy-AFZ-WebsiteToPi-Core.ps1"
+          echo 'R8 TOMBSTONE PASS'
 
       - name: Verify tombstones are exact and non-mutating
         shell: python
@@ -119,14 +120,15 @@ jobs:
             'AFZ_SITE_DEPLOY_RETIRED_R6: blocked before deploy core.',
             'afz-site-git-cutover-r7-20260829T0030',
             'AFZ_SITE_DEPLOY_RETIRED_R7: blocked before deploy core.',
+            'afz-site-git-cutover-r8-20260829T1348',
+            'AFZ_SITE_DEPLOY_RETIRED_R8: blocked before deploy core.',
             'c38576741ce2d379723fde038300363429845656',
             'exit 42'
           ]:
             assert marker in p, marker
           first_core=p.index("$core=Join-Path $PSScriptRoot 'Deploy-AFZ-WebsiteToPi-Core.ps1'")
-          assert p.index('AFZ_SITE_DEPLOY_RETIRED_R3') < first_core
-          assert p.index('AFZ_SITE_DEPLOY_RETIRED_R6') < first_core
-          assert p.index('AFZ_SITE_DEPLOY_RETIRED_R7') < first_core
+          for marker in ('AFZ_SITE_DEPLOY_RETIRED_R3','AFZ_SITE_DEPLOY_RETIRED_R6','AFZ_SITE_DEPLOY_RETIRED_R7','AFZ_SITE_DEPLOY_RETIRED_R8'):
+            assert p.index(marker) < first_core
           pre_core=p[:first_core]
           assert 'Remove-Item' not in pre_core
           assert 'Set-Content' not in pre_core
