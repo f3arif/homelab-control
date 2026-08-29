@@ -1,0 +1,31 @@
+{
+  "schema": "afz-github-primary-v1",
+  "repository": "f3arif/homelab-control",
+  "source_branch": "main",
+  "transport_priority": [
+    "direct-fabric",
+    "github-coordination",
+    "onedrive-emergency-fallback",
+    "manual"
+  ],
+  "planes": {
+    "live_execution": "Control Hub / Direct Fabric / typed AFZ agent APIs",
+    "durable_coordination": "GitHub",
+    "emergency_handoff": "OneDrive / SharePoint"
+  },
+  "connector": {
+    "repository_discovery": "installation-aware",
+    "canonical_repo_full_name": "f3arif/homelab-control",
+    "allow_unindexed_code_search_as_authority": false,
+    "fallback_read_method": "direct repository/path fetch"
+  },
+  "workers": ["windows-main","h3","lenovo","hplaptop","hpenvy","pi"],
+  "rules": {
+    "github_is_scheduler": false,
+    "github_is_lease_database": false,
+    "github_is_worker_liveness_authority": false,
+    "onedrive_normal_polling_allowed": false,
+    "delete_legacy_branches": false,
+    "disable_onedrive_before_validation": false
+  }
+}
