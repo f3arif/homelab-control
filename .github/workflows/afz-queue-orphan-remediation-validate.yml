@@ -1,0 +1,73 @@
+name: AFZ Queue Orphan Remediation Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - '.github/workflows/afz-queue-orphan-remediation-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+      - '.github/workflows/afz-queue-orphan-remediation-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse queue remediation PowerShell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/AFZ-Agent-Control.ps1',
+            'afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+
+      - name: Validate typed non-arbitrary remediation contract
+        shell: python
+        run: |
+          from pathlib import Path
+          control=Path('afz-openai-agent/AFZ-Agent-Control.ps1').read_text()
+          runner=Path('afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1').read_text()
+          required_control=[
+            "version='1.7.0'",
+            "'/api/queue-orphan-remediation'",
+            'Test-DeployPeer',
+            "@('audit','apply')",
+            'queue remediation source mismatch',
+            'Invoke-AFZ-Queue-Orphan-Remediation.ps1',
+            'arbitraryShell=$false'
+          ]
+          for marker in required_control:
+            assert marker in control, marker
+          required_runner=[
+            "ValidateSet('audit','apply')",
+            'ORPHAN_AFTER_TERMINAL_RESULT',
+            'Get-LiveExecutors',
+            'Move-Item',
+            'quarantine-manifest.json',
+            'terminalResultMoved=$false',
+            'deletedFiles=0'
+          ]
+          for marker in required_runner:
+            assert marker in runner, marker
+          assert 'Remove-Item' not in runner
+          assert 'Invoke-Expression' not in control
+          assert 'Invoke-Expression' not in runner
+          assert 'cmd.exe /c' not in control.lower()
+          print('QUEUE ORPHAN REMEDIATION CONTRACT PASS')
