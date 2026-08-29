@@ -46,16 +46,6 @@ jobs:
           assert active.exists(), 'Expected terminal R6 active request missing before retirement'
           active.unlink()
 
-          wf=Path('.github/workflows/afz-site-pi-deploy-r1-validate.yml')
-          w=wf.read_text(encoding='utf-8')
-          w=w.replace("      - activate/afz-site-cutover-r6\n", "      - activate/afz-site-cutover-r6\n      - fix/afz-site-cutover-r7-crlf\n",1)
-          w=w.replace('Validate staged or exact active R6 and bounded transport contract','Validate staged or exact active R7 and bounded transport contract',1)
-          w=w.replace("'job_id':'afz-site-git-cutover-r6-20260828T1602'","'job_id':'afz-site-git-cutover-r7-20260829T0001'",1)
-          w=w.replace("print('R6 ACTIVE REQUEST CONTRACT PASS')","print('R7 ACTIVE REQUEST CONTRACT PASS')",1)
-          w=w.replace("print('R6 STAGED-NOT-ACTIVE CONTRACT PASS')","print('R7 STAGED-NOT-ACTIVE CONTRACT PASS')",1)
-          w=w.replace("print('R6 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')","print('R7 STAGED/ACTIVE + BOUNDED TRANSPORT CONTRACT PASS')",1)
-          wf.write_text(w,encoding='utf-8',newline='\n')
-
       - name: Validate patch under Windows PowerShell
         shell: powershell
         run: |
@@ -72,18 +62,14 @@ jobs:
           if(Test-Path 'afz-openai-agent/requests/afz-site-deploy.json'){throw 'Terminal R6 active request must be retired'}
           Write-Host 'R7 CRLF PATCH CONTRACT PASS'
 
-      - name: Commit patched files and remove one-shot workflow
+      - name: Commit non-workflow R7 patch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1 \
-                  afz-openai-agent/requests/afz-site-deploy-next.json \
-                  .github/workflows/afz-site-pi-deploy-r1-validate.yml
+                  afz-openai-agent/requests/afz-site-deploy-next.json
           git rm afz-openai-agent/requests/afz-site-deploy.json
-          git rm .github/workflows/afz-site-r7-crlf-patch.yml
           git commit -m 'Normalize AFZ site checksum paths and stage R7'
           git push origin HEAD:fix/afz-site-cutover-r7-crlf
-
-# retrigger after workflow exists in branch parent
