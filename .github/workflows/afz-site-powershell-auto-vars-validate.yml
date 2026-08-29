@@ -1,0 +1,46 @@
+name: AFZ Website PowerShell Auto Vars Validate
+
+on:
+  push:
+    branches:
+      - fix/afz-site-r8-home-collision
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+      - '.github/workflows/afz-site-powershell-auto-vars-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1'
+      - '.github/workflows/afz-site-powershell-auto-vars-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse and reject HOME assignment collision
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=(Resolve-Path 'afz-openai-agent/Deploy-AFZ-WebsiteToPi-Core.ps1').Path
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+
+          $bad=$ast.FindAll({
+            param($n)
+            if($n -isnot [System.Management.Automation.Language.AssignmentStatementAst]){return $false}
+            $left=[string]$n.Left.Extent.Text
+            return $left -match '^\$home$'
+          },$true)
+          if($bad.Count -gt 0){throw 'Deploy core assigns to read-only automatic variable $HOME (PowerShell variable names are case-insensitive).'}
+
+          $text=[IO.File]::ReadAllText($path)
+          if($text -notmatch '\$homeResponse\s*=\s*Invoke-WebRequest'){throw 'Expected non-reserved public home response variable is missing.'}
+          if($text -notmatch 'Public home-page verification failed'){throw 'Public home verification guard is missing.'}
+          Write-Host 'POWERSHELL AUTOMATIC VARIABLE COLLISION CHECK PASS'
