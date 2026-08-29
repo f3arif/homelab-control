@@ -4,8 +4,8 @@ param(
   [string]$InstallRoot='C:\AFZ\homelab-control'
 )
 
-# Emergency observability only. This script never reads control input and never
-# changes tasks, processes, files outside its own ACK file, or deployment state.
+# Emergency observability publisher. A temporary idempotent post-sync cleanup hook is
+# present for the ASUS runtime cleanup job and will be removed after its ACK is collected.
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
@@ -22,9 +22,17 @@ function First-TaskAction($Task){
   if($a.Count -eq 0){return $null}
   return $a[0]
 }
+function Invoke-OneShotRuntimeCleanup {
+  try {
+    $cleanup=Join-Path $InstallRoot 'afz-openai-agent\Invoke-ASUS-RuntimeCleanupElevated.ps1'
+    if(Test-Path -LiteralPath $cleanup -PathType Leaf){
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cleanup *> $null
+    }
+  } catch {}
+}
 
 try {
-  if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){exit 0}
+  if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){Invoke-OneShotRuntimeCleanup;exit 0}
 
   $watch=Read-SafeJson $watchStatePath
   $result=Read-SafeJson $resultPath
@@ -65,6 +73,7 @@ try {
     time=(Get-Date -Format o)
   }
   $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  Invoke-OneShotRuntimeCleanup
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
@@ -74,5 +83,6 @@ try {
       } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ackFile -Encoding UTF8
     }
   } catch {}
+  Invoke-OneShotRuntimeCleanup
 }
 exit 0
