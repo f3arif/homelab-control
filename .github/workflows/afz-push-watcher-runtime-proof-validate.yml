@@ -1,0 +1,61 @@
+name: AFZ Push Watcher Runtime Proof Validate
+
+on:
+  push:
+    branches:
+      - fix/afz-push-watcher-runtime-proof
+    paths:
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - '.github/workflows/afz-push-watcher-runtime-proof-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - '.github/workflows/afz-push-watcher-runtime-proof-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse watcher
+        shell: pwsh
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent/Push-Deploy-Watcher.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PowerShell parse failed'}
+          Write-Host 'PARSE PASS'
+
+      - name: Validate startup-only runtime proof contract
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1').read_text()
+          required=[
+            'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt',
+            'function Save-RuntimeProof',
+            "purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'",
+            "controlPlane='github'",
+            "component='AFZ OpenAI Agent Push Deploy Watcher Runtime Proof'",
+            'processId=$PID',
+            'processStartTime=',
+            'scriptSha256=$scriptHash',
+            'Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256',
+            'taskState=',
+            'Save-RuntimeProof'
+          ]
+          for marker in required:
+            assert marker in p, marker
+          call=p.index('  Save-RuntimeProof\n')
+          loop=p.index('  while($true){')
+          assert call < loop, 'runtime proof must be written once at watcher startup'
+          body=p[p.index('function Save-RuntimeProof'):p.index('function Invoke-UpdaterPass')]
+          for forbidden in ['Start-ScheduledTask','Stop-ScheduledTask','Start-Process','Invoke-WebRequest','Invoke-RestMethod','Remove-Item']:
+            assert forbidden not in body, forbidden
+          assert 'Set-Content -LiteralPath $runtimeProofFile' in body
+          print('STARTUP-ONLY READ-ONLY RUNTIME PROOF PASS')
