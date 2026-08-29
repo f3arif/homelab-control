@@ -37,10 +37,12 @@ function Find-Gh{
   return $null
 }
 function Quote-Arg([string]$v){if($null -eq $v){return '""'};if($v -notmatch '[\s"]'){return $v};return '"'+($v.Replace('"','\"'))+'"'}
-function Invoke-Gh([string[]]$Args){
+function Invoke-Gh([string[]]$GhArgs){
+  if($null -eq $GhArgs -or $GhArgs.Count -eq 0){throw 'Invoke-Gh requires at least one GitHub CLI argument.'}
   $o=Join-Path $env:TEMP ('afz-gh-out-'+[guid]::NewGuid().ToString('N')+'.txt');$e=Join-Path $env:TEMP ('afz-gh-err-'+[guid]::NewGuid().ToString('N')+'.txt')
   try{
-    $line=($Args|ForEach-Object {Quote-Arg ([string]$_)}) -join ' '
+    $line=($GhArgs|ForEach-Object {Quote-Arg ([string]$_)}) -join ' '
+    if([string]::IsNullOrWhiteSpace($line)){throw 'Invoke-Gh produced an empty GitHub CLI command line.'}
     $p=Start-Process -FilePath $script:gh -ArgumentList $line -RedirectStandardOutput $o -RedirectStandardError $e -Wait -PassThru -NoNewWindow
     $out=if(Test-Path $o){Get-Content $o -Raw}else{''};$err=if(Test-Path $e){Get-Content $e -Raw}else{''}
     [pscustomobject]@{ExitCode=[int]$p.ExitCode;Stdout=([string]$out).Trim();Stderr=([string]$err).Trim()}
