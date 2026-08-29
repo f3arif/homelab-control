@@ -73,7 +73,7 @@ try{
   do{
     Start-Sleep -Seconds 2
     $r=Read-Json $helperResult
-    if($r -and [string]$r.jobId -eq $JobId -and [string]$r.expectedSha -eq $ExpectedSha -and [string]$r.status -in @('completed','failed')){break}
+    if($r -and [string]$r.jobId -eq $JobId -and [string]$r.expectedSha -eq $ExpectedSha -and [string]$r.status -in @('running','completed','failed')){break}
     $current=Get-ScheduledTask -TaskName $dedicatedTaskName -ErrorAction SilentlyContinue
     if($current -and $current.State -ne 'Running' -and $r){break}
   }while((Get-Date) -lt $deadline)
@@ -84,7 +84,7 @@ try{
     throw "Dedicated Interactive transport ended without result: $helperResult lastResult=$([string]$info.LastTaskResult)"
   }
   if([string]$r.jobId -ne $JobId -or [string]$r.expectedSha -ne $ExpectedSha){throw 'Dedicated Interactive transport result does not match this exact job/SHA.'}
-  if(-not [bool]$r.ok -or [string]$r.status -ne 'completed'){throw ('Dedicated Interactive transport failed: '+[string]$r.message)}
+  if(-not [bool]$r.ok -or [string]$r.status -notin @('running','completed')){throw ('Dedicated Interactive transport failed: '+[string]$r.message)}
 
   Save-State 'completed' 'H3 Ridge16K detached runner launch proved through a dedicated windows-main Interactive transport task.' $r
   Write-Output ('AFZ_QWENRIDGE16K_BOOTSTRAP_JSON='+((Get-Content $stateFile -Raw|ConvertFrom-Json)|ConvertTo-Json -Depth 12 -Compress))
