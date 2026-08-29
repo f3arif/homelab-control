@@ -80,9 +80,11 @@ try{
   $siteDeployRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Site-Deploy-Request-Watcher.ps1'
   $siteDeployExecutor=Join-Path $InstallRoot 'afz-openai-agent\Deploy-AFZ-WebsiteToPi.ps1'
   $familyPttEdgeWatcher=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
+  $familyPttProvisionWatcher=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Provision-Watcher-R17.ps1'
+  $familyPttProvisionExecutor=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Provision-R17.ps1'
   $prospectModule=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\ProspectEngine.ps1'
   $prospectUi=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\index.html'
-  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$familyPttEdgeWatcher,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
+  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$familyPttEdgeWatcher,$familyPttProvisionWatcher,$familyPttProvisionExecutor,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
   $ips=@(Get-Content -LiteralPath $allowFile | ForEach-Object {$_.Trim()} | Where-Object {$_ -and -not $_.StartsWith('#') -and $_ -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$'} | Sort-Object -Unique)
   if($ips.Count -eq 0){throw 'No Tailscale client IPs configured'}
@@ -110,40 +112,31 @@ try{
   $controlTask=Get-ScheduledTask -TaskName $controlTaskName -ErrorAction SilentlyContinue
   if($controlTask){Set-ScheduledTask -TaskName $controlTaskName -Action $controlAction | Out-Null}else{Register-ScheduledTask -TaskName $controlTaskName -Action $controlAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # Persistent secretless GitHub signal consumer. This used to exist only as a
-  # hidden child of the API wrapper, so agent restarts could silently remove the
-  # only fast-signal consumer. Give it an independent SYSTEM task lifecycle.
   $pushWatcherTaskName='AFZ OpenAI Agent Push Deploy Watcher'
   $pushWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$pushWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 3"
   $pushWatcherTask=Get-ScheduledTask -TaskName $pushWatcherTaskName -ErrorAction SilentlyContinue
   if($pushWatcherTask){Set-ScheduledTask -TaskName $pushWatcherTaskName -Action $pushWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $pushWatcherTaskName -Action $pushWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # Secretless GitHub request consumer. It only reads fixed typed request files
-  # from the exact-SHA synced source and can launch only fixed allowlisted relays.
   $benchmarkWatcherTaskName='AFZ H3 Qwen27B Request Watcher'
   $benchmarkWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$benchmarkRequestWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $benchmarkWatcherTask=Get-ScheduledTask -TaskName $benchmarkWatcherTaskName -ErrorAction SilentlyContinue
   if($benchmarkWatcherTask){Set-ScheduledTask -TaskName $benchmarkWatcherTaskName -Action $benchmarkWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $benchmarkWatcherTaskName -Action $benchmarkWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # Fixed AFZ website Git->Pi cutover lane. The SYSTEM watcher never reads or moves
-  # the Pi private key. It temporarily reuses a proven user-context carrier task,
-  # restores that task's original action, and disables the old OneDrive sync only
-  # after the Git deployment reports full success.
   $siteWatcherTaskName='AFZ Website Git Deploy Request Watcher'
   $siteWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$siteDeployRequestWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $siteWatcherTask=Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue
   if($siteWatcherTask){Set-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # FamilyPTT production-edge preflight watcher. Own this task directly from the
-  # SYSTEM updater so R12 self-heals even if the API wrapper is already running.
-  # Never forcibly restart a running R12 watcher because it may temporarily own the
-  # AFZ Edge Backup carrier and is responsible for restoring that carrier safely.
   $familyPttEdgeTaskName='AFZ FamilyPTT Edge Preflight Watcher R12'
   $familyPttEdgeTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttEdgeWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction SilentlyContinue
   if($familyPttEdgeTask){Set-ScheduledTask -TaskName $familyPttEdgeTaskName -Action $familyPttEdgeTaskAction | Out-Null}else{Register-ScheduledTask -TaskName $familyPttEdgeTaskName -Action $familyPttEdgeTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
-  # The 3-second fast signal watcher is primary. This one-minute task is recovery-only.
+  $familyPttProvisionTaskName='AFZ FamilyPTT Edge Provision Watcher R17'
+  $familyPttProvisionTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttProvisionWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $familyPttProvisionTask=Get-ScheduledTask -TaskName $familyPttProvisionTaskName -ErrorAction SilentlyContinue
+  if($familyPttProvisionTask){Set-ScheduledTask -TaskName $familyPttProvisionTaskName -Action $familyPttProvisionTaskAction | Out-Null}else{Register-ScheduledTask -TaskName $familyPttProvisionTaskName -Action $familyPttProvisionTaskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
+
   $updaterTaskName='AFZ OpenAI Agent Updater'
   $updaterAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updater`" -InstallRoot `"$InstallRoot`""
   $updaterTrigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
@@ -159,20 +152,22 @@ try{
   }
   Ensure-Running $agentTaskName $changed
   Ensure-Running $controlTaskName $changed
-  # Never forcibly restart the push watcher from inside an update it may have
-  # initiated. If absent or stopped, start it; otherwise leave the live loop alone.
   Ensure-Running $pushWatcherTaskName $false
   Ensure-Running $benchmarkWatcherTaskName $changed
   Ensure-Running $siteWatcherTaskName $changed
-  Ensure-Running $familyPttEdgeTaskName $false
+  $familyPttCarrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
+  $safeToRefreshFamilyPttWatchers=($changed -and (-not $familyPttCarrier -or [string]$familyPttCarrier.State -ne 'Running'))
+  Ensure-Running $familyPttEdgeTaskName $safeToRefreshFamilyPttWatchers
+  Ensure-Running $familyPttProvisionTaskName $safeToRefreshFamilyPttWatchers
 
   $trigger=$(if($ExpectedSha){'fast-signal-exact-sha'}else{'fallback-poll'})
   $pushTaskState=[string](Get-ScheduledTask -TaskName $pushWatcherTaskName -ErrorAction SilentlyContinue).State
   $siteTaskState=[string](Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue).State
   $familyPttEdgeTaskState=[string](Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction SilentlyContinue).State
+  $familyPttProvisionTaskState=[string](Get-ScheduledTask -TaskName $familyPttProvisionTaskName -ErrorAction SilentlyContinue).State
   Write-TransportDiagnosticAck $remoteSha $ExpectedSha $trigger $pushTaskState $siteTaskState
 
-  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
+  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;familyPttEdgeProvisionWatcherTask=$familyPttProvisionTaskName;familyPttEdgeProvisionWatcherState=$familyPttProvisionTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
   $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
 } catch {
   $result=[ordered]@{ok=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});error=$_.Exception.Message}
