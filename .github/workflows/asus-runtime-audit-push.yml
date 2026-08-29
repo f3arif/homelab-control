@@ -1,0 +1,147 @@
+name: ASUS Runtime Audit Push (read-only)
+
+on:
+  push:
+    branches:
+      - audit/asus-runtime-20260828
+    paths:
+      - '.github/workflows/asus-runtime-audit-push.yml'
+      - '.github/asus-runtime-audit-trigger.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: asus-runtime-audit-readonly
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read live Windows-main Ops Console status
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for url in \
+            http://100.70.25.8:8788/api/status \
+            http://100.70.25.8:8790/api/status; do
+            echo "Trying $url"
+            if curl --silent --show-error --fail \
+              --connect-timeout 4 --max-time 20 \
+              "$url" -o status.json; then
+              python -m json.tool status.json >/dev/null
+              echo "$url" > status-source.txt
+              ok=1
+              break
+            fi
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "No readable Ops Console status endpoint responded" >&2
+            exit 1
+          fi
+
+      - name: Summarize RAM, automation processes and scheduled tasks
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,re
+          from collections import defaultdict
+          d=json.load(open('status.json',encoding='utf-8'))
+          def get(o,*names,default=None):
+              if not isinstance(o,dict): return default
+              m={str(k).lower():k for k in o}
+              for n in names:
+                  if n in o:return o[n]
+                  k=m.get(str(n).lower())
+                  if k is not None:return o[k]
+              return default
+          def n(o,*names):
+              try:return float(get(o,*names))
+              except:return None
+          def ram(p):
+              for names in [('privateMb','privateRamMb','privateMemoryMb','privateWorkingSetMb'),('workingMb','workingSetMb','workingRamMb','memoryMb')]:
+                  v=n(p,*names)
+                  if v is not None:return v
+              for names in [('privateBytes','privateMemoryBytes','privateMemorySize64'),('workingSetBytes','workingSet64','workingSet')]:
+                  v=n(p,*names)
+                  if v is not None and v>1048576:return v/1048576
+              return 0.0
+          def name(p):return str(get(p,'label','processName','name','ProcessName',default='process'))
+          def pid(p):return str(get(p,'pid','processId','Id',default=''))
+          def cmd(p):return str(get(p,'commandLine','cmdline','command',default='') or '')
+          def cat(p):return str(get(p,'category','classification','afzCategory',default='') or '')
+          procs=get(d,'windowsProcesses','processes',default=[])
+          if not isinstance(procs,list):procs=[]
+          tasks=get(d,'scheduledTasks','windowsScheduledTasks','tasks',default=[])
+          if not isinstance(tasks,list):tasks=[]
+          ps=sorted(procs,key=ram,reverse=True)
+          tokens=('afz','watchdog','autorunner','worker','controller','loop','publisher','queue','remoteops','podcast','familyptt','radiohilal','marketplace','jellyfin','docker','wsl','onedrive','ollama')
+          auto=[p for p in procs if any(t in (' '.join([name(p),cat(p),cmd(p)])).lower() for t in tokens)]
+          auto.sort(key=ram,reverse=True)
+          sig=defaultdict(list)
+          for p in procs:
+              c=re.sub(r'\b\d{2,}\b','#',cmd(p).lower())
+              sig[(name(p).lower(),cat(p).lower(),c[:500])].append(p)
+          dups=sorted([g for g in sig.values() if len(g)>1],key=lambda g:sum(ram(x) for x in g),reverse=True)
+          lines=[]
+          lines += ['ASUS / WINDOWS-MAIN LIVE RUNTIME AUDIT','source='+open('status-source.txt').read().strip(),'top_keys='+','.join(sorted(map(str,d.keys()))),f'process_count={len(procs)}',f'scheduled_task_count={len(tasks)}']
+          # find RAM/CPU-like scalar metrics anywhere shallow
+          hits=[]
+          def walk(o,path='root',depth=0):
+              if depth>4:return
+              if isinstance(o,dict):
+                  for k,v in o.items():
+                      kl=str(k).lower()
+                      if any(x in kl for x in ['rampercent','memorypercent','cpupercent','ramused','ramtotal','memoryused','memorytotal']) and isinstance(v,(str,int,float,bool)):
+                          hits.append((path+'.'+str(k),v))
+                      walk(v,path+'.'+str(k),depth+1)
+              elif isinstance(o,list) and depth<3:
+                  for i,v in enumerate(o[:20]):walk(v,f'{path}[{i}]',depth+1)
+          walk(d)
+          lines.append('\nHOST METRICS')
+          lines.extend(f'{k}={v}' for k,v in hits[:60])
+          lines += ['\nTOP RAM PROCESSES','RAM_MB | PID | NAME | CATEGORY | COMMAND']
+          for p in ps[:35]:lines.append(f'{ram(p):8.1f} | {pid(p):>6} | {name(p)} | {cat(p)} | {cmd(p)[:260]}')
+          lines += ['\nAUTOMATION / RECURRING-RELATED LIVE PROCESSES','RAM_MB | PID | NAME | CATEGORY | COMMAND']
+          for p in auto[:100]:lines.append(f'{ram(p):8.1f} | {pid(p):>6} | {name(p)} | {cat(p)} | {cmd(p)[:340]}')
+          lines.append('\nPOSSIBLE DUPLICATE PROCESS FAMILIES')
+          if not dups:lines.append('none')
+          for g in dups[:35]:
+              lines.append(f'count={len(g)} total_ram_mb={sum(ram(x) for x in g):.1f} name={name(g[0])} category={cat(g[0])}')
+              for p in g[:8]:lines.append(f'  pid={pid(p)} ram_mb={ram(p):.1f} cmd={cmd(p)[:300]}')
+          lines.append('\nAFZ / RUNNING SCHEDULED TASKS')
+          rows=[]
+          for t in tasks:
+              tn=str(get(t,'taskName','name','TaskName',default='task'))
+              action=str(get(t,'action','actions','execute','command',default='') or '')
+              state=str(get(t,'state','status',default='') or '')
+              matched=get(t,'matchedPid','pid','livePid',default='')
+              last=get(t,'lastTaskResult','lastResult',default='')
+              nxt=get(t,'nextRunTime','nextRun',default='')
+              if 'afz' in (tn+' '+action).lower() or matched or state.lower()=='running':rows.append((tn,state,matched,last,nxt,action))
+          if not rows:lines.append('none returned')
+          for r in rows[:150]:lines.append(f'{r[0]} | state={r[1]} | pid={r[2]} | last={r[3]} | next={r[4]} | action={r[5][:380]}')
+          open('audit-summary.txt','w',encoding='utf-8').write('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Upload sanitized audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: asus-runtime-audit
+          path: |
+            audit-summary.txt
+            status-source.txt
+            status.json
+          retention-days: 3
