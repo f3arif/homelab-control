@@ -51,7 +51,6 @@ $patched=$patched.Replace('Tool-JellyfinUserViews $Args','Tool-JellyfinUserViews
 $patched=$patched.Replace('$args = [pscustomobject]@{}','$callArgs = [pscustomobject]@{}')
 $patched=$patched.Replace('$args = $call.arguments | ConvertFrom-Json','$callArgs = $call.arguments | ConvertFrom-Json')
 $patched=$patched.Replace('Invoke-Tool ([string]$call.name) $args','Invoke-Tool ([string]$call.name) $callArgs')
-$patched=$patched.Replace('Get-Content -LiteralPath $file -Raw','Get-Content -LiteralPath $file -Raw -Encoding UTF8')
 
 Copy-Item -LiteralPath $uiSrc -Destination (Join-Path $runtimeRoot 'AFZ-Agent-UI.html') -Force
 $runtimeTools=Join-Path $runtimeRoot 'tools'
