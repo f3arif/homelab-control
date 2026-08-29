@@ -27,9 +27,12 @@ function Run-Ssh([string]$Target,[string[]]$SshArgs,[string]$Command,[int]$Timeo
     $data=@(Receive-Job -Job $job -ErrorAction Stop)|Where-Object {$_ -and $_.PSObject.Properties['exit']}|Select-Object -Last 1
     if(-not $data){throw "SSH returned no structured result target=$Target"}
     return [ordered]@{exit=[int]$data.exit;output=@($data.output|ForEach-Object{[string]$_})}
-  } finally {
-    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-  }
+  } finally {Remove-Job -Job $job -Force -ErrorAction SilentlyContinue}
+}
+function Parse-Rtc([string]$text){
+  $map=@{}
+  foreach($part in @($text -split ';')){if($part -match '^\s*([A-Za-z0-9_]+)\s*:\s*(.*?)\s*$'){$map[$matches[1].ToLowerInvariant()]=$matches[2]}}
+  return $map
 }
 
 $result=[ordered]@{
@@ -55,8 +58,7 @@ printf 'ACME_WEBROOT='; docker exec npm-pi sh -lc 'test -d /data/letsencrypt-acm
 '@
   $pi=Run-Ssh $piTarget $piArgs $piCmd 45
   if($pi.exit -ne 0){throw ('Pi preflight SSH failed: '+(($pi.output|Select-Object -Last 3)-join ' | '))}
-  $piMap=@{}
-  foreach($line in $pi.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$piMap[$matches[1]]=$matches[2].Trim()}}
+  $piMap=@{};foreach($line in $pi.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$piMap[$matches[1]]=$matches[2].Trim()}}
   $result.pi=[ordered]@{
     host=$piMap.PI_HOST;npmContainer=$piMap.NPM_CONTAINER;npmPorts=$piMap.NPM_PORTS
     reachesApi=($piMap.PI_TO_API -eq 'true');reachesLiveKit=($piMap.PI_TO_LIVEKIT -eq 'true')
@@ -77,20 +79,27 @@ printf 'TOKEN_URL_SCHEME='; docker exec familyptt-livekit-token sh -lc 'case "${
 '@
   $hp=Run-Ssh $hpTarget $hpArgs $hpCmd 45
   if($hp.exit -ne 0){throw ('HP preflight SSH failed: '+(($hp.output|Select-Object -Last 3)-join ' | '))}
-  $hpMap=@{}
-  foreach($line in $hp.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$hpMap[$matches[1]]=$matches[2].Trim()}}
+  $hpMap=@{};foreach($line in $hp.output){if($line -match '^([A-Z0-9_]+)=(.*)$'){$hpMap[$matches[1]]=$matches[2].Trim()}}
+  $rtc=Parse-Rtc $hpMap.LK_RTC
+  $useExternal=([string]$rtc.use_external_ip).Trim().ToLowerInvariant() -eq 'true'
+  $hasConfiguredExternal=-not [string]::IsNullOrWhiteSpace([string]$rtc.external_ip)
+  $nodeIp=[string]$rtc.node_ip
+  $nodeLooksPrivate=($nodeIp -match '^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)')
+  $rtcPublicCandidateReady=($useExternal -or $hasConfiguredExternal -or (-not $nodeLooksPrivate -and -not [string]::IsNullOrWhiteSpace($nodeIp)))
   $result.hp=[ordered]@{
     host=$hpMap.HP_HOST;liveKitRunning=($hpMap.LK_RUNNING -eq 'true');tokenRunning=($hpMap.TOKEN_RUNNING -eq 'true')
     liveKitNetworkMode=$hpMap.LK_NETWORK;liveKitPortBindings=$hpMap.LK_PORTS;rtcSettings=$hpMap.LK_RTC;tokenUrlScheme=$hpMap.TOKEN_URL_SCHEME
+    rtcPublicCandidateReady=$rtcPublicCandidateReady
   }
 
   if(-not $result.pi.reachesApi -or -not $result.pi.reachesLiveKit){$result.classification='EDGE_PREFLIGHT_PI_CANNOT_REACH_BACKEND'}
   elseif(-not $result.hp.liveKitRunning -or -not $result.hp.tokenRunning){$result.classification='EDGE_PREFLIGHT_BACKEND_CONTAINER_NOT_READY'}
   elseif(-not $result.pi.certbotAvailable -or -not $result.pi.certbotAccountPresent -or -not $result.pi.acmeWebrootPresent){$result.classification='EDGE_PREFLIGHT_CERT_PATH_REVIEW_REQUIRED'}
+  elseif(-not $result.pi.customHttpIncluded){$result.classification='EDGE_PREFLIGHT_NPM_CUSTOM_ROUTE_NOT_READY'}
+  elseif(-not $result.hp.rtcPublicCandidateReady){$result.classification='EDGE_PREFLIGHT_RTC_PUBLIC_MEDIA_ROUTE_REQUIRED'}
   else{$result.classification='EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING'}
   $result.ok=($result.classification -eq 'EDGE_PREFLIGHT_READY_FOR_NARROW_PROVISIONING')
-  $result.finishedAt=(Get-Date -Format o)
-  Save-Result $result
+  $result.finishedAt=(Get-Date -Format o);Save-Result $result
   exit $(if($result.ok){0}else{2})
 }catch{
   $result.ok=$false;$result.error=$_.Exception.Message;$result.finishedAt=(Get-Date -Format o);Save-Result $result;exit 1
