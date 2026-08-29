@@ -13,6 +13,7 @@ $watchState=Join-Path $stateRoot 'push-watcher.json'
 $logRoot=Join-Path $stateRoot 'logs'
 $logFile=Join-Path $logRoot 'push-watcher.log'
 $signalBase='https://raw.githubusercontent.com/f3arif/homelab-control/main/.github/afz-agent-deploy-signal.txt'
+$compareBase='https://api.github.com/repos/f3arif/homelab-control/compare'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
@@ -29,6 +30,21 @@ function Handled-Signal{
     }catch{}
   }
   return ''
+}
+function Current-ContainsSignal([string]$Current,[string]$Signal){
+  if($Current -notmatch '^[0-9a-f]{40}$' -or $Signal -notmatch '^[0-9a-f]{40}$'){return $false}
+  if($Current -eq $Signal){return $true}
+  try{
+    $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $headers=@{'User-Agent'='AFZ-Push-Watcher';'Cache-Control'='no-cache';'Pragma'='no-cache';'Accept'='application/vnd.github+json'}
+    $pair=("{0}...{1}" -f $Signal,$Current)
+    $compare=Invoke-RestMethod -Uri ($compareBase+'/'+$pair+'?nocache='+$nonce) -Headers $headers -TimeoutSec 15
+    $status=([string]$compare.status).ToLowerInvariant()
+    return ($status -in @('ahead','identical'))
+  }catch{
+    Log "ANCESTRY_CHECK_ERROR signal=$Signal current=$Current error=$($_.Exception.Message)"
+    return $false
+  }
 }
 function Save-State([string]$signal,[string]$status,[string]$message){
   [ordered]@{ok=($status -eq 'idle' -or $status -eq 'deployed');signalSha=$signal;currentSha=(Current-Sha);status=$status;message=$message;intervalSeconds=$IntervalSeconds;time=(Get-Date -Format o)} |
@@ -73,7 +89,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true"
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
     try{
@@ -90,28 +106,39 @@ try{
           $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
           if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
           $before=Current-Sha
-          Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
-          Save-DiagnosticAck $sha 'signal-consumed' "Fast signal observed; source before update=$before"
-          Log "DEPLOY signal=$sha current=$before"
 
-          # Pass 1 synchronizes the exact GitHub source. If that synchronization
-          # replaces the updater itself, the already-running PowerShell process
-          # still has the old updater AST in memory. Pass 2 starts a fresh process
-          # from the newly synchronized updater so new task/registration logic is
-          # applied on the same signal instead of waiting for a later commit.
-          $code=Invoke-UpdaterPass $updater $sha 1
-          if($code -eq 0){$code=Invoke-UpdaterPass $updater $sha 2}
-
-          $after=Current-Sha
-          if($code -eq 0 -and $after -eq $sha){
-            Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
-            Save-DiagnosticAck $sha 'source-synced' "Exact-SHA two-pass update completed; source=$after"
-            Log "DEPLOY_OK signal=$sha source=$after passes=2"
+          # A delayed/cached fast-signal must never roll a machine backward. If the
+          # currently deployed source is already the signal itself or a Git
+          # descendant of it, mark the signal handled without invoking the updater.
+          if(Current-ContainsSignal $before $sha){
+            Save-State $sha 'deployed' "Signal already contained by current source=$before; downgrade skipped."
+            Save-DiagnosticAck $sha 'source-already-newer' "Signal already contained by current source=$before; downgrade skipped."
+            Log "DEPLOY_SKIP_ANCESTOR signal=$sha current=$before"
             $lastAttemptSha=''
           }else{
-            Save-State $sha 'failed' "Updater exit=$code current=$after expected=$sha"
-            Save-DiagnosticAck $sha 'source-sync-failed' "Updater exit=$code current=$after expected=$sha"
-            Log "DEPLOY_FAIL signal=$sha exit=$code current=$after expected=$sha"
+            Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
+            Save-DiagnosticAck $sha 'signal-consumed' "Fast signal observed; source before update=$before"
+            Log "DEPLOY signal=$sha current=$before"
+
+            # Pass 1 synchronizes the exact GitHub source. If that synchronization
+            # replaces the updater itself, the already-running PowerShell process
+            # still has the old updater AST in memory. Pass 2 starts a fresh process
+            # from the newly synchronized updater so new task/registration logic is
+            # applied on the same signal instead of waiting for a later commit.
+            $code=Invoke-UpdaterPass $updater $sha 1
+            if($code -eq 0){$code=Invoke-UpdaterPass $updater $sha 2}
+
+            $after=Current-Sha
+            if($code -eq 0 -and $after -eq $sha){
+              Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
+              Save-DiagnosticAck $sha 'source-synced' "Exact-SHA two-pass update completed; source=$after"
+              Log "DEPLOY_OK signal=$sha source=$after passes=2"
+              $lastAttemptSha=''
+            }else{
+              Save-State $sha 'failed' "Updater exit=$code current=$after expected=$sha"
+              Save-DiagnosticAck $sha 'source-sync-failed' "Updater exit=$code current=$after expected=$sha"
+              Log "DEPLOY_FAIL signal=$sha exit=$code current=$after expected=$sha"
+            }
           }
         }
       }else{
