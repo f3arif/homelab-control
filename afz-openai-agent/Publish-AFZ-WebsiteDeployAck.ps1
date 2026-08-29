@@ -13,6 +13,9 @@ $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
 $r5ReleasePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\r5-orphan-release.json'
 $r5JobId='afz-site-git-cutover-r5-20260828T1151'
+$h3HotfixMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\gh-argument-binding-v1.json'
+$h3PostmortemHookPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\postmortem-hook-latest.json'
+$h3PostmortemMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-postmortem\postmortem-v1.json'
 
 function Read-SafeJson([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
@@ -30,6 +33,9 @@ try {
 
   $watch=Read-SafeJson $watchStatePath
   $result=Read-SafeJson $resultPath
+  $h3Hotfix=Read-SafeJson $h3HotfixMarkerPath
+  $h3PostHook=Read-SafeJson $h3PostmortemHookPath
+  $h3PostMarker=Read-SafeJson $h3PostmortemMarkerPath
   $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
   $legacy=Get-ScheduledTask -TaskName 'AFZ Website Sync to Pi' -ErrorAction SilentlyContinue
   $siteWatcher=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
@@ -60,6 +66,13 @@ try {
     source='windows-main'
     controlPlane='github'
     component='AFZ Website Deploy Post-State ACK'
+    h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixMarkerPath -PathType Leaf)
+    h3ReturnHotfixStatus=$(if($h3Hotfix){[string]$h3Hotfix.status}else{$null})
+    h3ReturnHotfixReason=$(if($h3Hotfix){[string]$h3Hotfix.reason}else{$null})
+    h3ReturnPostmortemHookExists=(Test-Path -LiteralPath $h3PostmortemHookPath -PathType Leaf)
+    h3ReturnPostmortemHook=$h3PostHook
+    h3ReturnPostmortemMarkerExists=(Test-Path -LiteralPath $h3PostmortemMarkerPath -PathType Leaf)
+    h3ReturnPostmortem=$h3PostMarker
     r5OrphanReleaseStateExists=(Test-Path -LiteralPath $r5ReleasePath -PathType Leaf)
     r5OrphanReleasePurpose=$(if($r5Release){[string]$r5Release.purpose}else{$null})
     r5OrphanReleaseStatus=$(if($r5Release){[string]$r5Release.status}else{$null})
@@ -95,7 +108,7 @@ try {
     siteWatcherTaskState=$(if($siteWatcher){[string]$siteWatcher.State}else{'missing'})
     time=(Get-Date -Format o)
   }
-  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  $payload | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ackFile -Encoding UTF8
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
