@@ -77,8 +77,19 @@ function Start-H3QwenBenchmark([string]$jobId,[int]$startIteration,[int]$maxIter
   $queued|ConvertTo-Json -Depth 10 -Compress|Set-Content -LiteralPath $benchmarkState -Encoding UTF8
   return [ordered]@{ok=$true;state='STARTED';job=$queued}
 }
+function Invoke-QueueOrphanRemediation([string]$action,[string]$taskId){
+  if($action -notin @('audit','apply')){throw 'unsupported queue remediation action'}
+  if($taskId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,180}$'){throw 'invalid queue taskId'}
+  $script=Join-Path $InstallRoot 'afz-openai-agent\Invoke-AFZ-Queue-Orphan-Remediation.ps1'
+  if(-not(Test-Path -LiteralPath $script -PathType Leaf)){throw "queue remediation runner missing: $script"}
+  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Action $action -TaskId $taskId 2>&1 | Out-String).Trim()
+  $code=$LASTEXITCODE
+  if($code -ne 0){throw "queue remediation failed exit=$code output=$raw"}
+  if([string]::IsNullOrWhiteSpace($raw)){throw 'queue remediation returned empty output'}
+  try{return ($raw|ConvertFrom-Json)}catch{throw "queue remediation returned invalid JSON: $raw"}
+}
 
-$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.6.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed prospectEngineProbe=enabled"
+$listener=New-Object Net.HttpListener;$listener.Prefixes.Add("http://127.0.0.1:$Port/");if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")};$listener.Start();Log "START version=1.7.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed prospectEngineProbe=enabled"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
@@ -105,14 +116,22 @@ try{
       $r=Start-H3QwenBenchmark $jobId $startIteration $maxIterations $sha;Log "h3 qwen benchmark action=start job=$jobId sha=$sha requested by $ip";Send-Json $ctx 202 $r;continue
     }
 
+    if($path -eq '/api/queue-orphan-remediation' -and $ctx.Request.HttpMethod -eq 'POST'){
+      if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='queue remediation peer not authorized';client=$ip};continue}
+      $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant();$taskId=[string]$req.taskId
+      $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
+      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}$' -or $sha -ne $current){Send-Json $ctx 409 @{ok=$false;error='queue remediation source mismatch';current=$current;requested=$sha};continue}
+      $r=Invoke-QueueOrphanRemediation $action $taskId;Log "queue orphan remediation action=$action task=$taskId sha=$sha requested by $ip";Send-Json $ctx 200 $r;continue
+    }
+
     if(-not ((Get-AllowedClients) -contains $ip)){Send-Json $ctx 403 @{ok=$false;error='client not allowlisted';client=$ip};continue}
     if($ctx.Request.HttpMethod -eq 'OPTIONS'){Send-Json $ctx 200 @{ok=$true};continue}
     if($path -eq ''){$html=@'
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark execution is available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark and guarded queue-orphan remediation are available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
 '@;Send-Html $ctx $html;continue}
     if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){
       $u=Get-LastUpdate;$w=Get-WatcherState;$b=Get-BenchmarkState;$p=Get-ProspectEngineHealth;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
-      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.6.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});time=(Get-Date -Format o)};continue
+      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.7.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});queueOrphanRemediation=@{typed=$true;route='/api/queue-orphan-remediation';actions=@('audit','apply');arbitraryShell=$false};time=(Get-Date -Format o)};continue
     }
     if($path -eq '/api/update-now' -and $ctx.Request.HttpMethod -eq 'POST'){$r=Start-Update;Log "fallback update requested by $ip";Send-Json $ctx 202 $r;continue}
     if($path -eq '/api/control' -and $ctx.Request.HttpMethod -eq 'POST'){$req=Read-Json $ctx;$action=[string]$req.action;if($action -notin @('update-agent','update-openai-agent','pull-agent-now')){Send-Json $ctx 400 @{ok=$false;error='unsupported action'};continue};$r=Start-Update;Log "control action=$action requested by $ip";Send-Json $ctx 202 $r;continue}
