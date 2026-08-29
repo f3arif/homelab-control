@@ -46,7 +46,7 @@ try {
     })
     $r5CorePids=@($r5Core | ForEach-Object {[int]$_.ProcessId})
     $r5Ssh=@($all | Where-Object {
-      [string]$_.Name -ieq 'ssh.exe' -and
+      ([string]$_.Name) -match '(?i)^ssh[.]exe$' -and
       $r5CorePids -contains [int]$_.ParentProcessId -and
       ([string]$_.CommandLine) -match [regex]::Escape('192.168.50.68') -and
       ([string]$_.CommandLine) -match '(?i)mkdir -p' -and
