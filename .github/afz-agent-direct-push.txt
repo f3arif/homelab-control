@@ -1,5 +1,5 @@
 AFZ direct agent source recovery
-reason=github-primary-control-cutover-validate
+reason=familyptt-r12c-r17-exact-sha-unblock
 target=windows-main
 authority=direct-fabric-plus-github
-requested_at=2026-08-28T21:46:00-04:00
+requested_at=2026-08-28T23:23:00-04:00
