@@ -11,7 +11,7 @@ permissions:
 jobs:
   public-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Verify FamilyPTT public transport
         shell: bash
@@ -36,3 +36,32 @@ jobs:
           echo "LIVEKIT_HTTPS_STATUS=$lk_status"
           echo 'LIVEKIT_TCP_7881=true'
           echo 'FINAL=PASS_PUBLIC_TRANSPORT'
+
+      - name: Join LiveKit room from external runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet livekit
+          python3 - <<'PY'
+          import asyncio, json, urllib.request
+          from livekit import rtc
+
+          TOKEN_URL = 'https://ptt-api.afzeng.ca/token?identity=github-rtc-smoke&name=GitHubRtcSmoke&room=family-main'
+
+          async def main():
+              with urllib.request.urlopen(TOKEN_URL, timeout=15) as r:
+                  d = json.load(r)
+              assert d.get('serverUrl') == 'wss://ptt-livekit.afzeng.ca'
+              token = d.get('participantToken')
+              assert token
+              room = rtc.Room()
+              await asyncio.wait_for(room.connect(d['serverUrl'], token), timeout=30)
+              assert room.isconnected()
+              print('ROOM_CONNECTED=true')
+              print('ROOM_SERVER_URL=wss://ptt-livekit.afzeng.ca')
+              await asyncio.sleep(1)
+              await room.disconnect()
+              print('ROOM_DISCONNECTED_CLEANLY=true')
+
+          asyncio.run(main())
+          PY
