@@ -6,6 +6,7 @@ on:
       - fix/afz-fast-signal-persistence
       - fix/afz-direct-push-recovery
       - fix/afz-fast-signal-monotonic
+      - fix/afz-push-watcher-hot-reload
     paths:
       - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
@@ -66,7 +67,6 @@ jobs:
 
           assert task in update
           assert 'Register-ScheduledTask -TaskName $pushWatcherTaskName' in update
-          assert 'Ensure-Running $pushWatcherTaskName $false' in update
           assert task in install
           assert 'Register-ScheduledTask -TaskName $pushWatcherTask' in install
           assert 'Start-ScheduledTask -TaskName $pushWatcherTask' in install
@@ -100,6 +100,26 @@ jobs:
           guard=push.index('if(Current-ContainsSignal $before $sha)')
           updater=push.index('$code=Invoke-UpdaterPass $updater $sha 1')
           assert guard < updater, 'monotonic ancestry guard must run before exact-SHA updater'
+
+          # A script replacement does not update a long-lived watcher process. The
+          # independent fallback updater must refresh the task once per new watcher
+          # hash, while exact-SHA passes invoked by the watcher must never stop their
+          # own parent process.
+          required_refresh=[
+            'push-watcher-source.sha256',
+            'Get-FileHash -LiteralPath $pushWatcher -Algorithm SHA256',
+            '$pushWatcherNeedsRefresh=([string]::IsNullOrWhiteSpace($ExpectedSha)',
+            'if($pushWatcherNeedsRefresh)',
+            'Ensure-Running $pushWatcherTaskName $true',
+            'Set-Content -LiteralPath $pushWatcherHashMarker -Value $pushWatcherSourceHash -Encoding ASCII',
+            'pushWatcherRestarted=$pushWatcherRestarted'
+          ]
+          for marker in required_refresh:
+            assert marker in update, marker
+          refresh_guard=update.index('$pushWatcherNeedsRefresh=([string]::IsNullOrWhiteSpace($ExpectedSha)')
+          restart_call=update.index('Ensure-Running $pushWatcherTaskName $true')
+          assert refresh_guard < restart_call
+          assert 'Ensure-Running $pushWatcherTaskName $false' in update
 
           # Transport repair must remain scope-neutral even when a separate website
           # request exists elsewhere in the repository.
