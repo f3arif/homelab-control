@@ -1,0 +1,204 @@
+name: ASUS Runtime Audit (read-only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/asus-runtime-audit.yml'
+      - '.github/asus-runtime-audit-trigger.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read live Windows-main Ops Console status
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for url in \
+            http://100.70.25.8:8788/api/status \
+            http://100.70.25.8:8790/api/status; do
+            echo "Trying $url"
+            if curl --silent --show-error --fail \
+              --connect-timeout 4 --max-time 20 \
+              "$url" -o status.json; then
+              python -m json.tool status.json >/dev/null
+              echo "$url" > status-source.txt
+              ok=1
+              break
+            fi
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "No readable Ops Console status endpoint responded" >&2
+            exit 1
+          fi
+
+      - name: Build process and recurring-task audit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, re, os, math
+          from collections import Counter, defaultdict
+
+          with open('status.json', encoding='utf-8') as f:
+              d = json.load(f)
+
+          def get(obj, *names, default=None):
+              if not isinstance(obj, dict): return default
+              low = {str(k).lower(): k for k in obj.keys()}
+              for n in names:
+                  if n in obj: return obj[n]
+                  k = low.get(str(n).lower())
+                  if k is not None: return obj[k]
+              return default
+
+          def num(obj, *names):
+              v = get(obj, *names)
+              if v is None: return None
+              try: return float(v)
+              except: return None
+
+          def ram_mb(p):
+              # Prefer explicit MB fields; otherwise convert byte fields.
+              for names in [
+                  ('privateMb','privateRamMb','privateMemoryMb','privateWorkingSetMb'),
+                  ('workingMb','workingSetMb','workingRamMb','memoryMb'),
+              ]:
+                  v = num(p, *names)
+                  if v is not None: return v
+              for names in [
+                  ('privateBytes','privateMemoryBytes','privateMemorySize64'),
+                  ('workingSetBytes','workingSet64','workingSet'),
+              ]:
+                  v = num(p, *names)
+                  if v is not None and v > 1024*1024: return v/(1024*1024)
+              return 0.0
+
+          def pname(p):
+              return str(get(p,'label','processName','name','ProcessName',default='process'))
+
+          def pid(p):
+              v = get(p,'pid','processId','Id',default='')
+              return str(v)
+
+          def cmd(p):
+              return str(get(p,'commandLine','cmdline','command',default='') or '')
+
+          def category(p):
+              return str(get(p,'category','classification','afzCategory',default='') or '')
+
+          procs = get(d,'windowsProcesses','processes',default=[])
+          if not isinstance(procs,list): procs=[]
+          tasks = get(d,'scheduledTasks','windowsScheduledTasks','tasks',default=[])
+          if not isinstance(tasks,list): tasks=[]
+
+          # Lightweight host metrics discovery.
+          metric_hits=[]
+          def walk_metrics(obj,path='root',depth=0):
+              if depth>4: return
+              if isinstance(obj,dict):
+                  for k,v in obj.items():
+                      kl=str(k).lower()
+                      if any(t in kl for t in ['rampercent','memorypercent','cpupercent','ramused','ramtotal','memoryused','memorytotal']):
+                          if isinstance(v,(str,int,float,bool)) or v is None:
+                              metric_hits.append((path+'.'+str(k),v))
+                      walk_metrics(v,path+'.'+str(k),depth+1)
+              elif isinstance(obj,list) and depth<3:
+                  for i,v in enumerate(obj[:20]): walk_metrics(v,f'{path}[{i}]',depth+1)
+          walk_metrics(d)
+
+          # Sort processes by RAM and detect likely duplicate command families.
+          procs_sorted=sorted(procs,key=ram_mb,reverse=True)
+          sigs=defaultdict(list)
+          for p in procs:
+              c=cmd(p).lower()
+              # normalize volatile numeric ids and quoted paths modestly
+              s=re.sub(r'\b\d{2,}\b','#',c)
+              key=(pname(p).lower(), category(p).lower(), s[:500])
+              sigs[key].append(p)
+          dup_groups=[v for v in sigs.values() if len(v)>1]
+          dup_groups.sort(key=lambda g: sum(ram_mb(x) for x in g),reverse=True)
+
+          # AFZ/process classifications especially relevant to recurring automation.
+          recurring_tokens=('afz','watchdog','autorunner','worker','controller','loop','publisher','queue','remoteops','podcast','familyptt','radiohilal','marketplace','jellyfin','docker','wsl','onedrive')
+          recurring=[]
+          for p in procs:
+              hay=' '.join([pname(p),category(p),cmd(p)]).lower()
+              if any(t in hay for t in recurring_tokens): recurring.append(p)
+          recurring.sort(key=ram_mb,reverse=True)
+
+          def task_name(t): return str(get(t,'taskName','name','TaskName',default='task'))
+          task_rows=[]
+          for t in tasks:
+              n=task_name(t)
+              action=str(get(t,'action','actions','execute','command',default='') or '')
+              state=str(get(t,'state','status',default='') or '')
+              matched=get(t,'matchedPid','pid','livePid',default='')
+              last=get(t,'lastTaskResult','lastResult',default='')
+              nxt=get(t,'nextRunTime','nextRun',default='')
+              if ('afz' in (n+' '+action).lower() or matched or state.lower()=='running'):
+                  task_rows.append((n,state,matched,last,nxt,action))
+
+          lines=[]
+          lines.append('ASUS / WINDOWS-MAIN LIVE RUNTIME AUDIT')
+          lines.append('Source: '+open('status-source.txt').read().strip())
+          lines.append('Top-level keys: '+', '.join(sorted(map(str,d.keys()))))
+          if metric_hits:
+              lines.append('\nDISCOVERED HOST METRICS')
+              for p,v in metric_hits[:40]: lines.append(f'{p}={v}')
+          lines.append(f'\nPROCESS_COUNT={len(procs)}')
+          lines.append(f'SCHEDULED_TASK_COUNT={len(tasks)}')
+
+          lines.append('\nTOP RAM PROCESSES')
+          lines.append('RAM_MB | PID | NAME | CATEGORY | COMMAND')
+          for p in procs_sorted[:30]:
+              lines.append(f'{ram_mb(p):8.1f} | {pid(p):>6} | {pname(p)} | {category(p)} | {cmd(p)[:240]}')
+
+          lines.append('\nAUTOMATION / RECURRING-RELATED LIVE PROCESSES')
+          lines.append('RAM_MB | PID | NAME | CATEGORY | COMMAND')
+          for p in recurring[:80]:
+              lines.append(f'{ram_mb(p):8.1f} | {pid(p):>6} | {pname(p)} | {category(p)} | {cmd(p)[:320]}')
+
+          lines.append('\nPOSSIBLE DUPLICATE PROCESS FAMILIES')
+          if not dup_groups:
+              lines.append('none detected by normalized name/category/command signature')
+          else:
+              for g in dup_groups[:30]:
+                  lines.append(f'count={len(g)} total_ram_mb={sum(ram_mb(x) for x in g):.1f} name={pname(g[0])} category={category(g[0])}')
+                  for p in g[:8]: lines.append(f'  pid={pid(p)} ram_mb={ram_mb(p):.1f} cmd={cmd(p)[:280]}')
+
+          lines.append('\nAFZ / RUNNING SCHEDULED TASKS')
+          if not task_rows:
+              lines.append('No AFZ/running task rows found in returned payload')
+          else:
+              for n,state,matched,last,nxt,action in task_rows[:120]:
+                  lines.append(f'{n} | state={state} | pid={matched} | last={last} | next={nxt} | action={action[:360]}')
+
+          # Include known classification fields for top processes, but no environment/secrets.
+          with open('audit-summary.txt','w',encoding='utf-8') as f:
+              f.write('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Upload sanitized audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: asus-runtime-audit
+          path: |
+            audit-summary.txt
+            status-source.txt
+            status.json
+          retention-days: 3
