@@ -72,6 +72,11 @@ jobs:
             assert marker in start, marker
           for marker in ['deletedFiles=0','terminalResultMoved=$false','Get-LiveExecutors','Move-Item']:
             assert marker in repair, marker
+          # Quarantine location must outrank preserved source-name markers such as
+          # '.hold-rerouted-*'; otherwise a successfully quarantined artifact is
+          # falsely rediscovered as movable on the post-audit.
+          assert repair.index("return 'QUARANTINED'") < repair.index("return 'HELD'"), 'QUARANTINED classification must precede HELD'
+          assert 'Location is authoritative' in repair
           assert 'Remove-Item' not in watcher
           assert 'Invoke-Expression' not in watcher
           assert 'Invoke-Expression' not in repair
