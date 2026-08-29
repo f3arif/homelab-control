@@ -8,6 +8,7 @@ param(
 # present for the ASUS runtime cleanup job and will be removed after its ACK is collected.
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
+$cleanupAckFile=Join-Path $diagRoot 'EMERGENCY_FALLBACK-AFZ-RUNTIME-CLEANUP-ELEVATED-LATEST.json'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
 $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
@@ -33,6 +34,10 @@ function Invoke-OneShotRuntimeCleanup {
 
 try {
   if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){Invoke-OneShotRuntimeCleanup;exit 0}
+
+  # Run first so the existing, reliably-synced ACK carries the cleanup outcome too.
+  Invoke-OneShotRuntimeCleanup
+  $cleanupState=Read-SafeJson $cleanupAckFile
 
   $watch=Read-SafeJson $watchStatePath
   $result=Read-SafeJson $resultPath
@@ -70,19 +75,20 @@ try {
     legacySiteExecute=$(if($legacyAction){[string]$legacyAction.Execute}else{$null})
     legacySiteArguments=$(if($legacyAction){[string]$legacyAction.Arguments}else{$null})
     siteWatcherTaskState=$(if($siteWatcher){[string]$siteWatcher.State}else{'missing'})
+    runtimeCleanupAckExists=(Test-Path -LiteralPath $cleanupAckFile -PathType Leaf)
+    runtimeCleanup=$cleanupState
     time=(Get-Date -Format o)
   }
-  $payload | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ackFile -Encoding UTF8
-  Invoke-OneShotRuntimeCleanup
+  $payload | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ackFile -Encoding UTF8
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
       [ordered]@{
         schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github'
-        component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message;time=(Get-Date -Format o)
-      } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+        component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message
+        runtimeCleanupAckExists=(Test-Path -LiteralPath $cleanupAckFile -PathType Leaf);runtimeCleanup=(Read-SafeJson $cleanupAckFile);time=(Get-Date -Format o)
+      } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ackFile -Encoding UTF8
     }
   } catch {}
-  Invoke-OneShotRuntimeCleanup
 }
 exit 0
