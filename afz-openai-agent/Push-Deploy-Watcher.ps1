@@ -50,6 +50,10 @@ function Save-State([string]$signal,[string]$status,[string]$message){
   [ordered]@{ok=($status -eq 'idle' -or $status -eq 'deployed');signalSha=$signal;currentSha=(Current-Sha);status=$status;message=$message;intervalSeconds=$IntervalSeconds;time=(Get-Date -Format o)} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $watchState -Encoding UTF8
 }
+function Read-DiagJson([string]$path){
+  if(-not(Test-Path -LiteralPath $path -PathType Leaf)){return $null}
+  try{return Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message}}
+}
 function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
   # OneDrive is emergency observability only. It is never read as a control/request
   # input and failure to sync/write it does not affect the GitHub control path.
@@ -57,6 +61,13 @@ function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
     if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
     $pushTask=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Push Deploy Watcher' -ErrorAction SilentlyContinue
     $siteTask=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
+    $r17Task=Get-ScheduledTask -TaskName 'AFZ FamilyPTT Edge Provision Watcher R17' -ErrorAction SilentlyContinue
+    $r12Task=Get-ScheduledTask -TaskName 'AFZ FamilyPTT Edge Preflight Watcher R12' -ErrorAction SilentlyContinue
+    $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
+    $r17State=Read-DiagJson 'C:\ProgramData\AFZ\OpenAIAgent\jobs\familyptt-edge-provision-r17\latest.json'
+    $r12Result=Read-DiagJson 'C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTEdgePreflight\latest.json'
+    $rtcResult=Read-DiagJson 'C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTRtcRemediation\latest.json'
+    $r17Result=Read-DiagJson 'C:\Users\Faiz\AppData\Local\AFZ\FamilyPTTEdgeProvision\latest.json'
     [ordered]@{
       schema=1
       purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
@@ -69,9 +80,16 @@ function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
       message=$message
       pushWatcherTaskState=$(if($pushTask){[string]$pushTask.State}else{'missing'})
       siteWatcherTaskState=$(if($siteTask){[string]$siteTask.State}else{'missing'})
+      familyPttR17TaskState=$(if($r17Task){[string]$r17Task.State}else{'missing'})
+      familyPttR12TaskState=$(if($r12Task){[string]$r12Task.State}else{'missing'})
+      edgeBackupCarrierState=$(if($carrier){[string]$carrier.State}else{'missing'})
+      familyPttR17State=$r17State
+      familyPttR12Result=$r12Result
+      familyPttRtcResult=$rtcResult
+      familyPttR17Result=$r17Result
       processId=$PID
       time=(Get-Date -Format o)
-    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $diagFile -Encoding UTF8
+    } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $diagFile -Encoding UTF8
   }catch{}
 }
 function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
