@@ -1,0 +1,89 @@
+name: FamilyPTT receiver audio smoke
+
+on:
+  push:
+    paths:
+      - '.github/afz-familyptt-receiver-audio-signal.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  receive-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Listen for Pixel PTT audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet livekit
+          python3 - <<'PY'
+          import asyncio, json, urllib.request
+          from livekit import rtc
+
+          TOKEN_URL = 'https://ptt-api.afzeng.ca/token?identity=github-audio-receiver-smoke&name=GitHubAudioReceiverSmoke&room=family-main'
+
+          async def main():
+              with urllib.request.urlopen(TOKEN_URL, timeout=15) as r:
+                  d = json.load(r)
+              assert d.get('serverUrl') == 'wss://ptt-livekit.afzeng.ca'
+              token = d.get('participantToken')
+              assert token
+
+              room = rtc.Room()
+              audio_received = asyncio.Event()
+              frame_count = 0
+              sample_count = 0
+              stream_tasks = []
+
+              async def consume_audio(track, participant_identity):
+                  nonlocal frame_count, sample_count
+                  stream = rtc.AudioStream(track)
+                  try:
+                      async for event in stream:
+                          frame = event.frame
+                          frame_count += 1
+                          sample_count += int(frame.samples_per_channel) * int(frame.num_channels)
+                          if frame_count == 1:
+                              print(f'FIRST_AUDIO_FRAME_FROM={participant_identity}', flush=True)
+                              print(f'AUDIO_SAMPLE_RATE={frame.sample_rate}', flush=True)
+                              print(f'AUDIO_CHANNELS={frame.num_channels}', flush=True)
+                          if frame_count >= 5 and sample_count > 0:
+                              audio_received.set()
+                              break
+                  finally:
+                      await stream.aclose()
+
+              @room.on('track_subscribed')
+              def on_track_subscribed(track, publication, participant):
+                  if participant.identity.lower().startswith('familyptt-android-') and track.kind == rtc.TrackKind.KIND_AUDIO:
+                      print(f'ANDROID_AUDIO_TRACK_SUBSCRIBED={participant.identity}', flush=True)
+                      stream_tasks.append(asyncio.create_task(consume_audio(track, participant.identity)))
+
+              await asyncio.wait_for(room.connect(d['serverUrl'], token), timeout=30)
+              assert room.isconnected()
+              print('RECEIVER_ROOM_CONNECTED=true', flush=True)
+              remote_ids = sorted(room.remote_participants.keys())
+              android_ids = [identity for identity in remote_ids if identity.lower().startswith('familyptt-android-')]
+              print(f'ANDROID_REMOTE_COUNT={len(android_ids)}', flush=True)
+              for identity in android_ids:
+                  print(f'ANDROID_REMOTE_ID={identity}', flush=True)
+              assert android_ids, 'Android phone participant is not present before receiver test'
+              print('RECEIVER_READY_FOR_PTT=true', flush=True)
+
+              await asyncio.wait_for(audio_received.wait(), timeout=90)
+              print(f'AUDIO_FRAME_COUNT={frame_count}', flush=True)
+              print(f'AUDIO_SAMPLE_COUNT={sample_count}', flush=True)
+              assert frame_count >= 5 and sample_count > 0
+              print('REMOTE_AUDIO_RECEIVED=true', flush=True)
+
+              for task in stream_tasks:
+                  if not task.done():
+                      task.cancel()
+              await room.disconnect()
+              print('FINAL=PASS_REMOTE_AUDIO_RECEIVE', flush=True)
+
+          asyncio.run(main())
+          PY
