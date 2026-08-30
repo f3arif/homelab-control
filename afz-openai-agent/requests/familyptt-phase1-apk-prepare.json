@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "project": "familyptt",
+  "action": "prepare-phase1-acceptance-apk",
+  "job_id": "familyptt-phase1-apk-prepare-r1",
+  "status": "staged-not-active",
+  "repository": "f3arif/FamilyPTT",
+  "workflow_run_id": 33325967023,
+  "artifact_name": "FamilyPTT-standalone-release-apk-arm64",
+  "apk_sha256": "4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b",
+  "package_id": "ca.afzeng.familyptt",
+  "device_a": "19161FDEE008XN",
+  "device_b": "192.168.50.69:38209"
+}
