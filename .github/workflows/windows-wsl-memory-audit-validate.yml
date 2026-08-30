@@ -1,0 +1,93 @@
+name: Windows WSL memory audit validate
+
+on:
+  push:
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
+      - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - '.github/workflows/windows-wsl-memory-audit-validate.yml'
+  pull_request:
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
+      - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - '.github/workflows/windows-wsl-memory-audit-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: pwsh
+        run: |
+          foreach ($file in @(
+            'afz-openai-agent/AFZ-Agent-Control.ps1',
+            'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              exit 1
+            }
+          }
+
+      - name: Validate narrow read-only boundary
+        shell: python
+        run: |
+          from pathlib import Path
+
+          audit = Path('afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1').read_text(encoding='utf-8')
+          control = Path('afz-openai-agent/AFZ-Agent-Control.ps1').read_text(encoding='utf-8')
+
+          required_audit = [
+              "schema = 'afz.windows-wsl-memory-audit.v1'",
+              "readOnly = $true",
+              "Get-CimInstance Win32_OperatingSystem",
+              "Get-Process -Name 'vmmemWSL'",
+              "info --format '{{.MemTotal}}'",
+              "autoMemoryReclaim",
+              "Read-only: no process stop, service stop, WSL shutdown, Docker restart, container mutation, file write, configuration change, or memory-cap change.",
+          ]
+          for marker in required_audit:
+              assert marker in audit, f'missing audit marker: {marker}'
+
+          forbidden_audit = [
+              'Stop-Process',
+              'Stop-Service',
+              'Restart-Service',
+              'Set-Content',
+              'Add-Content',
+              'Out-File',
+              'Remove-Item',
+              'Move-Item',
+              'Copy-Item',
+              'wsl.exe --shutdown',
+              'docker.exe stop',
+              'docker compose down',
+          ]
+          lowered = audit.lower()
+          for marker in forbidden_audit:
+              assert marker.lower() not in lowered, f'audit contains forbidden mutator: {marker}'
+
+          required_control = [
+              "version='1.8.0'",
+              "'/api/windows-wsl-memory-audit'",
+              "Invoke-WindowsWslMemoryAudit",
+              "actions=@('audit')",
+              "readOnly=$true",
+              "arbitraryShell=$false",
+              "if($action -ne 'audit')",
+              "WSL memory audit source mismatch",
+          ]
+          for marker in required_control:
+              assert marker in control, f'missing control boundary marker: {marker}'
