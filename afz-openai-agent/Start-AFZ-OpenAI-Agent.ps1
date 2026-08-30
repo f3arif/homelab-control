@@ -16,8 +16,19 @@ $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $queueOrphanWatcher=Join-Path $sourceRoot 'Queue-Orphan-Request-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $familyPttEdgeWatcher=Join-Path $sourceRoot 'FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
+$remoteOpsOneShot=Join-Path $sourceRoot 'AFZ-RemoteOps-OneShot.ps1'
+$remoteOpsRequest=Join-Path $sourceRoot 'requests\afz-remoteops-start.json'
 $familyPttTwoHandsetPrepare=Join-Path $sourceRoot 'FamilyPTT-TwoHandset-Prepare.ps1'
 $familyPttTwoHandsetRequest=Join-Path $sourceRoot 'requests\familyptt-two-handset-prepare.json'
+
+# Typed, idempotent recovery for the pre-existing AFZ Remote Ops scheduled task.
+# This deliberately starts only that exact task; it does not add a generic command API.
+# Failure is isolated from the AFZ agent startup and is mirrored as diagnostic state.
+if((Test-Path -LiteralPath $remoteOpsOneShot -PathType Leaf) -and (Test-Path -LiteralPath $remoteOpsRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $remoteOpsOneShot -InstallRoot $InstallRoot -RequestPath $remoteOpsRequest *> $null
+  }catch{}
+}
 
 # Typed, idempotent FamilyPTT physical two-handset preparation runs before unrelated
 # agent startup dependencies. A later startup failure must not prevent the final
