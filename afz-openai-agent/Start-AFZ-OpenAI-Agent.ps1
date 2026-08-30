@@ -16,6 +16,8 @@ $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $queueOrphanWatcher=Join-Path $sourceRoot 'Queue-Orphan-Request-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $familyPttEdgeWatcher=Join-Path $sourceRoot 'FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
+$familyPttTwoHandsetPrepare=Join-Path $sourceRoot 'FamilyPTT-TwoHandset-Prepare.ps1'
+$familyPttTwoHandsetRequest=Join-Path $sourceRoot 'requests\familyptt-two-handset-prepare.json'
 $runtimeRoot='C:\ProgramData\AFZ\OpenAIAgent\runtime'
 $runtime=Join-Path $runtimeRoot 'AFZ-OpenAI-Agent-runtime.ps1'
 if(-not(Test-Path $src)){throw "Agent source missing: $src"}
@@ -127,6 +129,16 @@ if(Test-Path $familyPttEdgeWatcher){
   }
   $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction Stop
   if($familyPttEdgeTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttEdgeTaskName}
+}
+
+# Typed, idempotent FamilyPTT physical two-handset preparation. This is deliberately
+# a source-bundled one-shot request rather than an arbitrary remote command channel.
+# Failure never prevents the AFZ agent itself from starting; the executor writes its
+# own structured result and publishes the classification to canonical issue #17.
+if((Test-Path -LiteralPath $familyPttTwoHandsetPrepare -PathType Leaf) -and (Test-Path -LiteralPath $familyPttTwoHandsetRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $familyPttTwoHandsetPrepare -InstallRoot $InstallRoot -RequestPath $familyPttTwoHandsetRequest *> $null
+  }catch{}
 }
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
