@@ -19,6 +19,7 @@ $compareBase='https://api.github.com/repos/f3arif/homelab-control/compare'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
 $runtimeProofFile=Join-Path $diagRoot 'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt'
+$jellyfinRequestRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Visibility-Request.ps1'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -157,6 +158,13 @@ function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
   Log "UPDATER_PASS_DONE pass=$Pass signal=$Sha exit=$code source=$(Current-Sha)"
   return $code
 }
+function Handle-JellyfinVisibilityRequest{
+  if(-not(Test-Path -LiteralPath $jellyfinRequestRunner -PathType Leaf)){return}
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $jellyfinRequestRunner -InstallRoot $InstallRoot *> $null
+    if($LASTEXITCODE -ne 0){Log "JELLYFIN_VISIBILITY_REQUEST_ERROR exit=$LASTEXITCODE source=$(Current-Sha)"}
+  }catch{Log "JELLYFIN_VISIBILITY_REQUEST_ERROR $($_.Exception.Message)"}
+}
 $mutex=New-Object Threading.Mutex($false,'Global\AFZOpenAIAgentPushWatcher')
 $locked=$false
 try{
@@ -165,7 +173,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot"
   Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
@@ -183,10 +191,6 @@ try{
           $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
           if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
           $before=Current-Sha
-
-          # A delayed/cached fast-signal must never roll a machine backward. If the
-          # currently deployed source is already the signal itself or a Git
-          # descendant of it, mark the signal handled without invoking the updater.
           if(Current-ContainsSignal $before $sha){
             Save-State $sha 'deployed' "Signal already contained by current source=$before; downgrade skipped."
             Save-DiagnosticAck $sha 'source-already-newer' "Signal already contained by current source=$before; downgrade skipped."
@@ -196,15 +200,8 @@ try{
             Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
             Save-DiagnosticAck $sha 'signal-consumed' "Fast signal observed; source before update=$before"
             Log "DEPLOY signal=$sha current=$before"
-
-            # Pass 1 synchronizes the exact GitHub source. If that synchronization
-            # replaces the updater itself, the already-running PowerShell process
-            # still has the old updater AST in memory. Pass 2 starts a fresh process
-            # from the newly synchronized updater so new task/registration logic is
-            # applied on the same signal instead of waiting for a later commit.
             $code=Invoke-UpdaterPass $updater $sha 1
             if($code -eq 0){$code=Invoke-UpdaterPass $updater $sha 2}
-
             $after=Current-Sha
             if($code -eq 0 -and $after -eq $sha){
               Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
@@ -223,6 +220,7 @@ try{
         $lastAttemptSha=''
       }
       Refresh-FamilyPttR17IfSafe
+      Handle-JellyfinVisibilityRequest
       $lastError=''
     }catch{
       $msg=$_.Exception.Message
