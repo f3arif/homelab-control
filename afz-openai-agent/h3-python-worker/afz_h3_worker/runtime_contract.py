@@ -1,18 +1,19 @@
 """Evidence-bounded H3 runtime observations for Python migration R4.
 
-This module records only facts captured from the live H3 worker by read-only
-audits. Missing values stay unresolved rather than inheriting historical
-settings from older worker hashes.
+Only facts captured from the live H3 host are recorded here. Where a launcher
+definition was verified earlier than the runtime snapshot, the verification
+instant and PID-continuity evidence are preserved explicitly instead of being
+represented as a fresh task read.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
 
 
 R4_CAPTURED_AT = "2026-08-30T13:51:45.4011987-04:00"
 R4_HOST = "DESKTOP-H3R6CQN"
+TASK_LAUNCHER_VERIFIED_AT = "2026-08-30T01:32:15.7797175-04:00"
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,22 @@ class RuntimeFileIdentity:
             raise ValueError("sha256 must be 64 hexadecimal characters")
         if self.size_bytes < 1 or self.line_count < 1:
             raise ValueError("file size and line count must be positive")
+
+
+@dataclass(frozen=True)
+class TaskLauncherEvidence:
+    task_name: str
+    user: str
+    logon_type: str
+    run_level: str
+    execute: str
+    arguments: str
+    pid_after_definition_change: int
+    pid_at_r4_snapshot: int
+
+    @property
+    def live_pid_continuity(self) -> bool:
+        return self.pid_after_definition_change == self.pid_at_r4_snapshot
 
 
 GENERIC_WORKER = RuntimeFileIdentity(
@@ -159,12 +176,40 @@ TELEMETRY_RUNKEY_COMMAND = (
     r'"C:\AFZ\H3Worker\Run-AFZ-H3-OllamaTelemetry-Run-Hidden.vbs"'
 )
 
-# R4 V2 proved that the generic and telemetry workers are HKCU Run/wscript
-# launched. Its task-detail formatter failed on a null NextRunTime before a
-# Scheduled Task record could be emitted, so the remaining task contract stays
-# unresolved until the concise V3 task-only read completes.
-CURRENT_TASK_CONTRACT: Mapping[str, object] | None = None
+DIRECT_TASK_LAUNCHER = TaskLauncherEvidence(
+    task_name="AFZ H3 Direct Worker",
+    user="Faiz",
+    logon_type="Interactive",
+    run_level="Limited",
+    execute=r"C:\windows\System32\wscript.exe",
+    arguments=r'//B //Nologo "C:\ProgramData\AFZ\H3Direct\Run-AFZ-H3-Direct-Worker-Task-Hidden.vbs"',
+    pid_after_definition_change=13612,
+    pid_at_r4_snapshot=13612,
+)
+
+GENERIC_TASK_LAUNCHER = TaskLauncherEvidence(
+    task_name="AFZ H3 Generic Worker",
+    user="Faiz",
+    logon_type="Interactive",
+    run_level="Limited",
+    execute=r"C:\windows\System32\wscript.exe",
+    arguments=r'//B //Nologo "C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs"',
+    pid_after_definition_change=12112,
+    pid_at_r4_snapshot=12112,
+)
+
+CURRENT_GENERIC_PID = 12112
+CURRENT_TELEMETRY_PID = 23032
+CURRENT_DIRECT_PID = 13612
+CURRENT_WORKER_SESSION_ID = 1
 
 
 def current_contract_complete() -> bool:
-    return CURRENT_TASK_CONTRACT is not None
+    """Whether R4 has enough evidence to proceed to non-authoritative parity.
+
+    This does not claim that Scheduled Task XML was freshly re-read at 13:51.
+    It requires the last verified hidden launcher definitions plus continuity of
+    the exact live worker PIDs into the current R4 snapshot.
+    """
+
+    return DIRECT_TASK_LAUNCHER.live_pid_continuity and GENERIC_TASK_LAUNCHER.live_pid_continuity
