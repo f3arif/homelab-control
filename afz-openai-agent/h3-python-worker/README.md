@@ -1,4 +1,4 @@
-# H3 Python worker shadow foundation (R4)
+# H3 Python worker shadow foundation (R5)
 
 Status: **STAGED / NON-AUTHORITATIVE / NOT DEPLOYED**.
 
@@ -49,39 +49,45 @@ Current file identities:
 - Ollama telemetry: `C:\AFZ\H3Worker\AFZ-H3-OllamaTelemetry.ps1`, SHA-256 `BFEFD838E7E3AD3E9723FB47FADDC844AB534B382076C65082F739D5C9C4B30A`, 7,001 bytes / 64 lines.
 - H3 Direct worker: `C:\ProgramData\AFZ\H3Direct\AFZ-H3-Direct-Worker.ps1`, SHA-256 `BA417A98FB84972317ED0668FDCFFEF144B0944071841A73A18EB2BDC3109F61`, 4,800 bytes / 95 lines.
 
-Current Generic Worker constants are now verified against that exact SHA:
-
-- version `1.0.0`;
-- target `DESKTOP-H3R6CQN`;
-- mutex `Local\AFZH3GenericWorker`;
-- poll interval 12 seconds;
-- heavy-RAM hold threshold 88%;
-- max captured output 120,000 characters;
-- heavy actions: `h3-dotnet-build`, `h3-npm-build`, `h3-npm-test`, `h3-tsc`;
-- allowed actions: `h3-status`, `h3-powershell-parse`, `h3-json-validate`, `h3-python-compile`, `h3-file-hash`, plus the four heavy actions.
+Current Generic Worker constants are verified against that exact SHA: version `1.0.0`, target `DESKTOP-H3R6CQN`, mutex `Local\AFZH3GenericWorker`, 12-second poll, 88% heavy-RAM hold threshold, 120,000-character max captured output, and the nine current allowed actions.
 
 The Generic file queue uses `Queue\h3`, `Processing\h3`, `Results\h3`, `Archive\h3`, oldest `LastWriteTimeUtc,Name` first, with ten read retries at two seconds. Heavy jobs are held when RAM is at/above the threshold or RadioHilal35B is `BUSY`.
 
-The current heartbeat schema includes worker identity/state, queue/RAM/RadioHilal state, Ollama/model/context/activity, GPU/VRAM telemetry, `allowedActions`, `forcedSleep`, and `ollamaExposureChanged`. The R4 V2 live sample was `READY`, queue 0, RAM 53.2%, RadioHilal35B `READY`, compute `IDLE`, and was only 9.5 seconds old when captured.
+The current heartbeat schema includes worker identity/state, queue/RAM/RadioHilal state, Ollama/model/context/activity, GPU/VRAM telemetry, `allowedActions`, `forcedSleep`, and `ollamaExposureChanged`.
 
-Launch evidence is intentionally precise about time:
+Launch evidence is intentionally precise about time: Direct and Generic future Scheduled Task launches were changed to hidden `wscript.exe` VBS launchers at 01:32 EDT without restarting the preserved live PIDs; at 13:51 EDT those exact PIDs were still live. R4 therefore records launcher-definition + PID-continuity evidence and does not claim a fresh task-XML read at 13:51.
 
-- At 01:32 EDT the `AFZ H3 Direct Worker` and `AFZ H3 Generic Worker` Scheduled Task definitions were verified as user `Faiz`, `Interactive`, `Limited`, and changed for **future launches only** to hidden `wscript.exe //B //Nologo` VBS launchers; the existing live PIDs were explicitly preserved.
-- At 13:51 EDT, those exact preserved PIDs were still live: Direct `13612`, Generic `12112`. Therefore R4 records launcher-definition + live-PID continuity; it does **not** claim the task XML was freshly re-read at 13:51.
-- Generic Worker and Ollama telemetry also have current HKCU Run definitions through hidden `wscript.exe` VBS launchers. Current telemetry PID was `23032`.
-- All observed worker processes remain in session 1. The eventual Python service stage must move the candidate under external service supervision rather than relying on this interactive-session architecture.
+## R5 deterministic `h3-file-hash` candidate
 
-`afz_h3_worker/runtime_contract.py` is the machine-readable R4 evidence boundary. It is not a deployment configuration file and grants no runtime authority.
+R5 selects the smallest deterministic legacy action before any live Python transport is introduced.
+
+A real legacy `h3-file-hash` canary was run against the pinned Generic Worker file itself. It completed successfully in 0.2 seconds and produced:
+
+- `FILE_HASH : READ ONLY`
+- `PATH=C:\AFZ\H3Worker\AFZ-H3-Worker.ps1`
+- `SHA256=B61D8EB4E625549836C504D102BC0139D1C97786447E2EA071AC9DBC8F02795E`
+- `ForcedSleep=False`
+- `OllamaExposureChanged=False`
+
+The current worker's `Write-Result` contract serializes the action payload as `result` and renders each `result.summary` entry into the text artifact. `afz_h3_worker/actions.py` therefore implements the candidate as exactly one local read-only action returning:
+
+```text
+{"summary":["FILE_HASH : READ ONLY","PATH=<resolved path>","SHA256=<uppercase SHA-256>"]}
+```
+
+The candidate resolves the requested file before hashing, requires it to be inside an explicitly supplied read-only root, rejects directories/out-of-root paths, and performs no subprocess or network I/O. It does not write AFZ queue/result/archive files and is not wired into Control Hub or any live H3 launcher.
+
+R5 unit tests pin the uppercase digest and exact three-line payload shape and prove the path guard fails closed. This is candidate-contract validation only; **live H3 legacy-vs-Python execution parity is still required before promotion**.
 
 ## Next promotion gates
 
-R4 permits the next **non-authoritative parity** step only. It does not authorize cutover.
+R5 permits a bounded, non-authoritative live shadow comparison only. It does not authorize cutover.
 
-1. Run the Python `shadow_probe.py` on H3 against the exact pinned Generic Worker SHA and heartbeat schema, with no worker/task changes.
-2. Select a bounded canary that can execute safely inside the finite lease contract; do not depend on lease renewal unless a newer authoritative Hub contract proves it.
-3. Run the same bounded canary through legacy and candidate implementations and compare the real child exit code, stdout/stderr semantics, deterministic artifact hashes, externally visible state, timeout behavior, and orphan-process count.
-4. Only after parity, add a live Control Hub transport with no scheduler/routing authority.
-5. Only after independent canary proof, run plain `python.exe` under WinSW or NSSM with service recovery and external heartbeat monitoring. Do not use `pythonw.exe` and do not use an in-process watchdog as the resurrection mechanism.
+1. Place/run the exact GitHub R5 candidate transiently on H3 without replacing or restarting the Generic Worker.
+2. Hash the same pinned Generic Worker file through legacy `h3-file-hash` and the Python candidate and compare exact resolved path, uppercase SHA-256, summary order, candidate exit status, and orphan-process count.
+3. Confirm the legacy heartbeat remains healthy and the worker PID/launcher state is unchanged after the candidate run.
+4. Only after that parity proof, select the next deterministic read-only action or add a bounded Control Hub transport with no scheduler/routing authority.
+5. Only after broader parity, run plain `python.exe` under WinSW or NSSM with service recovery and external heartbeat monitoring. Do not use `pythonw.exe` and do not use an in-process watchdog as the resurrection mechanism.
 6. Retire one corresponding legacy launcher at a time only after rollback has also been proven.
 
 ## Local validation
