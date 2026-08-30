@@ -26,50 +26,46 @@ function Save-Result($o){
 
 try{
   foreach($p in @($keyPath,$keygen,$ssh,$knownHosts)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required path missing: $p"}}
-  $profile=@(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object {[string]$_.LocalPath -ieq 'C:\Users\Faiz'} | Select-Object -First 1)
-  if($profile.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$profile[0].SID)){throw 'Could not resolve Faiz profile SID.'}
-  $faizSidText=[string]$profile[0].SID
-  $faizSid=New-Object System.Security.Principal.SecurityIdentifier($faizSidText)
-  $systemSid=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-  $adminsSid=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+  $systemSidText='S-1-5-18'
+  $systemSid=New-Object System.Security.Principal.SecurityIdentifier($systemSidText)
 
+  # This is a dedicated AFZ automation key. The AFZ Agent and updater are SYSTEM tasks,
+  # so current Win32 OpenSSH requires the private key to be owned/readable only by SYSTEM.
+  # Key bytes are never changed or exported.
   $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
   $takeOwnOut=(& takeown.exe /F $keyPath /A 2>&1 | Out-String).Trim();$takeOwnExit=$LASTEXITCODE
   $ErrorActionPreference=$oldEap
   if($takeOwnExit -ne 0){throw "takeown failed: $takeOwnOut"}
 
   $security=New-Object System.Security.AccessControl.FileSecurity
-  $security.SetOwner($faizSid)
+  $security.SetOwner($systemSid)
   $security.SetAccessRuleProtection($true,$false)
   $rights=[System.Security.AccessControl.FileSystemRights]::FullControl
   $inherit=[System.Security.AccessControl.InheritanceFlags]::None
   $prop=[System.Security.AccessControl.PropagationFlags]::None
   $allow=[System.Security.AccessControl.AccessControlType]::Allow
-  foreach($sid in @($faizSid,$systemSid,$adminsSid)){
-    $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,$rights,$inherit,$prop,$allow)
-    [void]$security.AddAccessRule($rule)
-  }
+  $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid,$rights,$inherit,$prop,$allow)
+  [void]$security.AddAccessRule($rule)
   Set-Acl -LiteralPath $keyPath -AclObject $security -ErrorAction Stop
 
   $acl=Get-Acl -LiteralPath $keyPath -ErrorAction Stop
   $ownerSid=$null
   try{$ownerSid=([System.Security.Principal.NTAccount]$acl.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$ownerSid=[string]$acl.Owner}
-  if($ownerSid -ne $faizSidText){throw "Unexpected owner after ACL repair: $ownerSid"}
+  if($ownerSid -ne $systemSidText){throw "Unexpected owner after ACL repair: $ownerSid"}
   if(-not $acl.AreAccessRulesProtected){throw 'ACL inheritance remains enabled.'}
-  $approved=@($faizSidText,'S-1-5-18','S-1-5-32-544')
-  $actual=New-Object 'System.Collections.Generic.List[string]'
+  $actual=@()
   foreach($r in @($acl.Access)){
     try{$sidText=$r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$sidText=[string]$r.IdentityReference}
-    $actual.Add($sidText)
-    if($sidText -notin $approved){throw "Unexpected ACL principal remains: $sidText"}
+    $actual+=$sidText
+    if($sidText -ne $systemSidText){throw "Unexpected ACL principal remains: $sidText"}
     if($r.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow){throw "Unexpected deny ACL remains: $sidText"}
   }
-  foreach($sidText in $approved){if($actual -notcontains $sidText){throw "Required ACL principal missing: $sidText"}}
+  if($actual.Count -ne 1 -or $actual[0] -ne $systemSidText){throw 'SYSTEM-only ACL verification failed.'}
 
   $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
   $derived=(& $keygen -y -f $keyPath 2>&1 | Select-Object -First 1);$deriveExit=$LASTEXITCODE
   $ErrorActionPreference=$oldEap
-  if($deriveExit -ne 0 -or [string]::IsNullOrWhiteSpace([string]$derived)){throw 'Could not read repaired H3 private key.'}
+  if($deriveExit -ne 0 -or [string]::IsNullOrWhiteSpace([string]$derived)){throw "Could not read SYSTEM-owned H3 private key: $derived"}
   $tmpPub=Join-Path $env:TEMP ('afz-h3-acl-'+[guid]::NewGuid().ToString('n')+'.pub')
   try{
     ([string]$derived).Trim() | Set-Content -LiteralPath $tmpPub -Encoding ascii
@@ -95,13 +91,13 @@ try{
     $proofs+=[ordered]@{transport=$a.transport;exitCode=$code;remoteHost=$remoteHost;output=$text.Substring(0,[math]::Min(3000,$text.Length))}
     if($code -eq 0 -and $remoteHost -ieq $expectedHost){$success=$a.transport;break}
   }
-  if(-not $success){throw 'Strict H3 SSH proof failed after ACL repair.'}
+  if(-not $success){throw 'Strict H3 SSH proof failed after SYSTEM-only ACL repair.'}
 
-  $r=[ordered]@{schema=1;status='completed';classification='H3_SSH_KEY_ACL_REPAIRED_AND_VERIFIED';computer=$env:COMPUTERNAME;ownerSid=$ownerSid;aclProtected=[bool]$acl.AreAccessRulesProtected;approvedAclSids=(($approved|Sort-Object)-join ', ');fingerprint=$fingerprint;keyContentChanged=$false;remoteMutation=$false;transportUsed=$success;proofs=$proofs;time=(Get-Date -Format o)}
+  $r=[ordered]@{schema=1;status='completed';classification='H3_SYSTEM_SSH_KEY_ACL_REPAIRED_AND_VERIFIED';computer=$env:COMPUTERNAME;ownerSid=$ownerSid;aclProtected=[bool]$acl.AreAccessRulesProtected;approvedAclSids=$systemSidText;fingerprint=$fingerprint;keyContentChanged=$false;keyExported=$false;remoteMutation=$false;transportUsed=$success;proofs=$proofs;time=(Get-Date -Format o)}
   Save-Result $r
   exit 0
 }catch{
-  $r=[ordered]@{schema=1;status='failed';classification='H3_SSH_KEY_ACL_REPAIR_FAILED';computer=$env:COMPUTERNAME;keyContentChanged=$false;remoteMutation=$false;error=$_.Exception.Message;detail=($_|Out-String).Trim();time=(Get-Date -Format o)}
+  $r=[ordered]@{schema=1;status='failed';classification='H3_SYSTEM_SSH_KEY_ACL_REPAIR_FAILED';computer=$env:COMPUTERNAME;keyContentChanged=$false;keyExported=$false;remoteMutation=$false;error=$_.Exception.Message;detail=($_|Out-String).Trim();time=(Get-Date -Format o)}
   Save-Result $r
   exit 20
 }
