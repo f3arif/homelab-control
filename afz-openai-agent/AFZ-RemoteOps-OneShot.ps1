@@ -24,6 +24,14 @@ function Invoke-Phase1FamilyPttPrep {
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
+function Invoke-H3TailscaleUnattended {
+  # Typed, fixed-target one-shot. GitHub is the control input; OneDrive is result-only.
+  # The helper can only enforce H3's Tailscale UnattendedMode=always and verify it.
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Enable-H3-Tailscale-Unattended.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-tailscale-unattended.json'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
@@ -32,6 +40,10 @@ $id=([string]$req.id).Trim()
 $requestedTask=([string]$req.taskName).Trim()
 if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id'}
 if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
+
+# First-stage typed auxiliary requests are idempotent and isolated from RemoteOps.
+# A failure here must never prevent the existing RemoteOps recovery path.
+Invoke-H3TailscaleUnattended
 
 # The Phase 1 FamilyPTT prep is a separate typed, idempotent request. It is invoked
 # here only because this helper already runs at the first AFZ-agent startup stage.
