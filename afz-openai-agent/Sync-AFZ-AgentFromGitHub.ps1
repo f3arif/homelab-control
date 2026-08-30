@@ -48,6 +48,19 @@ function Invoke-H3ReturnPublisherHotfix([string]$Sha){
     return $parsed
   }catch{return [ordered]@{ok=$false;status='helper-exception';syncedSha=$Sha;error=$_.Exception.Message}}
 }
+function Invoke-H3ConsoleFlashRemediation([string]$Sha){
+  try {
+    $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-ConsoleFlash-Remediation.ps1'
+    if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){
+      return [ordered]@{ok=$false;status='helper-missing';syncedSha=$Sha}
+    }
+    $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -SyncedSha $Sha | Select-Object -Last 1
+    $code=$LASTEXITCODE
+    if($raw -is [string]){try{$parsed=$raw|ConvertFrom-Json}catch{$parsed=[ordered]@{ok=$false;status='helper-result-invalid';syncedSha=$Sha;raw=[string]$raw}}}else{$parsed=$raw}
+    if($code -ne 0){return [ordered]@{ok=$false;status='helper-process-failed';syncedSha=$Sha;exit=$code;result=$parsed}}
+    return $parsed
+  }catch{return [ordered]@{ok=$false;status='helper-exception';syncedSha=$Sha;error=$_.Exception.Message}}
+}
 $headers=@{
   'User-Agent'='AFZ-OpenAI-Agent-Updater'
   'Cache-Control'='no-cache'
@@ -73,8 +86,9 @@ $repoZip="https://codeload.github.com/f3arif/homelab-control/zip/$remoteSha"
 $localSha=$null
 if(Test-Path $stateFile){try{$localSha=[string]((Get-Content $stateFile -Raw|ConvertFrom-Json).remoteSha)}catch{}}
 if((-not $Force) -and $localSha -eq $remoteSha -and (Test-Path (Join-Path $InstallRoot 'afz-openai-agent\AFZ-OpenAI-Agent-v2.ps1'))){
+  $h3ConsoleFlashRemediation=Invoke-H3ConsoleFlashRemediation $remoteSha
   Publish-SiteDeployAck
-  Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=$false;remoteSha=$remoteSha;localSha=$localSha;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})
 }
 $temp=Join-Path $env:TEMP ('AFZ-AgentSync-'+[guid]::NewGuid().ToString('n'))
 $zip=Join-Path $temp 'source.zip'
@@ -177,6 +191,7 @@ try{
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   $h3ReturnRecovery=Invoke-H3ReturnRecovery $remoteSha
   $h3ReturnPublisherHotfix=Invoke-H3ReturnPublisherHotfix $remoteSha
+  $h3ConsoleFlashRemediation=Invoke-H3ConsoleFlashRemediation $remoteSha
   Publish-SiteDeployAck
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
