@@ -1,0 +1,72 @@
+name: FamilyPTT floor observer
+
+on:
+  push:
+    paths:
+      - '.github/afz-familyptt-floor-observer-signal.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Observe Pixel floor acquire and release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, time, urllib.request
+
+          URL = 'https://ptt-api.afzeng.ca/floor/status?room=family-main'
+
+          def status():
+              with urllib.request.urlopen(URL, timeout=10) as r:
+                  assert r.status == 200
+                  return json.load(r)
+
+          before = status()
+          before_floor = before.get('floor') if isinstance(before, dict) else None
+          print('FLOOR_INITIAL_FREE=' + ('true' if before_floor is None else 'false'), flush=True)
+          if before_floor is not None:
+              print('FLOOR_INITIAL=' + json.dumps(before_floor, sort_keys=True), flush=True)
+          print('OBSERVER_READY_FOR_PTT=true', flush=True)
+
+          acquired = None
+          acquire_at = None
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              payload = status()
+              floor = payload.get('floor') if isinstance(payload, dict) else None
+              if floor is not None:
+                  acquired = floor
+                  acquire_at = time.monotonic()
+                  print('FLOOR_ACQUIRED=' + json.dumps(floor, sort_keys=True), flush=True)
+                  break
+              time.sleep(0.05)
+
+          assert acquired is not None, 'No floor acquisition observed within 90 seconds'
+          acquired_text = json.dumps(acquired, sort_keys=True).lower()
+          android_holder = 'familyptt-android-' in acquired_text
+          print('ANDROID_FLOOR_HOLDER=' + ('true' if android_holder else 'false'), flush=True)
+          assert android_holder, f'Observed floor is not held by Android participant: {acquired!r}'
+
+          released = False
+          release_deadline = time.monotonic() + 15
+          while time.monotonic() < release_deadline:
+              payload = status()
+              floor = payload.get('floor') if isinstance(payload, dict) else None
+              if floor is None:
+                  released = True
+                  break
+              time.sleep(0.05)
+
+          print('FLOOR_RELEASED=' + ('true' if released else 'false'), flush=True)
+          if acquire_at is not None:
+              print(f'FLOOR_HELD_OBSERVED_SEC={time.monotonic() - acquire_at:.3f}', flush=True)
+          assert released, 'Floor did not release after PTT burst'
+          print('FINAL=PASS_PIXEL_FLOOR_ACQUIRE_RELEASE', flush=True)
+          PY
