@@ -2,6 +2,12 @@
 [CmdletBinding()]
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
+$liveViewsRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-LiveViews-Audit-Request.ps1'
+if(Test-Path -LiteralPath $liveViewsRunner -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $liveViewsRunner -InstallRoot $InstallRoot *> $null
+  }catch{}
+}
 $userStoreRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-UserStore-Audit-Request.ps1'
 if(Test-Path -LiteralPath $userStoreRunner -PathType Leaf){
   try{
