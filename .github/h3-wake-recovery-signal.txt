@@ -1,0 +1,4 @@
+target=h3
+action=wake-once
+reason=h3-python-r5-parity
+requested_at=2026-08-30T16:29:00-04:00
