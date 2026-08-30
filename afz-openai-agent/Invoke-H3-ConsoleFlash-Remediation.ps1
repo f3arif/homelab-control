@@ -8,11 +8,12 @@ $ErrorActionPreference='Stop'
 if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'SyncedSha must be a 40-character Git commit SHA'}
 $SyncedSha=$SyncedSha.ToLowerInvariant()
 
-# Live-rechecking remediation for DESKTOP-H3R6CQN. Never trust an old success
-# marker: legacy installers can recreate a visible Interactive console action.
-# This helper only mutates the known Direct Return Publisher when its action
-# exactly matches the old visible PowerShell form. All other tasks are audited
-# read-only and reported as remaining console risks.
+# GitHub-primary live recheck for H3 console flashes. This helper never trusts
+# prior success markers. On every source sync it verifies the three known
+# Interactive recurring/return tasks and changes only an exact legacy direct
+# PowerShell action to a wscript.exe hidden launcher. Principals, triggers,
+# settings, script paths and task names are preserved. Unexpected contracts are
+# audit-only, and a previously-successful task is rolled back on test failure.
 $targetHost='DESKTOP-H3R6CQN'
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
@@ -23,8 +24,8 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 function Save($Object){
-  [IO.File]::WriteAllText($stateFile,($Object|ConvertTo-Json -Depth 50 -Compress),$utf8)
-  Write-Output ($Object|ConvertTo-Json -Depth 50 -Compress)
+  [IO.File]::WriteAllText($stateFile,($Object|ConvertTo-Json -Depth 60 -Compress),$utf8)
+  Write-Output ($Object|ConvertTo-Json -Depth 60 -Compress)
 }
 
 try{
@@ -35,28 +36,77 @@ try{
   $remote=@'
 $ErrorActionPreference='Stop'
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: $env:COMPUTERNAME"}
-$taskName='AFZ H3 GitHub Direct Return Publisher'
-$publisher='C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1'
-$launcher='C:\AFZ\GitHubDirect\Run-H3-GitHub-DirectReturn-Hidden.vbs'
-$remoteState='C:\ProgramData\AFZ\H3GitHubDirect\console-flash-remediation-v2.json'
+$utf8=New-Object Text.UTF8Encoding($false)
+$wscript=Join-Path $env:SystemRoot 'System32\wscript.exe'
+$powerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$remoteState='C:\ProgramData\AFZ\H3GitHubDirect\console-flash-remediation-v3.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'H3-CONSOLE-FLASH-AUDIT-LATEST.json'
-$utf8=New-Object Text.UTF8Encoding($false)
+if(-not(Test-Path -LiteralPath $wscript -PathType Leaf)){throw "wscript.exe missing: $wscript"}
+if(-not(Test-Path -LiteralPath $powerShell -PathType Leaf)){throw "Windows PowerShell missing: $powerShell"}
 
-function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return $null}}
-function Fmt-Date($v){if($null -eq $v){return $null};try{return ([datetime]$v).ToString('o')}catch{return [string]$v}}
+$targets=@(
+  [pscustomobject]@{
+    Task='AFZ H3 GitHub Direct Return Publisher'
+    ExpectedScript='C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1'
+    Launcher='C:\AFZ\GitHubDirect\Run-H3-GitHub-DirectReturn-Hidden.vbs'
+    Optional=$false
+    TestSeconds=75
+  },
+  [pscustomobject]@{
+    Task='AFZ H3 Ollama Cloud Telemetry Watchdog'
+    ExpectedScript='C:\AFZ\H3Worker\Ensure-H3-OllamaCloudTelemetry.ps1'
+    Launcher='C:\AFZ\H3Worker\Run-Ensure-H3-OllamaCloudTelemetry-Hidden.vbs'
+    Optional=$true
+    TestSeconds=25
+  },
+  [pscustomobject]@{
+    Task='AFZ Ops 35B Watchdog'
+    ExpectedScript='C:\AFZ\Ops35B\AFZ-Ops35B-H3-Watchdog.ps1'
+    Launcher='C:\AFZ\Ops35B\Run-AFZ-Ops35B-H3-Watchdog-Hidden.vbs'
+    Optional=$true
+    TestSeconds=25
+  }
+)
+
+function Fmt-Date($Value){
+  if($null -eq $Value){return $null}
+  try{return ([datetime]$Value).ToString('o')}catch{return [string]$Value}
+}
+function Leaf([string]$Exe){
+  if([string]::IsNullOrWhiteSpace($Exe)){return ''}
+  try{return [IO.Path]::GetFileName($Exe).ToLowerInvariant()}catch{return ''}
+}
 function Is-ConsoleExecutable([string]$Exe){
-  if([string]::IsNullOrWhiteSpace($Exe)){return $false}
-  $leaf=[IO.Path]::GetFileName($Exe).ToLowerInvariant()
-  return ($leaf -in @('powershell.exe','pwsh.exe','cmd.exe','python.exe','python3.exe','py.exe','ssh.exe','git.exe','robocopy.exe','ffmpeg.exe','node.exe','npm.cmd','npx.cmd'))
+  return ((Leaf $Exe) -in @('powershell.exe','pwsh.exe','cmd.exe','python.exe','python3.exe','py.exe','ssh.exe','git.exe','robocopy.exe','ffmpeg.exe','node.exe','npm.cmd','npx.cmd'))
+}
+function Snapshot([string]$Name){
+  $t=Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+  if(-not $t){return $null}
+  $i=Get-ScheduledTaskInfo -TaskName $Name -ErrorAction SilentlyContinue
+  $actions=@($t.Actions)
+  $a=$(if($actions.Count -gt 0){$actions[0]}else{$null})
+  return [pscustomobject]@{
+    task=$Name
+    state=[string]$t.State
+    user=[string]$t.Principal.UserId
+    logonType=[string]$t.Principal.LogonType
+    runLevel=[string]$t.Principal.RunLevel
+    actionCount=$actions.Count
+    execute=$(if($a){[string]$a.Execute}else{$null})
+    arguments=$(if($a){[string]$a.Arguments}else{$null})
+    lastRunTime=$(if($i){Fmt-Date $i.LastRunTime}else{$null})
+    nextRunTime=$(if($i){Fmt-Date $i.NextRunTime}else{$null})
+    lastTaskResult=$(if($i){[int]$i.LastTaskResult}else{$null})
+  }
 }
 function Task-Audit {
   $rows=@()
   foreach($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
     $_.TaskName -like 'AFZ*' -or $_.TaskName -match 'H3' -or $_.TaskName -eq 'OpenWebUI Server'
   })){
-    $info=Get-ScheduledTaskInfo -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction SilentlyContinue
-    $triggerSummary=@($t.Triggers|ForEach-Object {
+    $i=Get-ScheduledTaskInfo -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction SilentlyContinue
+    $triggers=@($t.Triggers|ForEach-Object {
       [ordered]@{
         type=$_.CimClass.CimClassName
         startBoundary=[string]$_.StartBoundary
@@ -81,130 +131,128 @@ function Task-Audit {
         interactive=$interactive
         directConsole=$console
         consoleRisk=($interactive -and $console)
-        lastRunTime=$(if($info){Fmt-Date $info.LastRunTime}else{$null})
-        nextRunTime=$(if($info){Fmt-Date $info.NextRunTime}else{$null})
-        lastTaskResult=$(if($info){[int]$info.LastTaskResult}else{$null})
-        triggers=$triggerSummary
+        lastRunTime=$(if($i){Fmt-Date $i.LastRunTime}else{$null})
+        nextRunTime=$(if($i){Fmt-Date $i.NextRunTime}else{$null})
+        lastTaskResult=$(if($i){[int]$i.LastTaskResult}else{$null})
+        triggers=$triggers
       }
     }
   }
   return @($rows)
 }
-function Publish-Diagnostic($Object){
-  New-Item -ItemType Directory -Force -Path (Split-Path $remoteState -Parent)|Out-Null
-  [IO.File]::WriteAllText($remoteState,($Object|ConvertTo-Json -Depth 50 -Compress),$utf8)
-  try{if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagFile,($Object|ConvertTo-Json -Depth 50),$utf8)}}catch{}
-}
-function Emit($Object){Publish-Diagnostic $Object;Write-Output ($Object|ConvertTo-Json -Depth 50 -Compress)}
-
-$beforeAudit=@(Task-Audit)
-$beforeRisks=@($beforeAudit|Where-Object {$_.consoleRisk})
-$t=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if(-not $t){
-  Emit ([ordered]@{schema=2;ok=$false;status='target-task-missing';host=$env:COMPUTERNAME;targetTask=$taskName;changed=$false;auditBefore=$beforeAudit;remainingRiskTasks=$beforeRisks;updatedAt=(Get-Date -Format o)})
-  exit 0
-}
-$actions=@($t.Actions)
-if($actions.Count -ne 1){
-  Emit ([ordered]@{schema=2;ok=$false;status='unexpected-target-action-count';host=$env:COMPUTERNAME;targetTask=$taskName;changed=$false;actionCount=$actions.Count;auditBefore=$beforeAudit;remainingRiskTasks=$beforeRisks;updatedAt=(Get-Date -Format o)})
-  exit 0
-}
-$a=$actions[0]
-$execute=[string]$a.Execute
-$args=[string]$a.Arguments
-$leaf=[IO.Path]::GetFileName($execute).ToLowerInvariant()
-$principalBefore=[ordered]@{user=[string]$t.Principal.UserId;logonType=[string]$t.Principal.LogonType;runLevel=[string]$t.Principal.RunLevel}
-$changed=$false
-$restored=$false
-$parityFailure=$null
-$infoBefore=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-$publisherStatePath='C:\ProgramData\AFZ\H3GitHubDirect\return-publisher-v3.json'
-$publisherBefore=Read-Json $publisherStatePath
-
-if($leaf -eq 'wscript.exe' -and $args -like "*$launcher*"){
-  $status='already-remediated-live-verified'
-}elseif($leaf -eq 'powershell.exe' -and $args -like '*Publish-H3-GitHub-DirectReturn-V3.ps1*' -and ([string]$t.Principal.LogonType) -match 'Interactive'){
-  if(-not(Test-Path -LiteralPath $publisher -PathType Leaf)){throw "Publisher missing: $publisher"}
-  $oldAction=New-ScheduledTaskAction -Execute $execute -Argument $args
-  $ps="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-  $cmd='"'+$ps+'" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$publisher+'"'
+function Write-HiddenLauncher([string]$Launcher,[string]$Arguments){
+  $parent=Split-Path $Launcher -Parent
+  if($parent){New-Item -ItemType Directory -Force -Path $parent|Out-Null}
+  $cmd='"'+$powerShell+'" '+$Arguments
   $escaped=$cmd.Replace('"','""')
-  $vbsLines=@(
+  $vbs=@(
     'Option Explicit',
     'Dim shell, cmd, rc',
     'Set shell = CreateObject("WScript.Shell")',
     ('cmd = "'+$escaped+'"'),
     'rc = shell.Run(cmd, 0, True)',
     'WScript.Quit rc'
-  )
-  [IO.File]::WriteAllText($launcher,($vbsLines -join "`r`n"),$utf8)
-  $wscript=Join-Path $env:SystemRoot 'System32\wscript.exe'
-  if(-not(Test-Path -LiteralPath $wscript -PathType Leaf)){throw "wscript.exe missing: $wscript"}
-  $newAction=New-ScheduledTaskAction -Execute $wscript -Argument ('//B //Nologo "'+$launcher+'"')
-  try{Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue}catch{}
-  Set-ScheduledTask -TaskName $taskName -Action $newAction|Out-Null
-  $changed=$true
-
-  $afterSet=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-  $principalAfter=[ordered]@{user=[string]$afterSet.Principal.UserId;logonType=[string]$afterSet.Principal.LogonType;runLevel=[string]$afterSet.Principal.RunLevel}
-  if($principalBefore.user -ne $principalAfter.user -or $principalBefore.logonType -ne $principalAfter.logonType -or $principalBefore.runLevel -ne $principalAfter.runLevel){
-    Set-ScheduledTask -TaskName $taskName -Action $oldAction|Out-Null
-    throw 'Principal changed unexpectedly; original action restored.'
+  ) -join "`r`n"
+  [IO.File]::WriteAllText($Launcher,$vbs,$utf8)
+}
+function Ensure-NoWindowTask($Spec){
+  $before=Snapshot ([string]$Spec.Task)
+  if(-not $before){
+    return [pscustomobject]@{task=$Spec.Task;ok=[bool]$Spec.Optional;status=$(if($Spec.Optional){'not-installed'}else{'missing'});changed=$false;before=$null;after=$null}
+  }
+  if($before.actionCount -ne 1){
+    return [pscustomobject]@{task=$Spec.Task;ok=$false;status='unexpected-action-count';changed=$false;before=$before;after=$before}
+  }
+  $leaf=Leaf ([string]$before.execute)
+  if($leaf -eq 'wscript.exe' -and [string]$before.arguments -like ('*'+[string]$Spec.Launcher+'*')){
+    return [pscustomobject]@{task=$Spec.Task;ok=$true;status='already-hidden-live-verified';changed=$false;before=$before;after=$before}
+  }
+  if($leaf -notin @('powershell.exe','pwsh.exe') -or [string]$before.arguments -notlike ('*'+[string]$Spec.ExpectedScript+'*') -or [string]$before.logonType -notmatch 'Interactive'){
+    return [pscustomobject]@{task=$Spec.Task;ok=$false;status='unexpected-contract-audit-only';changed=$false;before=$before;after=$before}
+  }
+  if(-not(Test-Path -LiteralPath ([string]$Spec.ExpectedScript) -PathType Leaf)){
+    return [pscustomobject]@{task=$Spec.Task;ok=$false;status='expected-script-missing';changed=$false;before=$before;after=$before}
   }
 
-  Start-ScheduledTask -TaskName $taskName
-  $deadline=(Get-Date).AddSeconds(75)
-  do{Start-Sleep -Milliseconds 750;$current=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue;if($current -and [string]$current.State -ne 'Running'){break}}while((Get-Date) -lt $deadline)
-  $infoAfter=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-  $publisherAfter=Read-Json $publisherStatePath
-  if($infoBefore -and [int]$infoBefore.LastTaskResult -eq 0 -and $infoAfter -and [string](Get-ScheduledTask -TaskName $taskName).State -ne 'Running' -and [int]$infoAfter.LastTaskResult -ne 0){$parityFailure="Task exit changed from 0 to $([int]$infoAfter.LastTaskResult)"}
-  if(-not $parityFailure -and $publisherBefore -and [bool]$publisherBefore.ok -and $publisherAfter -and -not [bool]$publisherAfter.ok){$parityFailure='Publisher state regressed from ok=true to ok=false.'}
-  if($parityFailure){
-    try{Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue}catch{}
-    Set-ScheduledTask -TaskName $taskName -Action $oldAction|Out-Null
-    Start-ScheduledTask -TaskName $taskName
-    $restored=$true
-    $changed=$false
-    $status='rollback-parity-failure'
-  }else{$status='remediated-live'}
-}else{
-  $status='unexpected-target-action-audit-only'
+  $oldAction=New-ScheduledTaskAction -Execute ([string]$before.execute) -Argument ([string]$before.arguments)
+  Write-HiddenLauncher -Launcher ([string]$Spec.Launcher) -Arguments ([string]$before.arguments)
+  $newAction=New-ScheduledTaskAction -Execute $wscript -Argument ('//B //Nologo "'+[string]$Spec.Launcher+'"')
+  try{Stop-ScheduledTask -TaskName ([string]$Spec.Task) -ErrorAction SilentlyContinue}catch{}
+  Set-ScheduledTask -TaskName ([string]$Spec.Task) -Action $newAction|Out-Null
+
+  $afterSet=Snapshot ([string]$Spec.Task)
+  if(-not $afterSet -or $afterSet.user -ne $before.user -or $afterSet.logonType -ne $before.logonType -or $afterSet.runLevel -ne $before.runLevel){
+    Set-ScheduledTask -TaskName ([string]$Spec.Task) -Action $oldAction|Out-Null
+    return [pscustomobject]@{task=$Spec.Task;ok=$false;status='principal-mismatch-rolled-back';changed=$false;before=$before;after=(Snapshot ([string]$Spec.Task))}
+  }
+
+  Start-ScheduledTask -TaskName ([string]$Spec.Task)
+  $deadline=(Get-Date).AddSeconds([int]$Spec.TestSeconds)
+  do{
+    Start-Sleep -Milliseconds 500
+    $probe=Get-ScheduledTask -TaskName ([string]$Spec.Task) -ErrorAction SilentlyContinue
+    if($probe -and [string]$probe.State -ne 'Running'){break}
+  }while((Get-Date) -lt $deadline)
+  $after=Snapshot ([string]$Spec.Task)
+
+  $regression=$false
+  $reason=$null
+  if($null -ne $before.lastTaskResult -and [int]$before.lastTaskResult -eq 0 -and $after -and $after.state -ne 'Running' -and $null -ne $after.lastTaskResult -and [int]$after.lastTaskResult -ne 0){
+    $regression=$true
+    $reason='task-result-regressed-from-0-to-'+[string]$after.lastTaskResult
+  }
+  if($regression){
+    try{Stop-ScheduledTask -TaskName ([string]$Spec.Task) -ErrorAction SilentlyContinue}catch{}
+    Set-ScheduledTask -TaskName ([string]$Spec.Task) -Action $oldAction|Out-Null
+    Start-ScheduledTask -TaskName ([string]$Spec.Task)
+    return [pscustomobject]@{task=$Spec.Task;ok=$false;status='test-regression-rolled-back';changed=$false;reason=$reason;before=$before;failedAfter=$after;after=(Snapshot ([string]$Spec.Task))}
+  }
+  return [pscustomobject]@{task=$Spec.Task;ok=$true;status='hidden-launcher-installed';changed=$true;launcher=$Spec.Launcher;before=$before;after=$after}
+}
+function Publish-Diagnostic($Object){
+  New-Item -ItemType Directory -Force -Path (Split-Path $remoteState -Parent)|Out-Null
+  [IO.File]::WriteAllText($remoteState,($Object|ConvertTo-Json -Depth 60 -Compress),$utf8)
+  try{if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagFile,($Object|ConvertTo-Json -Depth 60),$utf8)}}catch{}
 }
 
+$beforeAudit=@(Task-Audit)
+$results=@()
+foreach($target in $targets){$results += Ensure-NoWindowTask $target}
 $afterAudit=@(Task-Audit)
 $remaining=@($afterAudit|Where-Object {$_.consoleRisk})
-$currentTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-$currentAction=$(if($currentTask){@($currentTask.Actions)[0]}else{$null})
+$periodicRemaining=@($remaining|Where-Object {
+  $hasRepeat=$false
+  foreach($tr in @($_.triggers)){if([string]$tr.repetitionInterval){$hasRepeat=$true;break}}
+  $hasRepeat
+})
+$bad=@($results|Where-Object {-not $_.ok})
 $result=[ordered]@{
-  schema=2
-  ok=($status -in @('already-remediated-live-verified','remediated-live'))
-  status=$status
+  schema=3
+  ok=($bad.Count -eq 0)
+  status=$(if($bad.Count -eq 0){'completed'}else{'partial-or-blocked'})
   host=$env:COMPUTERNAME
-  targetTask=$taskName
-  changed=$changed
-  restored=$restored
-  parityFailure=$parityFailure
-  principalPreserved=$true
-  targetExecute=$(if($currentAction){[string]$currentAction.Execute}else{$null})
-  targetArguments=$(if($currentAction){[string]$currentAction.Arguments}else{$null})
+  targets=$results
+  beforeRiskCount=@($beforeAudit|Where-Object {$_.consoleRisk}).Count
+  afterRiskCount=$remaining.Count
+  periodicConsoleRiskCount=$periodicRemaining.Count
+  periodicConsoleRisks=$periodicRemaining
   auditBefore=$beforeAudit
   auditAfter=$afterAudit
-  remainingRiskCount=$remaining.Count
-  remainingRiskTasks=$remaining
   updatedAt=(Get-Date -Format o)
 }
-Emit $result
+Publish-Diagnostic $result
+Write-Output ($result|ConvertTo-Json -Depth 60 -Compress)
 exit 0
 '@
 
-  $stdin=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV2-In-'+[guid]::NewGuid().ToString('n')+'.ps1')
-  $stdout=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV2-Out-'+[guid]::NewGuid().ToString('n')+'.txt')
-  $stderr=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV2-Err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stdin=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV3-In-'+[guid]::NewGuid().ToString('n')+'.ps1')
+  $stdout=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV3-Out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $stderr=Join-Path $env:TEMP ('AFZ-H3-ConsoleFlashV3-Err-'+[guid]::NewGuid().ToString('n')+'.txt')
   try{
     [IO.File]::WriteAllText($stdin,$remote,[Text.Encoding]::ASCII)
     $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=12','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known),$h3,'powershell.exe','-NoProfile','-NonInteractive','-Command','-')
     $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $stdin -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -NoNewWindow
-    if(-not $p.WaitForExit(120000)){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{};throw 'H3 console-flash V2 remediation timed out after 120 seconds'}
+    if(-not $p.WaitForExit(180000)){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{};throw 'H3 console-flash V3 remediation timed out after 180 seconds'}
     $p.WaitForExit()
     $exit=[int]$p.ExitCode
     $outText=$(if(Test-Path -LiteralPath $stdout){[IO.File]::ReadAllText($stdout)}else{''})
@@ -212,14 +260,12 @@ exit 0
     $jsonLine=@(($outText -split "`r?`n")|Where-Object {$_ -match '^\{.*\}$'}|Select-Object -Last 1)
     $remoteResult=$null
     if($jsonLine){try{$remoteResult=$jsonLine|ConvertFrom-Json}catch{}}
-    if($exit -ne 0){throw "H3 console-flash V2 remediation failed exit=$exit stdout=$outText stderr=$errText"}
-    if(-not $remoteResult){throw "H3 console-flash V2 returned no JSON result: stdout=$outText stderr=$errText"}
+    if($exit -ne 0){throw "H3 console-flash V3 remediation failed exit=$exit stdout=$outText stderr=$errText"}
+    if(-not $remoteResult){throw "H3 console-flash V3 returned no JSON result: stdout=$outText stderr=$errText"}
   }finally{Remove-Item -LiteralPath $stdin,$stdout,$stderr -Force -ErrorAction SilentlyContinue}
 
-  $result=[ordered]@{schema=2;ok=[bool]$remoteResult.ok;status=[string]$remoteResult.status;target=$targetHost;syncedSha=$SyncedSha;remote=$remoteResult;updatedAt=(Get-Date -Format o)}
-  Save $result
+  Save ([ordered]@{schema=3;ok=[bool]$remoteResult.ok;status=[string]$remoteResult.status;target=$targetHost;syncedSha=$SyncedSha;remote=$remoteResult;updatedAt=(Get-Date -Format o)})
 }catch{
-  $failed=[ordered]@{schema=2;ok=$false;status='failed';target=$targetHost;syncedSha=$SyncedSha;error=$_.Exception.Message;updatedAt=(Get-Date -Format o)}
-  Save $failed
+  Save ([ordered]@{schema=3;ok=$false;status='failed';target=$targetHost;syncedSha=$SyncedSha;error=$_.Exception.Message;updatedAt=(Get-Date -Format o)})
   exit 1
 }
