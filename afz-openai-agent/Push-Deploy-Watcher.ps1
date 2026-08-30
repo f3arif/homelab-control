@@ -20,6 +20,9 @@ $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
 $runtimeProofFile=Join-Path $diagRoot 'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt'
 $jellyfinRequestRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Visibility-Request.ps1'
+$familyPttPhase1ApkRunner=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
+$familyPttPhase1ApkRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
+$familyPttPhase1LastAttempt=[DateTime]::MinValue
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -165,6 +168,32 @@ function Handle-JellyfinVisibilityRequest{
     if($LASTEXITCODE -ne 0){Log "JELLYFIN_VISIBILITY_REQUEST_ERROR exit=$LASTEXITCODE source=$(Current-Sha)"}
   }catch{Log "JELLYFIN_VISIBILITY_REQUEST_ERROR $($_.Exception.Message)"}
 }
+# BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
+function Handle-FamilyPttPhase1ApkRequest{
+  if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $familyPttPhase1ApkRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'prepare-phase1-acceptance-apk'){return}
+    if([string]$req.status -ne 'active'){return}
+    $now=Get-Date
+    if(($now-$script:familyPttPhase1LastAttempt).TotalSeconds -lt 10){return}
+    $script:familyPttPhase1LastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $familyPttPhase1ApkRunner -InstallRoot $InstallRoot -RequestPath $familyPttPhase1ApkRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    if($code -ne 0){
+      Log "FAMILYPTT_PHASE1_APK_REQUEST_ERROR exit=$code source=$(Current-Sha) output=$raw"
+      return
+    }
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{
+        $result=$raw|ConvertFrom-Json
+        Log "FAMILYPTT_PHASE1_APK_REQUEST status=$([string]$result.status) job=$([string]$result.jobId) source=$(Current-Sha)"
+      }catch{Log "FAMILYPTT_PHASE1_APK_REQUEST_OK source=$(Current-Sha)"}
+    }
+  }catch{Log "FAMILYPTT_PHASE1_APK_REQUEST_ERROR $($_.Exception.Message)"}
+}
+# END FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
 $mutex=New-Object Threading.Mutex($false,'Global\AFZOpenAIAgentPushWatcher')
 $locked=$false
 try{
@@ -173,7 +202,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot familyPttPhase1ApkRequest=typed-active-only"
   Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
@@ -221,6 +250,7 @@ try{
       }
       Refresh-FamilyPttR17IfSafe
       Handle-JellyfinVisibilityRequest
+      Handle-FamilyPttPhase1ApkRequest
       $lastError=''
     }catch{
       $msg=$_.Exception.Message
