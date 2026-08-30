@@ -8,8 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 
 # AFZ_FAMILYPTT_PHASE1_EXACT_APK_PREP_V1
-# This helper is intentionally NOT wired to a watcher by this change.
-# It performs no work unless an exact request is explicitly status=active.
+# The helper performs no work unless an exact request is explicitly status=active.
+# Missing expected handsets is a resumable waiting state, never a partial install.
 $ExpectedRepo='f3arif/FamilyPTT'
 $ExpectedRunId=33325967023
 $ExpectedArtifact='FamilyPTT-standalone-release-apk-arm64'
@@ -171,6 +171,10 @@ try{
   Emit $done 0
 }catch{
   $msg=$_.Exception.Message
+  if($msg -like 'WAIT_TWO_EXPECTED_HANDSETS*'){
+    $waiting=Save-State $jobId 'waiting' $msg ([ordered]@{mutated=$false;retryable=$true})
+    Emit $waiting 0
+  }
   $failed=Save-State $jobId 'failed' $msg
   Emit $failed 1
 }finally{
