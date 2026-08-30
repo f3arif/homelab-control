@@ -1,0 +1,89 @@
+name: Validate FamilyPTT Phase 1 APK preparer
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1'
+      - 'afz-openai-agent/requests/familyptt-phase1-apk-prepare.json'
+      - 'afz-openai-agent/AFZ-Native-Process.ps1'
+      - '.github/workflows/familyptt-phase1-apk-prepare-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse and validate fail-closed contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1'
+          $native='afz-openai-agent/AFZ-Native-Process.ps1'
+          $request='afz-openai-agent/requests/familyptt-phase1-apk-prepare.json'
+
+          foreach($path in @($script,$native)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count -gt 0){throw "PowerShell parser rejected $path`: $($errors.Message -join '; ')"}
+          }
+
+          $r=Get-Content $request -Raw|ConvertFrom-Json
+          if([int]$r.schema -ne 1){throw 'request schema mismatch'}
+          if([string]$r.project -ne 'familyptt' -or [string]$r.action -ne 'prepare-phase1-acceptance-apk'){throw 'request route mismatch'}
+          if([string]$r.status -ne 'staged-not-active'){throw 'request must remain staged-not-active in this PR'}
+          if([int64]$r.workflow_run_id -ne 33325967023){throw 'workflow run is not pinned'}
+          if([string]$r.artifact_name -ne 'FamilyPTT-standalone-release-apk-arm64'){throw 'artifact name mismatch'}
+          if([string]$r.apk_sha256 -ne '4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b'){throw 'APK SHA mismatch'}
+          if([string]$r.package_id -ne 'ca.afzeng.familyptt'){throw 'package mismatch'}
+          if([string]$r.device_a -ne '19161FDEE008XN' -or [string]$r.device_b -ne '192.168.50.69:38209'){throw 'device pins mismatch'}
+
+          $text=Get-Content $script -Raw
+          foreach($required in @(
+            'AFZ_FAMILYPTT_PHASE1_EXACT_APK_PREP_V1',
+            "`$ExpectedRunId=33325967023",
+            "`$ExpectedApkSha256='4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b'",
+            "`$ExpectedDeviceA='19161FDEE008XN'",
+            "`$ExpectedDeviceB='192.168.50.69:38209'",
+            "if(`$status -eq 'staged-not-active')",
+            "if(`$status -ne 'active')",
+            'Assert-ExpectedDevices $adb',
+            "@('install','-r',`$apk)",
+            'AFZ-Native-Process.ps1',
+            'Invoke-AFZBoundedNative'
+          )){if(-not $text.Contains($required)){throw "missing required safety marker: $required"}}
+
+          foreach($forbidden in @(
+            "@('uninstall'",
+            "@('shell','pm','clear'",
+            "@('shell','svc','wifi'",
+            "@('shell','svc','data'",
+            'airplane_mode_on',
+            "@('shell','settings','put'",
+            'Remove-NetFirewallRule',
+            'New-NetFirewallRule',
+            'Set-ScheduledTask',
+            'Register-ScheduledTask'
+          )){if($text.Contains($forbidden)){throw "forbidden mutation surface present: $forbidden"}}
+
+          $stageIndex=$text.IndexOf("if(`$status -eq 'staged-not-active')")
+          $ghIndex=$text.IndexOf("Resolve-Command @('gh.exe','gh')")
+          $installIndex=$text.IndexOf("@('install','-r',`$apk)")
+          if($stageIndex -lt 0 -or $ghIndex -lt 0 -or $installIndex -lt 0 -or $stageIndex -gt $ghIndex -or $stageIndex -gt $installIndex){throw 'staged-not-active gate must precede artifact/device mutation path'}
+
+      - name: Execute staged no-op under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path '.').Path
+          $script=Join-Path $root 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
+          $request=Join-Path $root 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
+          $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -InstallRoot $root -RequestPath $request
+          if($LASTEXITCODE -ne 0){throw "staged helper exited $LASTEXITCODE"}
+          $o=$raw|ConvertFrom-Json
+          if([string]$o.status -ne 'staged-not-active' -or [bool]$o.mutated -ne $false){throw 'staged helper did not fail closed'}
+          Write-Host 'FAMILYPTT_PHASE1_APK_PREP_STAGED_PASS'
