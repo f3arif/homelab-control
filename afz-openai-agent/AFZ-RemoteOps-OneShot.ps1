@@ -11,12 +11,20 @@ $taskName='AFZ Remote Ops'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\remoteops-start'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-REMOTEOPS-START-LATEST.json'
+$h3HookMirror=Join-Path $mirrorRoot 'H3-TAILSCALE-UNATTENDED-HOOK-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Write-Result($obj,[string]$path){
   $json=$obj | ConvertTo-Json -Depth 12
   $json | Set-Content -LiteralPath $path -Encoding UTF8
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
+}
+function Write-H3HookResult($obj){
+  try{
+    if(Test-Path -LiteralPath $mirrorRoot -PathType Container){
+      ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $h3HookMirror -Encoding UTF8
+    }
+  }catch{}
 }
 function Invoke-Phase1FamilyPttPrep {
   $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-Apk-Prepare.ps1'
@@ -29,8 +37,19 @@ function Invoke-H3TailscaleUnattended {
   # The helper can only enforce H3's Tailscale UnattendedMode=always and verify it.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Enable-H3-Tailscale-Unattended.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-tailscale-unattended.json'
-  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
-  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+  $helperExists=Test-Path -LiteralPath $helper -PathType Leaf
+  $requestExists=Test-Path -LiteralPath $request -PathType Leaf
+  if(-not $helperExists -or -not $requestExists){
+    Write-H3HookResult ([ordered]@{schema=1;status='not-invoked';helperExists=$helperExists;requestExists=$requestExists;helper=$helper;request=$request;time=(Get-Date -Format o)})
+    return
+  }
+  try{
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request 2>&1 | Out-String).Trim()
+    $code=$LASTEXITCODE
+    Write-H3HookResult ([ordered]@{schema=1;status=$(if($code -eq 0){'completed'}else{'failed'});exitCode=$code;helperExists=$true;requestExists=$true;output=$raw;time=(Get-Date -Format o)})
+  }catch{
+    Write-H3HookResult ([ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;error=$_.Exception.Message;detail=($_ | Out-String).Trim();time=(Get-Date -Format o)})
+  }
 }
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
