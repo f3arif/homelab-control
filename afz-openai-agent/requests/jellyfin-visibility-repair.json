@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "project": "jellyfin-visibility",
+  "action": "repair-exact-screenshot-user",
+  "job_id": "jellyfin-visibility-20260830-0034",
+  "expected_screenshot_views": [
+    "Home Videos and Photos",
+    "Movies",
+    "Wedding"
+  ],
+  "required_recovered_views": [
+    "Bollywood   Hindi (TorBox)",
+    "Bollywood - Hindi (All Sources)",
+    "Bollywood - Hindi (Downloaded)",
+    "Real-Debrid Movies",
+    "Stream Now (TorBox)",
+    "TorBox Downloaded Movies"
+  ]
+}
