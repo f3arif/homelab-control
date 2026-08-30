@@ -1,0 +1,72 @@
+name: H3 Console Flash Remediation Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Invoke-H3-ConsoleFlash-Remediation.ps1'
+      - 'afz-openai-agent/Bootstrap-H3-GitHub-DirectReturnV4.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/h3-console-flash-remediation-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse affected scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent\Invoke-H3-ConsoleFlash-Remediation.ps1',
+            'afz-openai-agent\Bootstrap-H3-GitHub-DirectReturnV4.ps1',
+            'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null
+            $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){
+              throw "$file parse failure: $($errors.Message -join '; ')"
+            }
+          }
+
+      - name: Verify narrow launcher safety contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fix=Get-Content 'afz-openai-agent\Invoke-H3-ConsoleFlash-Remediation.ps1' -Raw
+          $bootstrap=Get-Content 'afz-openai-agent\Bootstrap-H3-GitHub-DirectReturnV4.ps1' -Raw
+          $sync=Get-Content 'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1' -Raw
+
+          $requiredFix=@(
+            "`$taskName='AFZ H3 GitHub Direct Return Publisher'",
+            "`$launcher='C:\AFZ\GitHubDirect\Run-H3-GitHub-DirectReturn-Hidden.vbs'",
+            "`$leaf -ne 'powershell.exe'",
+            "LogonType) -notmatch 'Interactive'",
+            "Set-ScheduledTask -TaskName `$taskName -Action `$newAction",
+            "Set-ScheduledTask -TaskName `$taskName -Action `$oldAction",
+            "principalPreserved",
+            "WScript.Quit rc"
+          )
+          foreach($needle in $requiredFix){if(-not $fix.Contains($needle)){throw "Remediation safety invariant missing: $needle"}}
+          if($fix -match '(?i)pythonw|nssm|winsw|prefect'){throw 'Launcher-only remediation unexpectedly introduced worker/service migration.'}
+
+          $requiredBootstrap=@(
+            "`$task='AFZ H3 GitHub Direct Return Publisher'",
+            "System32\wscript.exe",
+            "LogonType Interactive",
+            "WScript.Quit rc"
+          )
+          foreach($needle in $requiredBootstrap){if(-not $bootstrap.Contains($needle)){throw "Bootstrap invariant missing: $needle"}}
+          if($bootstrap -match "New-ScheduledTaskAction -Execute 'powershell.exe'.*Publish-H3-GitHub-DirectReturn-V3"){
+            throw 'Future bootstrap still directly registers the publisher under powershell.exe.'
+          }
+
+          if(-not $sync.Contains('Invoke-H3-ConsoleFlash-Remediation.ps1')){throw 'Source sync does not contain the guarded remediation hook.'}
+          if(-not $sync.Contains('h3ConsoleFlashRemediation')){throw 'Source sync does not return remediation state.'}
