@@ -1,0 +1,77 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+  [string]$InstallRoot='C:\AFZ\homelab-control',
+  [string]$RequestPath=''
+)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version 2.0
+
+$taskName='AFZ Remote Ops'
+$stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\remoteops-start'
+$mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$mirrorPath=Join-Path $mirrorRoot 'AFZ-REMOTEOPS-START-LATEST.json'
+New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+
+function Write-Result($obj,[string]$path){
+  $json=$obj | ConvertTo-Json -Depth 12
+  $json | Set-Content -LiteralPath $path -Encoding UTF8
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
+}
+
+if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
+if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
+$req=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$id=([string]$req.id).Trim()
+$requestedTask=([string]$req.taskName).Trim()
+if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id'}
+if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
+
+$statePath=Join-Path $stateRoot ($id+'.json')
+if(Test-Path -LiteralPath $statePath -PathType Leaf){
+  try{
+    $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if([string]$existing.classification -eq 'REMOTEOPS_TASK_RUNNING'){
+      Write-Result $existing $statePath
+      Write-Output ($existing | ConvertTo-Json -Depth 12 -Compress)
+      exit 0
+    }
+  }catch{}
+}
+
+$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if(-not $task){
+  $r=[ordered]@{schema=1;requestId=$id;taskName=$taskName;classification='REMOTEOPS_TASK_MISSING';time=(Get-Date -Format o)}
+  Write-Result $r $statePath
+  Write-Output ($r|ConvertTo-Json -Compress)
+  exit 20
+}
+
+$before=[string]$task.State
+$startAttempted=$false
+if($before -ne 'Running'){
+  Start-ScheduledTask -TaskName $taskName
+  $startAttempted=$true
+  Start-Sleep -Seconds 3
+}
+$afterTask=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+$after=[string]$afterTask.State
+$info=$null
+try{$info=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop}catch{}
+$class=$(if($after -eq 'Running'){'REMOTEOPS_TASK_RUNNING'}else{'REMOTEOPS_TASK_START_NOT_RUNNING'})
+$r=[ordered]@{
+  schema=1
+  requestId=$id
+  taskName=$taskName
+  classification=$class
+  startAttempted=$startAttempted
+  stateBefore=$before
+  stateAfter=$after
+  lastRunTime=$(if($info){$info.LastRunTime}else{$null})
+  lastTaskResult=$(if($info){$info.LastTaskResult}else{$null})
+  nextRunTime=$(if($info){$info.NextRunTime}else{$null})
+  time=(Get-Date -Format o)
+}
+Write-Result $r $statePath
+Write-Output ($r | ConvertTo-Json -Depth 12 -Compress)
+if($class -ne 'REMOTEOPS_TASK_RUNNING'){exit 21}
