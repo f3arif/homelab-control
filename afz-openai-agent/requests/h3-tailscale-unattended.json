@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "h3-tailscale-unattended-g1-20260830",
+  "project": "afz-infrastructure",
+  "action": "h3-enable-tailscale-unattended",
+  "generation": 1,
+  "status": "active",
+  "target": {
+    "hostname": "DESKTOP-H3R6CQN",
+    "lanIp": "192.168.50.185",
+    "tailscaleIp": "100.106.186.118"
+  },
+  "expected": {
+    "unattendedPolicy": "always",
+    "tailscaleIp": "100.106.186.118"
+  }
+}
