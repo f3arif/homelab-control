@@ -3,11 +3,11 @@
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
 $requestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\jellyfin-userstore-audit.json'
-$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Live-UserStore-Audit-V2.ps1'
+$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Live-UserStore-Audit-V3.ps1'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\jellyfin-userstore-audit'
 $stateFile=Join-Path $stateRoot 'latest.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-$diagFile=Join-Path $diagRoot 'JELLYFIN-USERSTORE-AUDIT-V2-LATEST.txt'
+$diagFile=Join-Path $diagRoot 'JELLYFIN-USERSTORE-AUDIT-V3-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
