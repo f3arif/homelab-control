@@ -1,0 +1,85 @@
+name: H3 Generic Worker SYSTEM Recovery Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1'
+      - 'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
+      - '.github/workflows/h3-generic-worker-system-recovery-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse affected scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $paths=@(
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1',
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1',
+            'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
+          )
+          foreach($path in $paths){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){
+              $errors|Format-List|Out-String|Write-Error
+              throw "PowerShell parse failed: $path"
+            }
+          }
+          'POWERSHELL_PARSE=PASS'
+
+      - name: Prove preserved sync core is byte-identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git hash-object afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1)
+          test "$actual" = 'b2086a00fd196a86b86a7a248f5521e73d984e4e'
+          echo 'SYNC_CORE_BLOB_IDENTITY=PASS'
+
+      - name: Verify bounded recovery safety contract
+        shell: powershell
+        run: |
+          $wrapper=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
+          $helper=Get-Content 'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1' -Raw
+
+          foreach($needle in @(
+            'Sync-AFZ-AgentFromGitHub-Core.ps1',
+            'Invoke-H3-GenericWorker-Recovery.ps1',
+            'h3GenericWorkerRecovery'
+          )){if(-not $wrapper.Contains($needle)){throw "Wrapper invariant missing: $needle"}}
+
+          foreach($needle in @(
+            "C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system",
+            "AFZ H3 Generic Worker",
+            "C:\AFZ\H3Worker\AFZ-H3-Worker.ps1",
+            'Start-ScheduledTask -TaskName $taskName',
+            'H3_GENERIC_WORKER_ALREADY_RUNNING',
+            'H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK',
+            'StrictHostKeyChecking=yes',
+            'IdentitiesOnly=yes'
+          )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
+
+          if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM recovery.'}
+          foreach($forbidden in @(
+            'Register-ScheduledTask',
+            'Set-ScheduledTask',
+            'Stop-ScheduledTask',
+            'Unregister-ScheduledTask',
+            'Disable-ScheduledTask',
+            'Stop-Process',
+            'Set-Acl',
+            'icacls.exe',
+            'Remove-Item -LiteralPath $key'
+          )){if($helper.Contains($forbidden)){throw "Forbidden mutation primitive present: $forbidden"}}
+
+          $startMatches=[regex]::Matches($helper,'Start-ScheduledTask').Count
+          if($startMatches -ne 1){throw "Expected exactly one Start-ScheduledTask occurrence; found $startMatches"}
+          'H3_GENERIC_RECOVERY_SAFETY=PASS'
