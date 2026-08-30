@@ -1,0 +1,150 @@
+name: Jellyfin visibility repair
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/jellyfin-visibility-repair-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: jellyfin-visibility-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Trigger exact-SHA source sync on Windows-main
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 15 \
+            -H 'Content-Type: application/json' \
+            -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy
+
+      - name: Confirm exact source and typed Jellyfin endpoint
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
+              if HEALTH="$health" EXPECTED="$AFZ_SHA" python - <<'PY'
+          import json, os
+          expected = os.environ['EXPECTED'].strip().lower()
+          data = json.loads(os.environ['HEALTH'])
+          endpoint = data.get('jellyfinVisibilityRepair') or {}
+          assert (data.get('commit') or '').strip().lower() == expected
+          assert data.get('version') == '1.9.0'
+          assert endpoint.get('typed') is True
+          assert endpoint.get('arbitraryShell') is False
+          assert endpoint.get('actions') == ['audit','repair-exact-screenshot-user']
+          PY
+              then
+                echo "Windows-main exact SHA and typed Jellyfin visibility endpoint confirmed."
+                exit 0
+              fi
+            fi
+            echo "Attempt $attempt: waiting for exact source + Jellyfin visibility endpoint"
+            sleep 5
+          done
+          echo "Windows-main did not reach the required exact source/endpoint state" >&2
+          exit 1
+
+      - name: Audit current live Jellyfin user visibility
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s","action":"audit"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/jellyfin-visibility-repair \
+            > jellyfin-visibility-audit.json
+          python -m json.tool jellyfin-visibility-audit.json
+
+      - name: Require one exact screenshot user match
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          d=json.loads(Path('jellyfin-visibility-audit.json').read_text(encoding='utf-8'))
+          assert d['schema']=='afz.jellyfin-visibility.v1'
+          assert d['action']=='audit'
+          assert d['secretExposed'] is False
+          assert d['matchCount']==1, f"Expected one exact three-view user match, got {d['matchCount']}"
+
+      - name: Restore all-folder access for exact matched user
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s","action":"repair-exact-screenshot-user"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 45 \
+            -H 'Content-Type: application/json' \
+            -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/jellyfin-visibility-repair \
+            > jellyfin-visibility-repair.json
+          python -m json.tool jellyfin-visibility-repair.json
+
+      - name: Validate recovered Jellyfin views
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          d=json.loads(Path('jellyfin-visibility-repair.json').read_text(encoding='utf-8'))
+          required=[
+            'Bollywood   Hindi (TorBox)',
+            'Bollywood - Hindi (All Sources)',
+            'Bollywood - Hindi (Downloaded)',
+            'Real-Debrid Movies',
+            'Stream Now (TorBox)',
+            'TorBox Downloaded Movies',
+          ]
+          assert d['schema']=='afz.jellyfin-visibility.v1'
+          assert d['action']=='repair'
+          assert d['secretExposed'] is False
+          assert d['passwordChanged'] is False
+          assert d['administratorChanged'] is False
+          assert d['matchCount']==1
+          assert d['enableAllFoldersAfter'] is True
+          after=set(d.get('afterViews') or [])
+          missing=[x for x in required if x not in after]
+          assert not missing, f"Required recovered views still missing: {missing}"
+          assert d['ok'] is True
+
+      - name: Upload sanitized Jellyfin visibility proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: jellyfin-visibility-proof
+          path: |
+            jellyfin-visibility-audit.json
+            jellyfin-visibility-repair.json
+          if-no-files-found: error
+          retention-days: 3
