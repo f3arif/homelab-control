@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-R4_CAPTURED_AT = "2026-08-30T13:39:36.6037991-04:00"
+R4_CAPTURED_AT = "2026-08-30T13:51:45.4011987-04:00"
 R4_HOST = "DESKTOP-H3R6CQN"
 
 
@@ -61,6 +61,10 @@ GENERIC_HEARTBEAT_TEXT = "h3.txt"
 
 CURRENTLY_OBSERVED_HEARTBEAT_FIELDS = frozenset(
     {
+        "timestamp",
+        "computer",
+        "pid",
+        "version",
         "state",
         "detail",
         "queueCount",
@@ -78,6 +82,9 @@ CURRENTLY_OBSERVED_HEARTBEAT_FIELDS = frozenset(
         "gpuPercent",
         "vramPercent",
         "ollamaTelemetryAgeSeconds",
+        "allowedActions",
+        "forcedSleep",
+        "ollamaExposureChanged",
     }
 )
 
@@ -107,27 +114,57 @@ DIRECT_WORKER_ROUTING_AUTHORITY = False
 DIRECT_WORKER_PROJECT_EXECUTION = False
 DIRECT_WORKER_RADIOHILAL35B_AUTHORITY = False
 
-# R4 V1 did not capture these current values before its output budget was
-# exhausted. Historical values must not silently promote into current facts.
-CURRENT_GENERIC_WORKER_VERSION: str | None = None
-CURRENT_GENERIC_POLL_SECONDS: int | None = None
-CURRENT_HEAVY_RAM_CEILING_PERCENT: float | None = None
-CURRENT_ALLOWED_ACTIONS: tuple[str, ...] | None = None
-CURRENT_HEAVY_ACTIONS: tuple[str, ...] | None = None
-CURRENT_MUTEX_NAME: str | None = None
+CURRENT_GENERIC_WORKER_VERSION = "1.0.0"
+CURRENT_GENERIC_POLL_SECONDS = 12
+CURRENT_HEAVY_RAM_CEILING_PERCENT = 88.0
+CURRENT_MAX_OUTPUT_CHARS = 120000
+CURRENT_MUTEX_NAME = r"Local\AFZH3GenericWorker"
+CURRENT_HEAVY_ACTIONS = (
+    "h3-dotnet-build",
+    "h3-npm-build",
+    "h3-npm-test",
+    "h3-tsc",
+)
+CURRENT_ALLOWED_ACTIONS = (
+    "h3-status",
+    "h3-powershell-parse",
+    "h3-json-validate",
+    "h3-python-compile",
+    "h3-file-hash",
+    "h3-dotnet-build",
+    "h3-npm-build",
+    "h3-npm-test",
+    "h3-tsc",
+)
+CURRENT_ALLOWED_WORK_ROOT_EXPRESSIONS = (
+    r"C:\Projects",
+    r"C:\OpenWebUI",
+    "$Staging",
+)
+CURRENT_READONLY_ROOT_EXPRESSIONS = (
+    r"C:\Projects",
+    r"C:\OpenWebUI",
+    r"C:\AFZ",
+    "$Staging",
+)
+
+GENERIC_RUNKEY_NAME = "AFZ H3 Generic Worker"
+GENERIC_RUNKEY_COMMAND = (
+    r'"C:\windows\System32\wscript.exe" //B //Nologo '
+    r'"C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Run-Hidden.vbs"'
+)
+TELEMETRY_RUNKEY_NAME = "AFZ H3 Ollama Telemetry"
+TELEMETRY_RUNKEY_COMMAND = (
+    r'"C:\windows\System32\wscript.exe" //B //Nologo '
+    r'"C:\AFZ\H3Worker\Run-AFZ-H3-OllamaTelemetry-Run-Hidden.vbs"'
+)
+
+# R4 V2 proved that the generic and telemetry workers are HKCU Run/wscript
+# launched. Its task-detail formatter failed on a null NextRunTime before a
+# Scheduled Task record could be emitted, so the remaining task contract stays
+# unresolved until the concise V3 task-only read completes.
 CURRENT_TASK_CONTRACT: Mapping[str, object] | None = None
 
 
 def current_contract_complete() -> bool:
-    return all(
-        value is not None
-        for value in (
-            CURRENT_GENERIC_WORKER_VERSION,
-            CURRENT_GENERIC_POLL_SECONDS,
-            CURRENT_HEAVY_RAM_CEILING_PERCENT,
-            CURRENT_ALLOWED_ACTIONS,
-            CURRENT_HEAVY_ACTIONS,
-            CURRENT_MUTEX_NAME,
-            CURRENT_TASK_CONTRACT,
-        )
-    )
+    return CURRENT_TASK_CONTRACT is not None
