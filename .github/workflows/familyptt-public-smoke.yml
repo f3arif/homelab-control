@@ -72,3 +72,81 @@ jobs:
 
           asyncio.run(main())
           PY
+
+      - name: Verify floor acquire and release without audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, time, urllib.error, urllib.request
+
+          BASE = 'https://ptt-api.afzeng.ca'
+          ROOM = 'family-main'
+          IDENTITY = 'github-floor-smoke'
+
+          def request(path, method='GET', body=None):
+              data = None
+              headers = {}
+              if body is not None:
+                  data = json.dumps(body).encode('utf-8')
+                  headers['content-type'] = 'application/json'
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      raw = r.read()
+                      payload = json.loads(raw.decode('utf-8')) if raw else None
+                      return r.status, payload
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  payload = None
+                  try:
+                      payload = json.loads(raw.decode('utf-8')) if raw else None
+                  except Exception:
+                      pass
+                  return e.code, payload
+
+          before_status, before = request(f'/floor/status?room={ROOM}')
+          assert before_status == 200
+          before_floor = (before or {}).get('floor')
+          print('FLOOR_BEFORE_FREE=' + ('true' if before_floor is None else 'false'))
+          if before_floor is not None:
+              print('FLOOR_TEST_SKIPPED_BUSY=true')
+              raise SystemExit(0)
+
+          acquired = False
+          try:
+              acquire_status, _ = request('/floor/acquire', 'POST', {
+                  'room': ROOM,
+                  'identity': IDENTITY,
+                  'priority': 'normal',
+              })
+              print(f'FLOOR_ACQUIRE_STATUS={acquire_status}')
+              assert 200 <= acquire_status < 300
+              acquired = True
+
+              verify_status, verify = request(f'/floor/status?room={ROOM}')
+              assert verify_status == 200
+              floor_present = (verify or {}).get('floor') is not None
+              print('FLOOR_AFTER_ACQUIRE_PRESENT=' + ('true' if floor_present else 'false'))
+              assert floor_present
+          finally:
+              if acquired:
+                  release_status, _ = request('/floor/release', 'POST', {
+                      'room': ROOM,
+                      'identity': IDENTITY,
+                  })
+                  print(f'FLOOR_RELEASE_STATUS={release_status}')
+                  assert 200 <= release_status < 300
+
+          free = False
+          for _ in range(10):
+              final_status, final = request(f'/floor/status?room={ROOM}')
+              assert final_status == 200
+              if (final or {}).get('floor') is None:
+                  free = True
+                  break
+              time.sleep(0.25)
+          print('FLOOR_AFTER_RELEASE_FREE=' + ('true' if free else 'false'))
+          assert free
+          print('FINAL=PASS_FLOOR_ACQUIRE_RELEASE_NO_AUDIO')
+          PY
