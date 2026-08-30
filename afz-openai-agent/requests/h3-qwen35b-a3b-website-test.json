@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "project": "qwen36-35b-a3b-website-direct-test",
+  "job_id": "qwen35b-a3b-website-20260830-r1",
+  "model": "qwen3.6:35b-a3b",
+  "context": 16384,
+  "no_think": true,
+  "max_model_calls": 1,
+  "project_root": "C:\\Projects\\Qwen36-35B-A3B-Website-Test-20260830-r1",
+  "required_routes": ["/", "/services", "/projects", "/about", "/contact"],
+  "comparison_basis": "same-afz-website-prompt-as-qwen-ridge16k-test"
+}
