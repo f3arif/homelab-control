@@ -6,7 +6,7 @@ $expectedData='C:\Users\Faiz\AppData\Local\Jellyfin'
 $db=Join-Path $expectedData 'data\jellyfin.db'
 $taskName='Jellyfin Server'
 $backupBase='C:\AFZ\MediaCatalog\Backups'
-Write-Output 'AFZ_JELLYFIN_CONTROLLED_RELOAD_V2'
+Write-Output 'AFZ_JELLYFIN_CONTROLLED_RELOAD_V3'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'USER_LIBRARY_WRITE=false'
 Write-Output 'PREFERENCE_WRITE=false'
@@ -24,7 +24,8 @@ $acts=@($task.Actions|ForEach-Object{(([string]$_.Execute)+' '+([string]$_.Argum
 $joined=($acts -join ' | ')
 Write-Output ('TASK_ACTIONS='+$joined)
 $expectedArg='--datadir "'+$expectedData+'"'
-if($joined -notmatch [regex]::Escape($expectedArg)){Write-Output 'RELOAD_STATUS=SAFE_STOP|reason=TASK_DATADIR_MISMATCH';exit 0}
+$expectedArg=$expectedArg.Replace('\"','"')
+if($joined -notmatch [regex]::Escape($expectedArg)){Write-Output ('EXPECTED_TASK_ARG='+$expectedArg);Write-Output 'RELOAD_STATUS=SAFE_STOP|reason=TASK_DATADIR_MISMATCH';exit 0}
 if(-not(Test-Path -LiteralPath $db -PathType Leaf)){Write-Output 'RELOAD_STATUS=SAFE_STOP|reason=DB_NOT_FOUND';exit 0}
 $py=(Get-Command python.exe,python,py.exe,py -ErrorAction SilentlyContinue|Select-Object -First 1)
 if(-not $py){Write-Output 'RELOAD_STATUS=SAFE_STOP|reason=NO_PYTHON_FOR_BACKUP';exit 0}
@@ -66,7 +67,6 @@ $deadline=(Get-Date).AddSeconds(20)
 do{Start-Sleep -Milliseconds 500;$still=Get-Process -Id $oldPid -ErrorAction SilentlyContinue}while($still -and (Get-Date)-lt $deadline)
 if($still){Write-Output 'RELOAD_STATUS=SAFE_STOP|reason=OLD_PID_DID_NOT_STOP';exit 0}
 Write-Output ('OLD_PID_STOPPED='+$oldPid)
-# Give any existing supervisor a short chance to recover Jellyfin; do not create a duplicate process.
 Start-Sleep -Seconds 2
 $auto=@(Get-CimInstance Win32_Process -Filter "Name='jellyfin.exe'" -ErrorAction SilentlyContinue)
 if($auto.Count -gt 1){Write-Output 'RELOAD_STATUS=FAILED|reason=MULTIPLE_JELLYFIN_AFTER_STOP';exit 1}
