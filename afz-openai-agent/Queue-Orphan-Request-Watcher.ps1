@@ -14,9 +14,15 @@ $logFile=Join-Path $stateRoot 'request-watcher.log'
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-AFZ-Queue-Orphan-Remediation.ps1'
 $requestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\queue-orphan-remediation.json'
+$wslAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Windows-Wsl-Memory-Audit.ps1'
+$wslAuditRequestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\windows-wsl-memory-audit.json'
+$wslAuditStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\windows-wsl-memory-audit'
+$wslAuditStateFile=Join-Path $wslAuditStateRoot 'request-watcher.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-QUEUE-ORPHAN-REMEDIATION-LATEST.txt'
+$wslAuditDiagFile=Join-Path $diagRoot 'AFZ-WINDOWS-WSL-MEMORY-AUDIT-LATEST.json'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $wslAuditStateRoot | Out-Null
 
 function Log([string]$Message){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8}
 function Read-JsonFile([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $Path -Raw -ErrorAction Stop|ConvertFrom-Json}catch{return $null}}
@@ -77,11 +83,98 @@ function Invoke-Runner([string]$Action,[string]$TaskId){
 }
 function Is-TerminalWatcherStatus([string]$Status){return $Status -in @('completed','no-op','refused','failed')}
 
+# Reuse this already-running, exact-source local watcher as the polling host for one
+# additional read-only diagnostic. This does not add another scheduler or execution
+# plane. The WSL request can only invoke the dedicated audited helper below.
+function Get-WslAuditRequest{return Read-JsonFile $wslAuditRequestFile}
+function Valid-WslAuditRequest($r){
+  if(-not $r){return $false};try{if([int]$r.schema -ne 1){return $false}}catch{return $false}
+  if([string]$r.project -ne 'ops'){return $false}
+  if([string]$r.action -ne 'audit-wsl-memory-readonly'){return $false}
+  if(([string]$r.request_id) -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,100}$'){return $false}
+  if($r.PSObject.Properties.Name -notcontains 'enabled' -or [bool]$r.enabled -ne $true){return $false}
+  return $true
+}
+function Save-WslAuditState([string]$RequestId,[string]$Status,[string]$Message,$Audit=$null){
+  $o=[ordered]@{
+    ok=($Status -eq 'completed')
+    requestId=$RequestId
+    status=$Status
+    message=$Message
+    sourceSha=(Current-Sha)
+    transport='atomic-local-readonly-request-from-exact-github-source'
+    readOnly=$true
+    audit=$Audit
+    updatedAt=(Get-Date -Format o)
+  }
+  $o|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $wslAuditStateFile -Encoding UTF8
+  return $o
+}
+function Save-WslAuditDiagnostic($State){
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    $diag=[ordered]@{
+      schema=1
+      purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
+      controlPlane='github'
+      source='windows-main'
+      requestId=[string]$State.requestId
+      status=[string]$State.status
+      message=[string]$State.message
+      sourceSha=[string]$State.sourceSha
+      transport=[string]$State.transport
+      readOnly=$true
+      audit=$State.audit
+      updatedAt=[string]$State.updatedAt
+    }
+    $json=$diag|ConvertTo-Json -Depth 24
+    [IO.File]::WriteAllText($wslAuditDiagFile,$json,(New-Object Text.UTF8Encoding($false)))
+  }catch{}
+}
+function Invoke-WslAuditRunner {
+  if(-not(Test-Path -LiteralPath $wslAuditRunner -PathType Leaf)){throw "WSL memory audit helper missing: $wslAuditRunner"}
+  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $wslAuditRunner 2>&1|Out-String).Trim();$code=$LASTEXITCODE
+  if($code -ne 0){throw "WSL memory audit helper failed exit=$code output=$raw"}
+  if([string]::IsNullOrWhiteSpace($raw)){throw 'WSL memory audit helper returned empty output'}
+  try{return $raw|ConvertFrom-Json}catch{throw 'WSL memory audit helper returned invalid JSON'}
+}
+function Process-WslAuditRequest {
+  $r=$null
+  try{
+    $r=Get-WslAuditRequest
+    if(-not(Valid-WslAuditRequest $r)){return}
+    $requestId=[string]$r.request_id
+    $prior=Read-JsonFile $wslAuditStateFile
+    if($prior -and [string]$prior.requestId -eq $requestId -and [string]$prior.status -in @('completed','refused','failed')){return}
+    $current=Current-Sha
+    if($current -notmatch '^[0-9a-f]{40}$'){
+      $s=Save-WslAuditState $requestId 'refused' 'Deployed source SHA is unavailable; refusing WSL audit.'
+      Save-WslAuditDiagnostic $s;Log "WSL_AUDIT_REFUSED request=$requestId reason=no-source-sha";return
+    }
+    $running=Save-WslAuditState $requestId 'running' 'Exact-source local WSL memory audit started.'
+    Save-WslAuditDiagnostic $running;Log "WSL_AUDIT_START request=$requestId sha=$current"
+    $audit=Invoke-WslAuditRunner
+    if(-not [bool]$audit.ok -or -not [bool]$audit.readOnly -or [string]$audit.schema -ne 'afz.windows-wsl-memory-audit.v1' -or [string]$audit.computer -ne 'DESKTOP-10SKF0M'){
+      throw 'WSL memory audit returned an invalid read-only contract.'
+    }
+    $s=Save-WslAuditState $requestId 'completed' 'Read-only Windows WSL memory audit completed.' $audit
+    Save-WslAuditDiagnostic $s;Log "WSL_AUDIT_COMPLETE request=$requestId load=$($audit.physicalMemory.loadPct) vmmemMB=$($audit.wsl.vmmemWslMB)"
+  }catch{
+    $msg=$_.Exception.Message
+    try{
+      $rid=$(if($r){[string]$r.request_id}else{''})
+      if($rid){$s=Save-WslAuditState $rid 'failed' $msg;Save-WslAuditDiagnostic $s}
+    }catch{}
+    Log "WSL_AUDIT_ERROR $msg"
+  }
+}
+
 $mutex=New-Object Threading.Mutex($false,'Global\AFZQueueOrphanRequestWatcher');$locked=$false
 try{
   $locked=$mutex.WaitOne(0);if(-not $locked){exit 0}
-  Log "START interval=${IntervalSeconds}s request=local-exact-source typed=true arbitrary_shell=false"
+  Log "START interval=${IntervalSeconds}s request=local-exact-source typed=true arbitrary_shell=false wsl_audit=typed-readonly"
   while($true){
+    Process-WslAuditRequest
     $request=$null
     try{
       $request=Get-LocalRequest
