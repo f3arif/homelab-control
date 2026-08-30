@@ -3,7 +3,7 @@
   "project": "familyptt",
   "action": "prepare-phase1-acceptance-apk",
   "job_id": "familyptt-phase1-apk-prepare-r001",
-  "status": "staged-not-active",
+  "status": "active",
   "repository": "f3arif/FamilyPTT",
   "workflow_run_id": 33325967023,
   "artifact_name": "FamilyPTT-standalone-release-apk-arm64",
