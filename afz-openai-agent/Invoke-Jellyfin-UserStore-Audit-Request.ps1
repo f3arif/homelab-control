@@ -3,11 +3,11 @@
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
 $requestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\jellyfin-userstore-audit.json'
-$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Live-UserStore-Audit-V3.ps1'
+$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Runtime-Root-Audit-V4.ps1'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\jellyfin-userstore-audit'
 $stateFile=Join-Path $stateRoot 'latest.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-$diagFile=Join-Path $diagRoot 'JELLYFIN-USERSTORE-AUDIT-V3-LATEST.txt'
+$diagFile=Join-Path $diagRoot 'JELLYFIN-RUNTIME-ROOT-AUDIT-V4-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
@@ -20,7 +20,7 @@ $job=[string]$req.job_id
 if($job -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid Jellyfin userstore audit job_id'}
 $prior=Read-Json $stateFile
 if($prior -and [string]$prior.job_id -eq $job -and [string]$prior.status -in @('completed','failed')){exit 0}
-if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){throw "Jellyfin userstore audit helper missing: $helper"}
+if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){throw "Jellyfin runtime/root audit helper missing: $helper"}
 $started=Get-Date
 try{
   $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper 2>&1 | ForEach-Object {[string]$_})
@@ -29,19 +29,10 @@ try{
   $out=[ordered]@{schema=1;controlPlane='github';source='windows-main-local-github-request';job_id=$job;status=$status;readOnly=$true;secretExposed=$false;helperExit=$code;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)}
   Write-Json $stateFile $out
   if(Test-Path -LiteralPath $diagRoot -PathType Container){
-    $proof=@(
-      'PURPOSE=EMERGENCY_DIAGNOSTIC_ACK_ONLY',
-      'CONTROL_PLANE=github',
-      ('JOB_ID='+$job),
-      ('STATUS='+$status),
-      'READ_ONLY=true',
-      'SECRET_EXPOSED=false',
-      ('HELPER_EXIT='+$code)
-    )+$lines+@('MIRRORED_AT='+(Get-Date -Format o))
+    $proof=@('PURPOSE=EMERGENCY_DIAGNOSTIC_ACK_ONLY','CONTROL_PLANE=github',('JOB_ID='+$job),('STATUS='+$status),'READ_ONLY=true','SECRET_EXPOSED=false',('HELPER_EXIT='+$code))+$lines+@('MIRRORED_AT='+(Get-Date -Format o))
     [IO.File]::WriteAllLines($diagFile,$proof,$utf8)
   }
-  if($code -ne 0){exit $code}
-  exit 0
+  if($code -ne 0){exit $code};exit 0
 }catch{
   $out=[ordered]@{schema=1;controlPlane='github';source='windows-main-local-github-request';job_id=$job;status='failed';readOnly=$true;secretExposed=$false;error=$_.Exception.Message;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)}
   Write-Json $stateFile $out
