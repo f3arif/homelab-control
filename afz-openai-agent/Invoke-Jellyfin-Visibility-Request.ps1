@@ -2,6 +2,12 @@
 [CmdletBinding()]
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
+$userStoreRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-UserStore-Audit-Request.ps1'
+if(Test-Path -LiteralPath $userStoreRunner -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $userStoreRunner -InstallRoot $InstallRoot *> $null
+  }catch{}
+}
 $requestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\jellyfin-visibility-repair.json'
 $helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Visibility-Repair.ps1'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\jellyfin-visibility-request'
