@@ -54,8 +54,7 @@ function Read-Json([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType
 function Task-Audit {
   $rows=@()
   foreach($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {$_.TaskName -like 'AFZ*' -or $_.TaskName -match 'H3'})){
-    $actions=@($t.Actions)
-    foreach($a in $actions){
+    foreach($a in @($t.Actions)){
       $exe=[string]$a.Execute
       $leaf=[IO.Path]::GetFileName($exe).ToLowerInvariant()
       $interactive=([string]$t.Principal.LogonType -match 'Interactive')
@@ -120,18 +119,22 @@ $publisherStatePath='C:\ProgramData\AFZ\H3GitHubDirect\return-publisher-v3.json'
 $publisherBefore=Read-Json $publisherStatePath
 $oldAction=New-ScheduledTaskAction -Execute $execute -Argument $args
 
-$vbs=@'
-Option Explicit
-Dim shell, ps, cmd, rc
-Set shell = CreateObject("WScript.Shell")
-ps = shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe")
-cmd = Chr(34) & ps & Chr(34) & " -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " & Chr(34) & "C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1" & Chr(34)
-rc = shell.Run(cmd, 0, True)
-WScript.Quit rc
-'@
+# Do not nest a here-string inside the SSH payload here-string. Keep the
+# remote payload parseable by Windows PowerShell 5.1.
+$vbs=@(
+  'Option Explicit',
+  'Dim shell, ps, cmd, rc',
+  'Set shell = CreateObject("WScript.Shell")',
+  'ps = shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe")',
+  'cmd = Chr(34) & ps & Chr(34) & " -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " & Chr(34) & "C:\AFZ\GitHubDirect\Publish-H3-GitHub-DirectReturn-V3.ps1" & Chr(34)',
+  'rc = shell.Run(cmd, 0, True)',
+  'WScript.Quit rc'
+) -join [Environment]::NewLine
 [IO.File]::WriteAllText($launcher,$vbs,$utf8)
 
-$newAction=New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument "//B //Nologo `"$launcher`""
+$wscript=Join-Path $env:SystemRoot 'System32\wscript.exe'
+if(-not(Test-Path -LiteralPath $wscript -PathType Leaf)){throw "wscript.exe missing: $wscript"}
+$newAction=New-ScheduledTaskAction -Execute $wscript -Argument '//B //Nologo "C:\AFZ\GitHubDirect\Run-H3-GitHub-DirectReturn-Hidden.vbs"'
 try{Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue}catch{}
 Set-ScheduledTask -TaskName $taskName -Action $newAction | Out-Null
 
