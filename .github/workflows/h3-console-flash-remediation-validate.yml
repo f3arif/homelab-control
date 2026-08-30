@@ -36,7 +36,7 @@ jobs:
             if($errors.Count -gt 0){throw "$file parse failure: $($errors.Message -join '; ')"}
           }
 
-      - name: Verify recurring no-window safety contract
+      - name: Verify H3 no-window safety contract
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -49,28 +49,50 @@ jobs:
             'AFZ H3 GitHub Direct Return Publisher',
             'AFZ H3 Ollama Cloud Telemetry Watchdog',
             'AFZ Ops 35B Watchdog',
+            'AFZ H3 Direct Worker',
+            'AFZ H3 Generic Worker',
+            'AFZ Ops 35B Planner',
+            'AFZ RadioHilal35B Worker',
+            'AFZ H3 Ollama Telemetry',
+            'AFZ H3 Qwen Ridge16K Runner',
             'Run-H3-GitHub-DirectReturn-Hidden.vbs',
             'Run-Ensure-H3-OllamaCloudTelemetry-Hidden.vbs',
             'Run-AFZ-Ops35B-H3-Watchdog-Hidden.vbs',
+            'Run-AFZ-H3-Worker-Task-Hidden.vbs',
+            'Run-AFZ-H3-Worker-Run-Hidden.vbs',
+            'Run-AFZ-H3-OllamaTelemetry-Run-Hidden.vbs',
+            'Ensure-NoWindowFutureTask',
+            'Ensure-NoWindowRun',
+            'FUTURE-LAUNCH-ONLY',
             'already-hidden-live-verified',
             'periodicConsoleRiskCount',
+            'logonTaskConsoleRiskCount',
+            'hkcuRunConsoleRiskCount',
+            'manualInteractiveExemptions',
             'H3-CONSOLE-FLASH-AUDIT-LATEST.json',
-            'Set-ScheduledTask -TaskName',
+            '[long]$i.LastTaskResult',
+            'schema=4',
             'WScript.Quit rc'
           )){if(-not $fix.Contains($needle)){throw "Remediation invariant missing: $needle"}}
+
           if($fix.Contains('cached-completed')){throw 'Remediation still trusts a stale cached success marker.'}
           if($fix -match '(?i)pythonw|nssm|winsw|prefect'){throw 'Launcher remediation unexpectedly introduced a worker/service migration.'}
           if($fix -match '(?i)Disable-ScheduledTask|Unregister-ScheduledTask'){throw 'Remediation must not disable or unregister H3 tasks.'}
 
+          $m=[regex]::Match($fix,'(?s)function Ensure-NoWindowFutureTask\(\$Spec\)\{(.*?)function Ensure-NoWindowRun')
+          if(-not $m.Success){throw 'Could not isolate future-launch-only worker function.'}
+          $futureBody=$m.Groups[1].Value
+          if($futureBody -match '(?i)Start-ScheduledTask|Stop-ScheduledTask|Stop-Process|taskkill|\.Kill\('){
+            throw 'Future-launch-only worker remediation contains a live process/task interruption operation.'
+          }
+
           if(-not $v3.Contains('Bootstrap-H3-GitHub-DirectReturnV4.ps1')){throw 'V3 compatibility path does not delegate to V4.'}
           if($v3 -match '(?i)Register-ScheduledTask|New-ScheduledTaskAction'){throw 'V3 can still directly recreate a Scheduled Task.'}
-
           foreach($needle in @("`$task='AFZ H3 GitHub Direct Return Publisher'",'System32\wscript.exe','LogonType Interactive','WScript.Quit rc')){
-            if(-not $v4.Contains($needle)){throw "V4 invariant missing: $needle"}
+            if(-not $v4.Contains($needle)){throw "V4 publisher invariant missing: $needle"}
           }
           if($v4 -match "New-ScheduledTaskAction -Execute 'powershell.exe'.*Publish-H3-GitHub-DirectReturn-V3"){
             throw 'V4 still directly registers the publisher under powershell.exe.'
           }
-
           if(-not $sync.Contains('Invoke-H3-ConsoleFlash-Remediation.ps1')){throw 'Source sync does not contain the remediation hook.'}
           if(-not $sync.Contains('h3ConsoleFlashRemediation')){throw 'Source sync does not return remediation state.'}
