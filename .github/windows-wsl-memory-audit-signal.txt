@@ -1,0 +1,3 @@
+request=windows-wsl-memory-audit
+requested_at=2026-08-29T23:09:00-04:00
+mode=read-only
