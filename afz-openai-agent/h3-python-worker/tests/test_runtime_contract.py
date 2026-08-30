@@ -23,15 +23,32 @@ class RuntimeContractR4Tests(unittest.TestCase):
             "BA417A98FB84972317ED0668FDCFFEF144B0944071841A73A18EB2BDC3109F61",
         )
 
-    def test_current_generic_unknowns_fail_closed(self):
+    def test_current_generic_constants_are_live_v2_evidence(self):
+        self.assertEqual(rc.CURRENT_GENERIC_WORKER_VERSION, "1.0.0")
+        self.assertEqual(rc.CURRENT_GENERIC_POLL_SECONDS, 12)
+        self.assertEqual(rc.CURRENT_HEAVY_RAM_CEILING_PERCENT, 88.0)
+        self.assertEqual(rc.CURRENT_MAX_OUTPUT_CHARS, 120000)
+        self.assertEqual(rc.CURRENT_MUTEX_NAME, r"Local\AFZH3GenericWorker")
+        self.assertEqual(
+            rc.CURRENT_HEAVY_ACTIONS,
+            ("h3-dotnet-build", "h3-npm-build", "h3-npm-test", "h3-tsc"),
+        )
+        self.assertEqual(len(rc.CURRENT_ALLOWED_ACTIONS), 9)
+        self.assertIn("h3-status", rc.CURRENT_ALLOWED_ACTIONS)
+        self.assertIn("h3-python-compile", rc.CURRENT_ALLOWED_ACTIONS)
+        self.assertIn("h3-tsc", rc.CURRENT_ALLOWED_ACTIONS)
+
+    def test_only_task_contract_remains_unresolved_after_v2(self):
         self.assertFalse(rc.current_contract_complete())
-        self.assertIsNone(rc.CURRENT_GENERIC_WORKER_VERSION)
-        self.assertIsNone(rc.CURRENT_GENERIC_POLL_SECONDS)
-        self.assertIsNone(rc.CURRENT_HEAVY_RAM_CEILING_PERCENT)
-        self.assertIsNone(rc.CURRENT_ALLOWED_ACTIONS)
-        self.assertIsNone(rc.CURRENT_HEAVY_ACTIONS)
-        self.assertIsNone(rc.CURRENT_MUTEX_NAME)
         self.assertIsNone(rc.CURRENT_TASK_CONTRACT)
+
+    def test_generic_and_telemetry_launch_via_hidden_wscript_runkeys(self):
+        self.assertEqual(rc.GENERIC_RUNKEY_NAME, "AFZ H3 Generic Worker")
+        self.assertIn("wscript.exe", rc.GENERIC_RUNKEY_COMMAND.lower())
+        self.assertIn("Run-AFZ-H3-Worker-Run-Hidden.vbs", rc.GENERIC_RUNKEY_COMMAND)
+        self.assertEqual(rc.TELEMETRY_RUNKEY_NAME, "AFZ H3 Ollama Telemetry")
+        self.assertIn("wscript.exe", rc.TELEMETRY_RUNKEY_COMMAND.lower())
+        self.assertIn("Run-AFZ-H3-OllamaTelemetry-Run-Hidden.vbs", rc.TELEMETRY_RUNKEY_COMMAND)
 
     def test_observed_queue_semantics_are_pinned(self):
         self.assertEqual(rc.GENERIC_QUEUE_ORDER, ("LastWriteTimeUtc", "Name"))
@@ -46,18 +63,16 @@ class RuntimeContractR4Tests(unittest.TestCase):
         self.assertFalse(rc.DIRECT_WORKER_PROJECT_EXECUTION)
         self.assertFalse(rc.DIRECT_WORKER_RADIOHILAL35B_AUTHORITY)
 
-    def test_current_heartbeat_observation_includes_telemetry(self):
-        for field in (
-            "state",
-            "queueCount",
-            "computeState",
-            "ollamaReachable",
-            "ollamaPrimaryModel",
-            "ollamaContextLength",
-            "gpuPercent",
-            "vramPercent",
-        ):
-            self.assertIn(field, rc.CURRENTLY_OBSERVED_HEARTBEAT_FIELDS)
+    def test_current_heartbeat_schema_is_exact_v2_observation(self):
+        expected = {
+            "timestamp", "computer", "pid", "version", "state", "detail", "queueCount",
+            "ramPercent", "radioHilal35BState", "computeState", "ollamaReachable",
+            "ollamaVersion", "ollamaState", "ollamaModelCount", "ollamaPrimaryModel",
+            "ollamaVramBytes", "ollamaContextLength", "ollamaActiveTask", "gpuPercent",
+            "vramPercent", "ollamaTelemetryAgeSeconds", "allowedActions", "forcedSleep",
+            "ollamaExposureChanged",
+        }
+        self.assertEqual(rc.CURRENTLY_OBSERVED_HEARTBEAT_FIELDS, frozenset(expected))
 
 
 if __name__ == "__main__":
