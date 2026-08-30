@@ -38,6 +38,8 @@ jobs:
           p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1').read_text()
           required=[
             'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt',
+            r'AFZ Shared\AFZ Workers\Results',
+            '$runtimeProofSharedFile',
             'function Save-RuntimeProof',
             "purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'",
             "controlPlane='github'",
@@ -47,6 +49,9 @@ jobs:
             'scriptSha256=$scriptHash',
             'Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256',
             'taskState=',
+            "familyPttPhase1Binding='typed-active-only'",
+            'familyPttPhase1RequestStatus=$phase1RequestStatus',
+            '[IO.File]::WriteAllText($runtimeProofSharedFile',
             'Save-RuntimeProof'
           ]
           for marker in required:
@@ -55,7 +60,9 @@ jobs:
           loop=p.index('  while($true){')
           assert call < loop, 'runtime proof must be written once at watcher startup'
           body=p[p.index('function Save-RuntimeProof'):p.index('function Invoke-UpdaterPass')]
-          for forbidden in ['Start-ScheduledTask','Stop-ScheduledTask','Start-Process','Invoke-WebRequest','Invoke-RestMethod','Remove-Item']:
+          for forbidden in ['Start-ScheduledTask','Stop-ScheduledTask','Start-Process','Invoke-WebRequest','Invoke-RestMethod','Remove-Item','New-Item']:
             assert forbidden not in body, forbidden
           assert 'Set-Content -LiteralPath $runtimeProofFile' in body
-          print('STARTUP-ONLY READ-ONLY RUNTIME PROOF PASS')
+          assert '[IO.File]::WriteAllText($runtimeProofSharedFile' in body
+          assert 'New-Item' not in body
+          print('STARTUP-ONLY READ-ONLY SYNCED RUNTIME PROOF PASS')
