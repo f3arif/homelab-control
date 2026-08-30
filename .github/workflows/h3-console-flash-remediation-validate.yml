@@ -36,7 +36,7 @@ jobs:
             if($errors.Count -gt 0){throw "$file parse failure: $($errors.Message -join '; ')"}
           }
 
-      - name: Verify live recheck and no-window safety contract
+      - name: Verify recurring no-window safety contract
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,16 +46,21 @@ jobs:
           $sync=Get-Content 'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1' -Raw
 
           foreach($needle in @(
-            "`$taskName='AFZ H3 GitHub Direct Return Publisher'",
-            'already-remediated-live-verified',
-            'remainingRiskTasks',
+            'AFZ H3 GitHub Direct Return Publisher',
+            'AFZ H3 Ollama Cloud Telemetry Watchdog',
+            'AFZ Ops 35B Watchdog',
+            'Run-H3-GitHub-DirectReturn-Hidden.vbs',
+            'Run-Ensure-H3-OllamaCloudTelemetry-Hidden.vbs',
+            'Run-AFZ-Ops35B-H3-Watchdog-Hidden.vbs',
+            'already-hidden-live-verified',
+            'periodicConsoleRiskCount',
             'H3-CONSOLE-FLASH-AUDIT-LATEST.json',
-            "Set-ScheduledTask -TaskName `$taskName -Action `$newAction",
-            "Set-ScheduledTask -TaskName `$taskName -Action `$oldAction",
+            'Set-ScheduledTask -TaskName',
             'WScript.Quit rc'
           )){if(-not $fix.Contains($needle)){throw "Remediation invariant missing: $needle"}}
           if($fix.Contains('cached-completed')){throw 'Remediation still trusts a stale cached success marker.'}
           if($fix -match '(?i)pythonw|nssm|winsw|prefect'){throw 'Launcher remediation unexpectedly introduced a worker/service migration.'}
+          if($fix -match '(?i)Disable-ScheduledTask|Unregister-ScheduledTask'){throw 'Remediation must not disable or unregister H3 tasks.'}
 
           if(-not $v3.Contains('Bootstrap-H3-GitHub-DirectReturnV4.ps1')){throw 'V3 compatibility path does not delegate to V4.'}
           if($v3 -match '(?i)Register-ScheduledTask|New-ScheduledTaskAction'){throw 'V3 can still directly recreate a Scheduled Task.'}
