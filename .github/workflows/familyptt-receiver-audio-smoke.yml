@@ -20,10 +20,12 @@ jobs:
           set -euo pipefail
           python3 -m pip install --quiet livekit
           python3 - <<'PY'
-          import asyncio, json, urllib.request
+          import array, asyncio, json, sys, time, urllib.request
           from livekit import rtc
 
           TOKEN_URL = 'https://ptt-api.afzeng.ca/token?identity=github-audio-receiver-smoke&name=GitHubAudioReceiverSmoke&room=family-main'
+          MIN_PEAK = 100
+          MIN_FRAMES = 5
 
           async def main():
               with urllib.request.urlopen(TOKEN_URL, timeout=15) as r:
@@ -33,25 +35,42 @@ jobs:
               assert token
 
               room = rtc.Room()
-              audio_received = asyncio.Event()
+              meaningful_audio = asyncio.Event()
               frame_count = 0
               sample_count = 0
+              peak_sample = 0
+              abs_sum = 0
+              first_meaningful_delay = None
+              receiver_ready_at = None
               stream_tasks = []
 
               async def consume_audio(track, participant_identity):
-                  nonlocal frame_count, sample_count
+                  nonlocal frame_count, sample_count, peak_sample, abs_sum, first_meaningful_delay
                   stream = rtc.AudioStream(track)
                   try:
                       async for event in stream:
                           frame = event.frame
                           frame_count += 1
                           sample_count += int(frame.samples_per_channel) * int(frame.num_channels)
+                          vals = array.array('h')
+                          vals.frombytes(bytes(frame.data))
+                          if sys.byteorder != 'little':
+                              vals.byteswap()
+                          frame_peak = max((abs(v) for v in vals), default=0)
+                          frame_abs_sum = sum(abs(v) for v in vals)
+                          peak_sample = max(peak_sample, frame_peak)
+                          abs_sum += frame_abs_sum
                           if frame_count == 1:
                               print(f'FIRST_AUDIO_FRAME_FROM={participant_identity}', flush=True)
                               print(f'AUDIO_SAMPLE_RATE={frame.sample_rate}', flush=True)
                               print(f'AUDIO_CHANNELS={frame.num_channels}', flush=True)
-                          if frame_count >= 5 and sample_count > 0:
-                              audio_received.set()
+                              print(f'FIRST_FRAME_PEAK={frame_peak}', flush=True)
+                          if frame_peak >= MIN_PEAK and first_meaningful_delay is None:
+                              first_meaningful_delay = time.monotonic() - receiver_ready_at
+                              print(f'FIRST_MEANINGFUL_PEAK={frame_peak}', flush=True)
+                              print(f'MEANINGFUL_AUDIO_DELAY_SEC={first_meaningful_delay:.3f}', flush=True)
+                          if frame_count >= MIN_FRAMES and peak_sample >= MIN_PEAK and abs_sum > 0:
+                              meaningful_audio.set()
                               break
                   finally:
                       await stream.aclose()
@@ -71,19 +90,25 @@ jobs:
               for identity in android_ids:
                   print(f'ANDROID_REMOTE_ID={identity}', flush=True)
               assert android_ids, 'Android phone participant is not present before receiver test'
+              receiver_ready_at = time.monotonic()
+              print(f'PCM_PEAK_THRESHOLD={MIN_PEAK}', flush=True)
               print('RECEIVER_READY_FOR_PTT=true', flush=True)
 
-              await asyncio.wait_for(audio_received.wait(), timeout=90)
+              await asyncio.wait_for(meaningful_audio.wait(), timeout=90)
               print(f'AUDIO_FRAME_COUNT={frame_count}', flush=True)
               print(f'AUDIO_SAMPLE_COUNT={sample_count}', flush=True)
-              assert frame_count >= 5 and sample_count > 0
-              print('REMOTE_AUDIO_RECEIVED=true', flush=True)
+              print(f'AUDIO_PEAK_SAMPLE={peak_sample}', flush=True)
+              print(f'AUDIO_ABS_SUM={abs_sum}', flush=True)
+              assert frame_count >= MIN_FRAMES
+              assert peak_sample >= MIN_PEAK
+              assert abs_sum > 0
+              print('MEANINGFUL_AUDIO_RECEIVED=true', flush=True)
 
               for task in stream_tasks:
                   if not task.done():
                       task.cancel()
               await room.disconnect()
-              print('FINAL=PASS_REMOTE_AUDIO_RECEIVE', flush=True)
+              print('FINAL=PASS_REMOTE_AUDIO_ENERGY_RECEIVE', flush=True)
 
           asyncio.run(main())
           PY
