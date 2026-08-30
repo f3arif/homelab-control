@@ -20,6 +20,7 @@ $ExpectedDeviceB='192.168.50.69:38209'
 $ExpectedAction='prepare-phase1-acceptance-apk'
 $StateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\familyptt-phase1-apk-prepare'
 $StateFile=Join-Path $StateRoot 'latest.json'
+$NativeHelper=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Native-Process.ps1'
 if([string]::IsNullOrWhiteSpace($RequestPath)){
   $RequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
 }
@@ -56,24 +57,11 @@ function Resolve-Command([string[]]$Names){
   return $null
 }
 function Invoke-Native([string]$File,[string[]]$Arguments,[int]$TimeoutSeconds=120){
-  $psi=New-Object Diagnostics.ProcessStartInfo
-  $psi.FileName=$File
-  $psi.UseShellExecute=$false
-  $psi.CreateNoWindow=$true
-  $psi.RedirectStandardOutput=$true
-  $psi.RedirectStandardError=$true
-  foreach($a in $Arguments){[void]$psi.ArgumentList.Add($a)}
-  $p=New-Object Diagnostics.Process
-  $p.StartInfo=$psi
-  if(-not $p.Start()){throw "Failed to start native process: $File"}
-  $stdoutTask=$p.StandardOutput.ReadToEndAsync();$stderrTask=$p.StandardError.ReadToEndAsync()
-  if(-not $p.WaitForExit($TimeoutSeconds*1000)){
-    try{$p.Kill()}catch{}
-    throw "Native process timed out after ${TimeoutSeconds}s: $File"
-  }
-  $stdout=$stdoutTask.Result;$stderr=$stderrTask.Result;$code=$p.ExitCode
-  $p.Dispose()
-  return [ordered]@{exit=$code;stdout=$stdout;stderr=$stderr}
+  if(-not(Test-Path -LiteralPath $NativeHelper -PathType Leaf)){throw "AFZ bounded native helper missing: $NativeHelper"}
+  if(-not(Get-Command Invoke-AFZBoundedNative -ErrorAction SilentlyContinue)){. $NativeHelper}
+  $r=Invoke-AFZBoundedNative -FilePath $File -ArgumentList $Arguments -TimeoutSeconds $TimeoutSeconds
+  if([bool]$r.TimedOut){throw "Native process timed out after ${TimeoutSeconds}s: $File"}
+  return [ordered]@{exit=[int]$r.ExitCode;stdout=[string]$r.StdOut;stderr=[string]$r.StdErr}
 }
 function Get-AuthorizedDevices([string]$Adb){
   $r=Invoke-Native $Adb @('devices') 30
