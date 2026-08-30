@@ -2,6 +2,10 @@ name: Windows WSL memory audit
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windows-wsl-memory-audit-signal.txt'
 
 permissions:
   contents: read
