@@ -69,9 +69,22 @@ function Find-Adb{
   return $null
 }
 function Invoke-Adb([string]$adb,[string[]]$a,[switch]$AllowFailure){
-  $out=@(& $adb @a 2>&1);$code=$LASTEXITCODE
+  # adb writes normal progress (notably `adb pull`) to stderr. Under Windows
+  # PowerShell 5.1, ErrorActionPreference=Stop can promote that native stderr
+  # stream into a terminating NativeCommandError even when adb exits 0. Lower
+  # ErrorActionPreference only for the native process, capture both streams,
+  # then restore strict script-level error handling immediately.
+  $priorEap=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    $raw=@(& $adb @a 2>&1)
+    $code=$LASTEXITCODE
+  }finally{
+    $ErrorActionPreference=$priorEap
+  }
+  $out=@($raw|ForEach-Object{[string]$_})
   if(-not $AllowFailure -and $code -ne 0){throw "adb failed exit=$code args=$($a -join ' ') output=$($out -join ' | ')"}
-  return [pscustomobject]@{exitCode=$code;output=@($out)}
+  return [pscustomobject]@{exitCode=$code;output=$out}
 }
 function Device-Present([string]$adb,[string]$serial){
   $r=Invoke-Adb $adb @('devices')
@@ -112,7 +125,6 @@ $null=Mirror-Result $result
 Log "START job=$job A=$deviceA B=$deviceB"
 
 try{
-  # Reuse the already-authorized interactive user's ADB identity if a new server is needed.
   $env:USERPROFILE='C:\Users\Faiz'
   $env:HOME='C:\Users\Faiz'
   $env:ANDROID_USER_HOME='C:\Users\Faiz'
@@ -130,7 +142,7 @@ try{
   if(-not(Device-Present $adb $deviceB)){throw 'Pixel 8 direct ADB endpoint is not connected'}
 
   $pathsRaw=Invoke-Adb $adb @('-s',$deviceA,'shell','pm','path',$package)
-  $remoteApks=@($pathsRaw.output|ForEach-Object{[string]$_}|Where-Object{$_ -match '^package:'}|ForEach-Object{$_.Substring(8).Trim()})
+  $remoteApks=@($pathsRaw.output|Where-Object{$_ -match '^package:'}|ForEach-Object{$_.Substring(8).Trim()})
   if($remoteApks.Count -lt 1){throw 'FamilyPTT package is not installed on Pixel 6 Pro'}
 
   $work=Join-Path $env:TEMP ('familyptt-proven-apk-'+$job)
@@ -140,7 +152,7 @@ try{
   foreach($remote in $remoteApks){
     $name=[IO.Path]::GetFileName($remote);if([string]::IsNullOrWhiteSpace($name)){$name='base.apk'}
     $local=Join-Path $work $name
-    $pull=Invoke-Adb $adb @('-s',$deviceA,'pull',$remote,$local)
+    $null=Invoke-Adb $adb @('-s',$deviceA,'pull',$remote,$local)
     if(-not(Test-Path -LiteralPath $local -PathType Leaf)){throw "APK pull produced no file: $remote"}
     $hash=(Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLowerInvariant()
     $localApks+=$local;$apkInfo+=[ordered]@{name=$name;source=$remote;sha256=$hash;bytes=(Get-Item -LiteralPath $local).Length}
@@ -148,7 +160,7 @@ try{
   $result.apk.count=$localApks.Count;$result.apk.files=$apkInfo;$result.apk.primarySha256=[string]$apkInfo[0].sha256;Save-Result $result;$null=Mirror-Result $result
 
   if($localApks.Count -eq 1){$install=Invoke-Adb $adb @('-s',$deviceB,'install','-r',$localApks[0])}
-  else{$args=@('-s',$deviceB,'install-multiple','-r')+$localApks;$install=Invoke-Adb $adb $args}
+  else{$installArgs=@('-s',$deviceB,'install-multiple','-r')+$localApks;$install=Invoke-Adb $adb $installArgs}
   $installText=($install.output -join ' ').Trim();$result.deviceB.installResult=$installText
   if($installText -notmatch '(?i)Success'){throw "Pixel 8 install did not report Success: $installText"}
 
