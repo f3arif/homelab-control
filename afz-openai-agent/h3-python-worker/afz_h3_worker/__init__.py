@@ -5,6 +5,7 @@ contracts and local execution/parity primitives, but it does not perform live
 Control Hub I/O, schedule work, install services, or own worker liveness.
 """
 
+from .actions import ActionContractError, h3_file_hash, resolve_readonly_file
 from .contracts import (
     CLAIM_SCHEMA_KNOWN,
     LEASE_RENEWAL_SCHEMA_KNOWN,
@@ -31,6 +32,9 @@ from .transport import (
 )
 
 __all__ = [
+    "ActionContractError",
+    "h3_file_hash",
+    "resolve_readonly_file",
     "CLAIM_SCHEMA_KNOWN",
     "LEASE_RENEWAL_SCHEMA_KNOWN",
     "CompletionAck",
