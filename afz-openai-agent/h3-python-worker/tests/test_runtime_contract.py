@@ -38,9 +38,18 @@ class RuntimeContractR4Tests(unittest.TestCase):
         self.assertIn("h3-python-compile", rc.CURRENT_ALLOWED_ACTIONS)
         self.assertIn("h3-tsc", rc.CURRENT_ALLOWED_ACTIONS)
 
-    def test_only_task_contract_remains_unresolved_after_v2(self):
-        self.assertFalse(rc.current_contract_complete())
-        self.assertIsNone(rc.CURRENT_TASK_CONTRACT)
+    def test_launcher_evidence_has_live_pid_continuity(self):
+        self.assertTrue(rc.current_contract_complete())
+        self.assertTrue(rc.DIRECT_TASK_LAUNCHER.live_pid_continuity)
+        self.assertTrue(rc.GENERIC_TASK_LAUNCHER.live_pid_continuity)
+        self.assertEqual(rc.DIRECT_TASK_LAUNCHER.pid_at_r4_snapshot, rc.CURRENT_DIRECT_PID)
+        self.assertEqual(rc.GENERIC_TASK_LAUNCHER.pid_at_r4_snapshot, rc.CURRENT_GENERIC_PID)
+        for launcher in (rc.DIRECT_TASK_LAUNCHER, rc.GENERIC_TASK_LAUNCHER):
+            self.assertEqual(launcher.user, "Faiz")
+            self.assertEqual(launcher.logon_type, "Interactive")
+            self.assertEqual(launcher.run_level, "Limited")
+            self.assertTrue(launcher.execute.lower().endswith("wscript.exe"))
+            self.assertIn("//B //Nologo", launcher.arguments)
 
     def test_generic_and_telemetry_launch_via_hidden_wscript_runkeys(self):
         self.assertEqual(rc.GENERIC_RUNKEY_NAME, "AFZ H3 Generic Worker")
