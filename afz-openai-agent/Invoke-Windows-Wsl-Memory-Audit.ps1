@@ -112,12 +112,15 @@ try {
 
 $wsl = Get-WslVersionInfo
 $configs = @(Get-ConfigProfiles)
+$publishRoot = 'C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$publishPath = Join-Path $publishRoot 'AFZ-WINDOWS-WSL-MEMORY-AUDIT-LATEST.json'
 
 $result = [ordered]@{
     ok = $true
     schema = 'afz.windows-wsl-memory-audit.v1'
     action = 'audit'
     readOnly = $true
+    diagnosticWriteOnly = $true
     computer = $env:COMPUTERNAME
     time = Get-Date -Format o
     physicalMemory = [ordered]@{
@@ -139,7 +142,12 @@ $result = [ordered]@{
         infoError = $dockerInfoError
     }
     topMemoryProcesses = $top
-    safety = 'Read-only: no process stop, service stop, WSL shutdown, Docker restart, container mutation, file write, configuration change, or memory-cap change.'
+    publishedDiagnosticPath = if (Test-Path -LiteralPath $publishRoot -PathType Container) { $publishPath } else { $null }
+    safety = 'Operationally read-only: no process/service stop, WSL shutdown, Docker/container mutation, configuration change, or memory-cap change. The only write is this sanitized diagnostic result to the fixed AFZ Workers Results path when that directory exists.'
 }
 
-[pscustomobject]$result | ConvertTo-Json -Depth 8 -Compress
+$json = [pscustomobject]$result | ConvertTo-Json -Depth 8 -Compress
+if (Test-Path -LiteralPath $publishRoot -PathType Container) {
+    [IO.File]::WriteAllText($publishPath, $json, (New-Object Text.UTF8Encoding($false)))
+}
+$json

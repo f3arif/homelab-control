@@ -63,11 +63,15 @@ jobs:
           required_audit = [
               "schema = 'afz.windows-wsl-memory-audit.v1'",
               "readOnly = $true",
+              "diagnosticWriteOnly = $true",
               "Get-CimInstance Win32_OperatingSystem",
               "Get-Process -Name 'vmmemWSL'",
               "info --format '{{.MemTotal}}'",
               "autoMemoryReclaim",
-              "Read-only: no process stop, service stop, WSL shutdown, Docker restart, container mutation, file write, configuration change, or memory-cap change.",
+              "C:\\Users\\Faiz\\OneDrive - AFZ Engineering Inc\\AFZ Shared\\AFZ Workers\\Results",
+              "AFZ-WINDOWS-WSL-MEMORY-AUDIT-LATEST.json",
+              "[IO.File]::WriteAllText($publishPath, $json",
+              "Operationally read-only: no process/service stop, WSL shutdown, Docker/container mutation, configuration change, or memory-cap change. The only write is this sanitized diagnostic result to the fixed AFZ Workers Results path when that directory exists.",
           ]
           for marker in required_audit:
               assert marker in audit, f'missing audit marker: {marker}'
@@ -82,6 +86,7 @@ jobs:
               'Remove-Item',
               'Move-Item',
               'Copy-Item',
+              'New-Item',
               'wsl.exe --shutdown',
               'docker.exe stop',
               'docker compose down',
@@ -89,6 +94,8 @@ jobs:
           lowered = audit.lower()
           for marker in forbidden_audit:
               assert marker.lower() not in lowered, f'audit contains forbidden mutator: {marker}'
+          assert audit.count('[IO.File]::WriteAllText') == 1, 'audit may have exactly one diagnostic file write'
+          assert audit.count("$publishRoot = 'C:\\Users\\Faiz\\OneDrive - AFZ Engineering Inc\\AFZ Shared\\AFZ Workers\\Results'") == 1
 
           required_control = [
               "version='1.8.0'",
@@ -126,7 +133,7 @@ jobs:
               'schema': 1,
               'project': 'ops',
               'action': 'audit-wsl-memory-readonly',
-              'request_id': 'windows-wsl-memory-audit-20260829-r1',
+              'request_id': 'windows-wsl-memory-audit-20260829-r2',
               'enabled': True,
           }
 
