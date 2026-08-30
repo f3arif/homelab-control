@@ -51,7 +51,7 @@ jobs:
               if path.name!='process.py' and 'subprocess' in roots:
                   raise SystemExit(f'subprocess import outside central wrapper: {path}')
               if roots & network_roots:
-                  raise SystemExit(f'network import forbidden in staged R2: {path}: {sorted(roots & network_roots)}')
+                  raise SystemExit(f'network import forbidden in staged R3: {path}: {sorted(roots & network_roots)}')
 
           proc=(root/'afz_h3_worker/process.py').read_text(encoding='utf-8')
           for needle in ['CREATE_NO_WINDOW','GIT_TERMINAL_PROMPT','GCM_INTERACTIVE','shell=False','taskkill.exe','/T','/F']:
@@ -72,14 +72,26 @@ jobs:
 
           contracts_path=root/'afz_h3_worker/contracts.py'
           contracts_tree=parsed[contracts_path]
-          claim_known=None
+          contract_constants={}
           for node in contracts_tree.body:
-              if isinstance(node,ast.Assign):
-                  for target in node.targets:
-                      if isinstance(target,ast.Name) and target.id=='CLAIM_SCHEMA_KNOWN':
-                          claim_known=ast.literal_eval(node.value)
-          if claim_known is not False:
-              raise SystemExit('R2 must keep CLAIM_SCHEMA_KNOWN=False')
+              if isinstance(node,ast.Assign) and len(node.targets)==1 and isinstance(node.targets[0],ast.Name):
+                  try: contract_constants[node.targets[0].id]=ast.literal_eval(node.value)
+                  except Exception: pass
+          expected_contract_constants={
+              'CLAIM_SCHEMA_KNOWN': True,
+              'LEASE_RENEWAL_SCHEMA_KNOWN': False,
+              'LEASE_SECONDS_DEFAULT': 60,
+              'LEASE_SECONDS_MIN': 15,
+              'LEASE_SECONDS_MAX': 7200,
+              'CONTROL_HUB_WORKER_HEARTBEAT_PATH': '/api/workers/{worker_id}/heartbeat',
+              'CONTROL_HUB_WORKER_CLAIM_PATH': '/api/workers/{worker_id}/claim',
+              'CONTROL_HUB_JOB_COMPLETE_PATH': '/api/jobs/{job_id}/complete',
+              'DIRECT_GATEWAY_CLAIM_PATH': '/claim',
+              'DIRECT_GATEWAY_COMPLETE_PATH': '/complete',
+          }
+          for name,value in expected_contract_constants.items():
+              if contract_constants.get(name)!=value:
+                  raise SystemExit(f'R3 contract invariant failed: {name}={contract_constants.get(name)!r}')
 
           staged_paths=[contracts_path,root/'afz_h3_worker/transport.py']
           forbidden_live_literals=('http://','https://','X-AFZ-Token','AFZ_HUB_TOKEN')
@@ -87,7 +99,7 @@ jobs:
               for node in ast.walk(parsed[path]):
                   if isinstance(node,ast.Constant) and isinstance(node.value,str):
                       if any(value in node.value for value in forbidden_live_literals):
-                          raise SystemExit(f'live transport/config literal forbidden in R2: {path}')
+                          raise SystemExit(f'live transport/config literal forbidden in R3: {path}')
 
           transport_path=root/'afz_h3_worker/transport.py'
           transport_tree=parsed[transport_path]
@@ -105,13 +117,21 @@ jobs:
                   except Exception: pass
               elif isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)):
                   methods[node.name]=node
-          for name in ('network_enabled','claim_schema_known','routing_authority','scheduling_authority'):
-              if class_constants.get(name) is not False:
-                  raise SystemExit(f'Unbound transport authority invariant failed: {name}')
-          if 'claim' not in methods:
-              raise SystemExit('Unbound transport claim fail-closed method missing')
-          if not any(isinstance(node,ast.Raise) for node in ast.walk(methods['claim'])):
-              raise SystemExit('Unbound transport claim must fail closed')
+          expected_unbound={
+              'network_enabled': False,
+              'claim_schema_known': True,
+              'lease_renewal_schema_known': False,
+              'routing_authority': False,
+              'scheduling_authority': False,
+          }
+          for name,value in expected_unbound.items():
+              if class_constants.get(name)!=value:
+                  raise SystemExit(f'Unbound transport invariant failed: {name}={class_constants.get(name)!r}')
+          for name in ('health','heartbeat','claim','complete','renew_lease'):
+              if name not in methods:
+                  raise SystemExit(f'Unbound transport method missing: {name}')
+              if not any(isinstance(node,ast.Raise) for node in ast.walk(methods[name])):
+                  raise SystemExit(f'Unbound transport method must fail closed: {name}')
 
           readme=(root/'README.md').read_text(encoding='utf-8')
           for needle in [
@@ -119,8 +139,10 @@ jobs:
               'Control Hub / PostgreSQL / Direct Fabric',
               'OneDrive / SharePoint remains emergency fallback only',
               'Prefect is not introduced',
-              'CLAIM_SCHEMA_KNOWN=False',
-              'claim request/response schema is not yet proven',
+              'CLAIM_SCHEMA_KNOWN=True',
+              'LEASE_RENEWAL_SCHEMA_KNOWN=False',
+              'no lease-renew endpoint',
+              'network_enabled=False',
               'python.exe',
               'WinSW or NSSM',
               'Do not use `pythonw.exe`',
