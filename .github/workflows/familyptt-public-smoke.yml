@@ -59,7 +59,14 @@ jobs:
               assert room.isconnected()
               print('ROOM_CONNECTED=true')
               print('ROOM_SERVER_URL=wss://ptt-livekit.afzeng.ca')
-              await asyncio.sleep(1)
+              await asyncio.sleep(3)
+              remote_ids = sorted(room.remote_participants.keys())
+              android_ids = [identity for identity in remote_ids if identity.lower().startswith('familyptt-android-')]
+              print(f'REMOTE_PARTICIPANT_COUNT={len(remote_ids)}')
+              print(f'ANDROID_REMOTE_COUNT={len(android_ids)}')
+              for identity in android_ids:
+                  print(f'ANDROID_REMOTE_ID={identity}')
+              print('PHONE_ROOM_CONNECTED=' + ('true' if android_ids else 'false'))
               await room.disconnect()
               print('ROOM_DISCONNECTED_CLEANLY=true')
 
