@@ -1,0 +1,88 @@
+name: Validate FamilyPTT Phase 1 APK binding
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - 'afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1'
+      - 'afz-openai-agent/requests/familyptt-phase1-apk-prepare.json'
+      - '.github/workflows/familyptt-phase1-apk-bind-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell 5.1 sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($path in @(
+            'afz-openai-agent/Push-Deploy-Watcher.ps1',
+            'afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1',
+            'afz-openai-agent/AFZ-Native-Process.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count -gt 0){throw "PowerShell parser rejected $path`: $($errors.Message -join '; ')"}
+          }
+
+      - name: Enforce active-only typed binding
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $watcher=Get-Content 'afz-openai-agent/Push-Deploy-Watcher.ps1' -Raw
+          $helper=Get-Content 'afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1' -Raw
+          $request=Get-Content 'afz-openai-agent/requests/familyptt-phase1-apk-prepare.json' -Raw|ConvertFrom-Json
+
+          if([string]$request.status -ne 'staged-not-active'){throw 'request must remain staged-not-active in binding PR'}
+          if([string]$request.job_id -ne 'familyptt-phase1-apk-prepare-r001'){throw 'unexpected request generation'}
+
+          $begin='# BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING'
+          $end='# END FAMILYPTT_PHASE1_APK_ACTIVE_BINDING'
+          $start=$watcher.IndexOf($begin);$finish=$watcher.IndexOf($end)
+          if($start -lt 0 -or $finish -le $start){throw 'FamilyPTT binding markers missing'}
+          $block=$watcher.Substring($start,$finish-$start)
+
+          foreach($required in @(
+            "`$familyPttPhase1ApkRunner=Join-Path `$InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'",
+            "`$familyPttPhase1ApkRequest=Join-Path `$InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'",
+            "if([string]`$req.status -ne 'active'){return}",
+            "[string]`$req.project -ne 'familyptt'",
+            "[string]`$req.action -ne 'prepare-phase1-acceptance-apk'",
+            '-File $familyPttPhase1ApkRunner',
+            '-RequestPath $familyPttPhase1ApkRequest'
+          )){if(-not $watcher.Contains($required)){throw "required binding marker missing: $required"}}
+          if(-not $watcher.Contains('Handle-FamilyPttPhase1ApkRequest')){throw 'handler is not invoked'}
+
+          foreach($forbidden in @(
+            'adb.exe','adb install','svc wifi','svc data','airplane_mode_on','pm clear','uninstall',
+            'Register-ScheduledTask','Set-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask',
+            'Invoke-Expression','iex '
+          )){if($block.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "forbidden direct binding surface: $forbidden"}}
+
+          foreach($requiredHelper in @(
+            "if(`$status -eq 'staged-not-active')",
+            'WAIT_TWO_EXPECTED_HANDSETS',
+            "Save-State `$jobId 'waiting'",
+            'retryable=$true',
+            "@('install','-r',`$apk)"
+          )){if(-not $helper.Contains($requiredHelper)){throw "helper safety marker missing: $requiredHelper"}}
+
+      - name: Re-prove staged helper no-op
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path '.').Path
+          $script=Join-Path $root 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
+          $request=Join-Path $root 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
+          $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -InstallRoot $root -RequestPath $request
+          if($LASTEXITCODE -ne 0){throw "staged helper exited $LASTEXITCODE"}
+          $o=$raw|ConvertFrom-Json
+          if([string]$o.status -ne 'staged-not-active' -or [bool]$o.mutated -ne $false){throw 'staged helper did not remain inert'}
+          Write-Host 'FAMILYPTT_PHASE1_BINDING_STAGED_PASS'
