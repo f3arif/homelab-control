@@ -7,8 +7,11 @@ sys.path.insert(0, str(ROOT))
 
 from afz_h3_worker.contracts import (
     CLAIM_SCHEMA_KNOWN,
+    LEASE_RENEWAL_SCHEMA_KNOWN,
+    ClaimRequest,
     CompletionEnvelope,
     ContractError,
+    ControlHubCompletionRequest,
     ControlHubHealth,
     JobCreate,
     PORTABLE_ACTION,
@@ -20,7 +23,7 @@ from afz_h3_worker.contracts import (
     WorkerExecutionResult,
 )
 from afz_h3_worker.transport import (
-    ClaimContractUnavailable,
+    LeaseRenewalContractUnavailable,
     LiveTransportUnavailable,
     UnboundControlHubTransport,
 )
@@ -126,12 +129,12 @@ class JobCreateTests(unittest.TestCase):
                 JobCreate.from_portable_canary_mapping(raw)
 
 
-class CompletionTests(unittest.TestCase):
+class GatewayCompletionTests(unittest.TestCase):
     def test_nonzero_real_exit_is_preserved(self):
         result = WorkerExecutionResult.from_mapping(worker_result(exit_code=17))
         self.assertEqual(result.exit_code, 17)
 
-    def test_completion_round_trip(self):
+    def test_legacy_gateway_completion_round_trip(self):
         raw = {
             "job_id": "job-123",
             "ok": False,
@@ -160,29 +163,34 @@ class HealthAndTransportTests(unittest.TestCase):
         self.assertTrue(health.ok)
         self.assertEqual(health.mode, "safe-readonly")
 
-    def test_claim_schema_is_explicitly_unknown(self):
-        self.assertFalse(CLAIM_SCHEMA_KNOWN)
+    def test_claim_schema_known_but_transport_remains_unbound(self):
+        self.assertTrue(CLAIM_SCHEMA_KNOWN)
+        self.assertFalse(LEASE_RENEWAL_SCHEMA_KNOWN)
         transport = UnboundControlHubTransport()
         self.assertFalse(transport.network_enabled)
+        self.assertTrue(transport.claim_schema_known)
+        self.assertFalse(transport.lease_renewal_schema_known)
         self.assertFalse(transport.routing_authority)
         self.assertFalse(transport.scheduling_authority)
-        with self.assertRaises(ClaimContractUnavailable):
-            transport.claim()
+        with self.assertRaises(LiveTransportUnavailable):
+            transport.claim("h3-shadow", ClaimRequest.create())
+        with self.assertRaises(LeaseRenewalContractUnavailable):
+            transport.renew_lease("job-123")
 
     def test_unbound_transport_cannot_perform_health_or_completion_io(self):
         transport = UnboundControlHubTransport()
         with self.assertRaises(LiveTransportUnavailable):
             transport.health()
-        completion = CompletionEnvelope.from_mapping(
+        completion = ControlHubCompletionRequest.from_mapping(
             {
-                "job_id": "job-123",
+                "worker_id": "h3-shadow",
                 "ok": True,
                 "result": worker_result(),
                 "error": None,
             }
         )
         with self.assertRaises(LiveTransportUnavailable):
-            transport.complete(completion)
+            transport.complete("job-123", completion)
 
 
 if __name__ == "__main__":
