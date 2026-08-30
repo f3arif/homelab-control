@@ -67,6 +67,23 @@ jobs:
               for identity in android_ids:
                   print(f'ANDROID_REMOTE_ID={identity}')
               print('PHONE_ROOM_CONNECTED=' + ('true' if android_ids else 'false'))
+              assert android_ids, 'Android phone participant is not present in family-main'
+
+              active_android_mics = []
+              total_android_mics = 0
+              for identity in android_ids:
+                  participant = room.remote_participants[identity]
+                  for publication in participant.track_publications.values():
+                      if publication.source == rtc.TrackSource.SOURCE_MICROPHONE:
+                          total_android_mics += 1
+                          print(f'ANDROID_MIC_PUBLICATION={identity} muted={str(publication.muted).lower()}')
+                          if not publication.muted:
+                              active_android_mics.append((identity, publication.sid))
+              print(f'ANDROID_MIC_PUBLICATION_COUNT={total_android_mics}')
+              print(f'ANDROID_ACTIVE_MIC_COUNT={len(active_android_mics)}')
+              print('PHONE_IDLE_MIC_SAFE=' + ('true' if not active_android_mics else 'false'))
+              assert not active_android_mics, 'Android microphone is unexpectedly active while idle'
+
               await room.disconnect()
               print('ROOM_DISCONNECTED_CLEANLY=true')
 
