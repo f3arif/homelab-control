@@ -13,6 +13,7 @@ $component='ca.afzeng.familyptt/.MainActivity'
 $deviceA='19161FDEE008XN'
 $preferredDeviceB='192.168.50.69:38209'
 $expectedSha='4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b'
+$expectedWorkflowRun=33325967023
 $bridgeRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $apkPath=Join-Path $bridgeRoot 'FamilyPTT-standalone-arm64-phase1.apk'
 $diagPath=Join-Path $bridgeRoot 'FAMILYPTT-PHASE1-APK-PREP-LATEST.txt'
@@ -40,10 +41,7 @@ function Invoke-Adb([string]$adb,[string[]]$a,[switch]$AllowFailure){
 }
 function Get-Devices([string]$adb){
   $r=Invoke-Adb $adb @('devices','-l');$rows=@()
-  foreach($line in $r.output){
-    $s=[string]$line
-    if($s -match '^([^\s]+)\s+device\b'){$rows+=[pscustomobject]@{serial=$Matches[1];line=$s}}
-  }
+  foreach($line in $r.output){$s=[string]$line;if($s -match '^([^\s]+)\s+device\b'){$rows+=[pscustomobject]@{serial=$Matches[1];line=$s}}}
   return @($rows)
 }
 function Get-Pid([string]$adb,[string]$serial){$r=Invoke-Adb $adb @('-s',$serial,'shell','pidof',$package) -AllowFailure;if($r.exitCode -ne 0){return ''};return (($r.output -join '').Trim())}
@@ -51,7 +49,13 @@ function Audio-Granted([string]$adb,[string]$serial){$r=Invoke-Adb $adb @('-s',$
 
 $req=Read-Json $RequestPath
 if(-not $req){exit 0}
-if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'prepare-phase1-apk-two-handsets'){exit 0}
+if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'prepare-phase1-acceptance-apk'){exit 0}
+if([string]$req.status -ne 'active'){Log "SKIP request status=$([string]$req.status)";exit 0}
+if([int64]$req.workflow_run_id -ne $expectedWorkflowRun){throw 'unexpected workflow run id'}
+if(([string]$req.apk_sha256).ToLowerInvariant() -ne $expectedSha){throw 'request APK SHA256 does not match validated Phase 1 APK'}
+if([string]$req.package_id -ne $package){throw 'unexpected package id'}
+if([string]$req.device_a -ne $deviceA){throw 'unexpected Pixel 6 Pro endpoint'}
+if([string]$req.device_b -ne $preferredDeviceB){throw 'unexpected Pixel 8 endpoint'}
 $job=[string]$req.job_id
 if($job -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,100}$'){throw 'invalid job id'}
 
@@ -60,6 +64,7 @@ if($prior -and [string]$prior.jobId -eq $job -and [string]$prior.status -eq 'com
 
 $result=[ordered]@{
   schema=1;jobId=$job;status='running';ok=$false;classification='PHASE1_APK_PREP_RUNNING';startedAt=(Get-Date -Format o);finishedAt=$null
+  source=[ordered]@{repository=[string]$req.repository;workflowRunId=[int64]$req.workflow_run_id;artifactName=[string]$req.artifact_name}
   apk=[ordered]@{path=$apkPath;expectedSha256=$expectedSha;actualSha256=$null;bytes=$null}
   deviceA=[ordered]@{serial=$deviceA;model='Pixel 6 Pro';pid=$null;recordAudioGranted=$false;installResult=$null}
   deviceB=[ordered]@{serial=$null;model='Pixel 8';pid=$null;recordAudioGranted=$false;installResult=$null}
@@ -87,8 +92,7 @@ try{
   }
   if(-not $deviceB){
     $connect=Invoke-Adb $adb @('connect',$preferredDeviceB) -AllowFailure;Log "CONNECT preferred exit=$($connect.exitCode) output=$($connect.output -join ' | ')";Start-Sleep -Seconds 2
-    $devices=@(Get-Devices $adb)
-    if($devices.serial -contains $preferredDeviceB){$deviceB=$preferredDeviceB}
+    $devices=@(Get-Devices $adb);if($devices.serial -contains $preferredDeviceB){$deviceB=$preferredDeviceB}
   }
   if(-not $deviceB){throw 'Pixel 8 is not connected to ADB'}
   $result.deviceB.serial=$deviceB;Save-Result $result;$null=Mirror-Result $result
