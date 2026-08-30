@@ -5,11 +5,13 @@ on:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - '.github/workflows/windows-wsl-memory-audit.yml'
       - '.github/workflows/windows-wsl-memory-audit-validate.yml'
   pull_request:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - '.github/workflows/windows-wsl-memory-audit.yml'
       - '.github/workflows/windows-wsl-memory-audit-validate.yml'
 
 permissions:
@@ -48,6 +50,7 @@ jobs:
 
           audit = Path('afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1').read_text(encoding='utf-8')
           control = Path('afz-openai-agent/AFZ-Agent-Control.ps1').read_text(encoding='utf-8')
+          workflow = Path('.github/workflows/windows-wsl-memory-audit.yml').read_text(encoding='utf-8')
 
           required_audit = [
               "schema = 'afz.windows-wsl-memory-audit.v1'",
@@ -91,3 +94,20 @@ jobs:
           ]
           for marker in required_control:
               assert marker in control, f'missing control boundary marker: {marker}'
+
+          required_workflow = [
+              'workflow_dispatch:',
+              "branches: [main]",
+              "- '.github/windows-wsl-memory-audit-signal.txt'",
+              'tailscale/github-action@v4',
+              'tag:afz-deploy',
+              '/api/push-deploy',
+              '/api/windows-wsl-memory-audit',
+              'windows-wsl-memory-audit.json',
+              'retention-days: 3',
+          ]
+          for marker in required_workflow:
+              assert marker in workflow, f'missing audit workflow marker: {marker}'
+
+          assert 'workflow_run:' not in workflow
+          assert 'schedule:' not in workflow
