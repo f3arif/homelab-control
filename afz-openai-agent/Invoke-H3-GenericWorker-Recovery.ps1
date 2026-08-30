@@ -1,0 +1,177 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+  [string]$InstallRoot='C:\AFZ\homelab-control',
+  [Parameter(Mandatory=$true)][string]$SyncedSha
+)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version 2.0
+if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'SyncedSha must be a 40-character Git commit SHA'}
+$SyncedSha=$SyncedSha.ToLowerInvariant()
+
+$key='C:\Users\Faiz\.ssh\afz_h3_worker'
+$known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
+$ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+$target='Faiz@100.106.186.118'
+$expectedHost='DESKTOP-H3R6CQN'
+$expectedFingerprint='SHA256:xUZpwFvzX4H4qhRFHYNrHsITVC6XZXJ8vYe6yoN7R7I'
+$stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-generic-worker-recovery'
+$statePath=Join-Path $stateRoot 'latest.json'
+$mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$mirrorPath=Join-Path $mirrorRoot 'H3-GENERIC-WORKER-RECOVERY-LATEST.json'
+$utf8=New-Object Text.UTF8Encoding($false)
+New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+
+function Save-Result($o){
+  $json=$o|ConvertTo-Json -Depth 16 -Compress
+  [IO.File]::WriteAllText($statePath,$json,$utf8)
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
+  Write-Output $json
+}
+
+function Invoke-H3([string]$RemoteScript){
+  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($RemoteScript))
+  $args=@(
+    '-i',$key,
+    '-o','IdentitiesOnly=yes',
+    '-o','BatchMode=yes',
+    '-o','ConnectTimeout=8',
+    '-o','StrictHostKeyChecking=yes',
+    '-o',('UserKnownHostsFile='+$known),
+    $target,
+    ('powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand '+$encoded)
+  )
+  $outFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $errFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  try{
+    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+    if(-not $p.WaitForExit(60000)){
+      try{$p.Kill()}catch{}
+      throw 'H3 SSH recovery command timed out after 60 seconds.'
+    }
+    $stdout=$(if(Test-Path $outFile){[IO.File]::ReadAllText($outFile)}else{''})
+    $stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile)}else{''})
+    return [ordered]@{exit=[int]$p.ExitCode;stdout=$stdout;stderr=$stderr}
+  }finally{
+    Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
+try{
+  foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required path missing: $p"}}
+
+  $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+  if([string]$identity.User.Value -ne 'S-1-5-18'){
+    throw "SYSTEM execution required for dedicated H3 key. Actual identity: $($identity.Name) [$($identity.User.Value)]"
+  }
+
+  $keygen=Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe'
+  $derived=(& $keygen -y -f $key 2>&1 | Select-Object -First 1);$deriveExit=$LASTEXITCODE
+  if($deriveExit -ne 0 -or [string]::IsNullOrWhiteSpace([string]$derived)){throw 'SYSTEM cannot read dedicated H3 key.'}
+  $tmpPub=Join-Path $env:TEMP ('afz-h3-generic-recovery-'+[guid]::NewGuid().ToString('n')+'.pub')
+  try{
+    ([string]$derived).Trim()|Set-Content -LiteralPath $tmpPub -Encoding ascii
+    $fp=((& $keygen -lf $tmpPub 2>&1)-join ' ').Trim();$fpExit=$LASTEXITCODE
+  }finally{Remove-Item -LiteralPath $tmpPub -Force -ErrorAction SilentlyContinue}
+  if($fpExit -ne 0 -or $fp -notmatch [regex]::Escape($expectedFingerprint)){throw "Pinned H3 key fingerprint mismatch: $fp"}
+
+  $remote=@'
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version 2.0
+$taskName='AFZ H3 Generic Worker'
+$workerScript='C:\AFZ\H3Worker\AFZ-H3-Worker.ps1'
+$heartbeat='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Heartbeat\h3.txt'
+
+function Get-WorkerProcesses {
+  @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop |
+    Where-Object { [string]$_.CommandLine -like ('*'+$workerScript+'*') } |
+    Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+}
+
+$before=@(Get-WorkerProcesses)
+$task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+$taskInfo=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+$actions=@($task.Actions|ForEach-Object{[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})
+$principal=[ordered]@{userId=[string]$task.Principal.UserId;logonType=[string]$task.Principal.LogonType;runLevel=[string]$task.Principal.RunLevel}
+
+$hiddenActionOk=$false
+foreach($a in $actions){
+  if(([IO.Path]::GetFileName([string]$a.execute)) -ieq 'wscript.exe' -and [string]$a.arguments -match '(?i)//B' -and [string]$a.arguments -match '(?i)H3.*Generic|Generic.*Worker|Run-AFZ-H3-Worker-Hidden'){$hiddenActionOk=$true}
+}
+
+$started=$false
+$classification=''
+if($before.Count -gt 0){
+  $classification='H3_GENERIC_WORKER_ALREADY_RUNNING'
+}else{
+  if(-not $hiddenActionOk){throw 'Generic Worker process is absent but Scheduled Task action is not the expected hidden wscript launcher; refusing to start.'}
+  Start-ScheduledTask -TaskName $taskName
+  $started=$true
+  $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
+}
+
+$deadline=(Get-Date).AddSeconds(35)
+$after=@()
+do{
+  Start-Sleep -Milliseconds 750
+  $after=@(Get-WorkerProcesses)
+  if($after.Count -gt 0){break}
+}while((Get-Date) -lt $deadline)
+
+$heartbeatWrite=$null
+$heartbeatAgeSec=$null
+if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
+  $item=Get-Item -LiteralPath $heartbeat -ErrorAction Stop
+  $heartbeatWrite=$item.LastWriteTime.ToString('o')
+  $heartbeatAgeSec=[math]::Round(((Get-Date)-$item.LastWriteTime).TotalSeconds,1)
+}
+
+$result=[ordered]@{
+  schema=1
+  host=$env:COMPUTERNAME
+  taskName=$taskName
+  taskState=[string]$task.State
+  lastTaskResult=[int64]$taskInfo.LastTaskResult
+  lastRunTime=$taskInfo.LastRunTime.ToString('o')
+  actions=$actions
+  principal=$principal
+  hiddenActionVerified=$hiddenActionOk
+  beforeProcessCount=$before.Count
+  beforeProcesses=$before
+  taskStartIssued=$started
+  afterProcessCount=$after.Count
+  afterProcesses=$after
+  heartbeatPath=$heartbeat
+  heartbeatLastWrite=$heartbeatWrite
+  heartbeatAgeSeconds=$heartbeatAgeSec
+  classification=$classification
+  mutation=$(if($started){'START_EXISTING_TASK_ONLY'}else{'NONE'})
+  capturedAt=(Get-Date).ToString('o')
+}
+if($after.Count -eq 0){$result.classification='H3_GENERIC_WORKER_RECOVERY_FAILED_NO_PROCESS';$result|ConvertTo-Json -Depth 12 -Compress;exit 12}
+$result|ConvertTo-Json -Depth 12 -Compress
+exit 0
+'@
+
+  $remoteResult=Invoke-H3 $remote
+  if([int]$remoteResult.exit -ne 0){throw "H3 Generic Worker recovery failed exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
+  $lines=@(([string]$remoteResult.stdout -split "`r?`n")|Where-Object{$_.Trim()})
+  if($lines.Count -eq 0){throw 'H3 Generic Worker recovery returned no output.'}
+  $payload=$lines[-1]|ConvertFrom-Json -ErrorAction Stop
+  if([string]$payload.host -ne $expectedHost){throw "Unexpected H3 host: $($payload.host)"}
+  if([int]$payload.afterProcessCount -lt 1){throw 'H3 Generic Worker is still absent after recovery.'}
+
+  $r=[ordered]@{
+    schema=1;status='completed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
+    systemIdentity=[string]$identity.Name;keyFingerprint=$fp;remoteHost=[string]$payload.host;
+    taskStartIssued=[bool]$payload.taskStartIssued;hiddenActionVerified=[bool]$payload.hiddenActionVerified;
+    beforeProcessCount=[int]$payload.beforeProcessCount;afterProcessCount=[int]$payload.afterProcessCount;
+    heartbeatLastWrite=$payload.heartbeatLastWrite;heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;
+    remoteMutation=[string]$payload.mutation;remote=$payload;capturedAt=(Get-Date -Format o)
+  }
+  Save-Result $r
+  exit 0
+}catch{
+  Save-Result ([ordered]@{schema=1;status='failed';classification='H3_GENERIC_WORKER_SYSTEM_RECOVERY_FAILED';syncedSha=$SyncedSha;error=$_.Exception.Message;remoteMutation='UNKNOWN_OR_NONE';capturedAt=(Get-Date -Format o)})
+  exit 20
+}
