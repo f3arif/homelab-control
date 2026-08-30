@@ -12,6 +12,7 @@ $statePath=Join-Path $stateRoot 'generation-1.json'
 $latestPath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'H3-TAILSCALE-UNATTENDED-LATEST.json'
+$mirrorTextPath=Join-Path $mirrorRoot 'H3-TAILSCALE-UNATTENDED-LATEST.txt'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
 $key='C:\Users\Faiz\.ssh\afz_h3_worker'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
@@ -25,7 +26,12 @@ function Save-Result($obj){
   $json=$obj | ConvertTo-Json -Depth 12
   [IO.File]::WriteAllText($statePath,$json,$utf8)
   [IO.File]::WriteAllText($latestPath,$json,$utf8)
-  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
+  try{
+    if(Test-Path -LiteralPath $mirrorRoot -PathType Container){
+      [IO.File]::WriteAllText($mirrorPath,$json,$utf8)
+      [IO.File]::WriteAllText($mirrorTextPath,$json,$utf8)
+    }
+  }catch{}
   Write-Output ($obj | ConvertTo-Json -Depth 12 -Compress)
 }
 
