@@ -7,9 +7,20 @@ sys.path.insert(0, str(ROOT))
 
 from afz_h3_worker.contracts import (
     CLAIM_SCHEMA_KNOWN,
+    LEASE_RENEWAL_SCHEMA_KNOWN,
+    LEASE_SECONDS_DEFAULT,
+    LEASE_SECONDS_MAX,
+    LEASE_SECONDS_MIN,
+    ClaimRequest,
+    ClaimResponse,
+    ClaimedJob,
+    CompletionAck,
     CompletionEnvelope,
     ContractError,
+    ControlHubCompletionRequest,
     ControlHubHealth,
+    HeartbeatAck,
+    HeartbeatRequest,
     JobCreate,
     PORTABLE_ACTION,
     PORTABLE_PATH,
@@ -20,7 +31,7 @@ from afz_h3_worker.contracts import (
     WorkerExecutionResult,
 )
 from afz_h3_worker.transport import (
-    ClaimContractUnavailable,
+    LeaseRenewalContractUnavailable,
     LiveTransportUnavailable,
     UnboundControlHubTransport,
 )
@@ -69,6 +80,20 @@ def worker_result(**overrides):
         "stderr": "",
         "computer": "TEST-WINDOWS",
         "direct_transport": True,
+    }
+    value.update(overrides)
+    return value
+
+
+def claimed_job(**overrides):
+    value = {
+        "job_id": "job-123",
+        "project": "AFZ-General",
+        "action": "h3-health",
+        "payload": {"probe": "bounded"},
+        "required_capabilities": ["windows", "h3"],
+        "attempt": 1,
+        "lease_until": "2026-08-30T18:00:00+00:00",
     }
     value.update(overrides)
     return value
@@ -126,12 +151,12 @@ class JobCreateTests(unittest.TestCase):
                 JobCreate.from_portable_canary_mapping(raw)
 
 
-class CompletionTests(unittest.TestCase):
+class GatewayCompletionTests(unittest.TestCase):
     def test_nonzero_real_exit_is_preserved(self):
         result = WorkerExecutionResult.from_mapping(worker_result(exit_code=17))
         self.assertEqual(result.exit_code, 17)
 
-    def test_completion_round_trip(self):
+    def test_legacy_gateway_completion_round_trip(self):
         raw = {
             "job_id": "job-123",
             "ok": False,
@@ -144,6 +169,111 @@ class CompletionTests(unittest.TestCase):
     def test_direct_transport_must_be_true(self):
         with self.assertRaises(ContractError):
             WorkerExecutionResult.from_mapping(worker_result(direct_transport=False))
+
+
+class HeartbeatContractTests(unittest.TestCase):
+    def test_heartbeat_round_trip(self):
+        raw = {
+            "state": "READY",
+            "capabilities": ["windows", "h3"],
+            "metadata": {"source": "shadow"},
+            "current_job_id": None,
+        }
+        self.assertEqual(HeartbeatRequest.from_mapping(raw).to_dict(), raw)
+
+    def test_heartbeat_duplicate_capability_is_rejected(self):
+        raw = {
+            "state": "READY",
+            "capabilities": ["h3", "h3"],
+            "metadata": {},
+            "current_job_id": None,
+        }
+        with self.assertRaises(ContractError):
+            HeartbeatRequest.from_mapping(raw)
+
+    def test_heartbeat_ack_matches_captured_shape(self):
+        ack = HeartbeatAck.from_mapping({"ok": True, "worker_id": "h3-shadow"})
+        self.assertTrue(ack.ok)
+        self.assertEqual(ack.worker_id, "h3-shadow")
+
+
+class ClaimContractTests(unittest.TestCase):
+    def test_claim_contract_is_known_but_renewal_is_not(self):
+        self.assertTrue(CLAIM_SCHEMA_KNOWN)
+        self.assertFalse(LEASE_RENEWAL_SCHEMA_KNOWN)
+
+    def test_claim_defaults_match_captured_hub(self):
+        request = ClaimRequest.create()
+        self.assertEqual(request.lease_seconds, LEASE_SECONDS_DEFAULT)
+        self.assertEqual(request.effective_lease_seconds, 60)
+        self.assertFalse(request.strict_preferred)
+
+    def test_claim_lease_server_clamp_is_modelled(self):
+        low = ClaimRequest.create(lease_seconds=1)
+        high = ClaimRequest.create(lease_seconds=999999)
+        self.assertEqual(low.effective_lease_seconds, LEASE_SECONDS_MIN)
+        self.assertEqual(high.effective_lease_seconds, LEASE_SECONDS_MAX)
+        self.assertEqual(low.to_query()["lease_seconds"], 1)
+        self.assertEqual(high.to_query()["lease_seconds"], 999999)
+
+    def test_claim_query_supports_newer_strict_preferred_flag(self):
+        query = ClaimRequest.create(lease_seconds=90, strict_preferred=True).to_query()
+        self.assertEqual(query, {"lease_seconds": 90, "strict_preferred": True})
+
+    def test_claim_rejects_bool_lease_and_nonbool_strict_preferred(self):
+        with self.assertRaises(ContractError):
+            ClaimRequest.create(lease_seconds=True)
+        with self.assertRaises(ContractError):
+            ClaimRequest.create(strict_preferred=1)
+
+    def test_claimed_job_round_trip(self):
+        job = ClaimedJob.from_mapping(claimed_job())
+        self.assertEqual(job.to_dict(), claimed_job())
+
+    def test_claimed_job_requires_post_claim_attempt_and_iso_lease(self):
+        with self.assertRaises(ContractError):
+            ClaimedJob.from_mapping(claimed_job(attempt=0))
+        with self.assertRaises(ContractError):
+            ClaimedJob.from_mapping(claimed_job(lease_until="not-a-time"))
+
+    def test_idle_claim_response_round_trip(self):
+        raw = {"ok": True, "job": None}
+        self.assertEqual(ClaimResponse.from_mapping(raw).to_dict(), raw)
+
+    def test_shadow_claim_response_round_trip(self):
+        raw = {"ok": True, "job": None, "mode": "shadow"}
+        self.assertEqual(ClaimResponse.from_mapping(raw).to_dict(), raw)
+
+    def test_claim_response_with_job_round_trip(self):
+        raw = {"ok": True, "job": claimed_job()}
+        self.assertEqual(ClaimResponse.from_mapping(raw).to_dict(), raw)
+
+    def test_shadow_mode_cannot_also_return_job(self):
+        with self.assertRaises(ContractError):
+            ClaimResponse.from_mapping({"ok": True, "job": claimed_job(), "mode": "shadow"})
+
+
+class CanonicalCompletionTests(unittest.TestCase):
+    def test_control_hub_completion_round_trip(self):
+        raw = {
+            "worker_id": "h3-shadow",
+            "ok": False,
+            "result": {"exit_code": 17, "stdout": "", "stderr": "failed"},
+            "error": "real child exit 17",
+        }
+        self.assertEqual(ControlHubCompletionRequest.from_mapping(raw).to_dict(), raw)
+
+    def test_completion_ack_is_bounded_to_hub_statuses(self):
+        self.assertEqual(
+            CompletionAck.from_mapping({"ok": True, "status": "COMPLETED"}).status,
+            "COMPLETED",
+        )
+        self.assertEqual(
+            CompletionAck.from_mapping({"ok": True, "status": "FAILED"}).status,
+            "FAILED",
+        )
+        with self.assertRaises(ContractError):
+            CompletionAck.from_mapping({"ok": True, "status": "RUNNING"})
 
 
 class HealthAndTransportTests(unittest.TestCase):
@@ -160,29 +290,32 @@ class HealthAndTransportTests(unittest.TestCase):
         self.assertTrue(health.ok)
         self.assertEqual(health.mode, "safe-readonly")
 
-    def test_claim_schema_is_explicitly_unknown(self):
-        self.assertFalse(CLAIM_SCHEMA_KNOWN)
+    def test_contract_known_but_transport_remains_unbound(self):
         transport = UnboundControlHubTransport()
         self.assertFalse(transport.network_enabled)
+        self.assertTrue(transport.claim_schema_known)
+        self.assertFalse(transport.lease_renewal_schema_known)
         self.assertFalse(transport.routing_authority)
         self.assertFalse(transport.scheduling_authority)
-        with self.assertRaises(ClaimContractUnavailable):
-            transport.claim()
+        with self.assertRaises(LiveTransportUnavailable):
+            transport.claim("h3-shadow", ClaimRequest.create())
+        with self.assertRaises(LeaseRenewalContractUnavailable):
+            transport.renew_lease("job-123")
 
-    def test_unbound_transport_cannot_perform_health_or_completion_io(self):
+    def test_unbound_transport_cannot_perform_any_live_io(self):
         transport = UnboundControlHubTransport()
         with self.assertRaises(LiveTransportUnavailable):
             transport.health()
-        completion = CompletionEnvelope.from_mapping(
-            {
-                "job_id": "job-123",
-                "ok": True,
-                "result": worker_result(),
-                "error": None,
-            }
+        heartbeat = HeartbeatRequest.from_mapping(
+            {"state": "READY", "capabilities": ["h3"], "metadata": {}, "current_job_id": None}
         )
         with self.assertRaises(LiveTransportUnavailable):
-            transport.complete(completion)
+            transport.heartbeat("h3-shadow", heartbeat)
+        completion = ControlHubCompletionRequest.from_mapping(
+            {"worker_id": "h3-shadow", "ok": True, "result": worker_result(), "error": None}
+        )
+        with self.assertRaises(LiveTransportUnavailable):
+            transport.complete("job-123", completion)
 
 
 if __name__ == "__main__":
