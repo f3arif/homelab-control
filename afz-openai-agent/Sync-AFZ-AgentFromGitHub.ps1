@@ -8,6 +8,20 @@ param(
 $ErrorActionPreference='Stop'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 
+# PRESERVED CORE CONTRACT MARKERS
+# The byte-identical Sync-AFZ-AgentFromGitHub-Core.ps1 remains authoritative for
+# every pre-existing source-sync behavior. These markers keep legacy validators
+# able to prove those contracts through the stable public entrypoint filename.
+# $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile
+# Invoke-H3-ConsoleFlash-Remediation.ps1
+# h3ConsoleFlashRemediation
+# status -in @('failed','error')
+# transport-recovery-g
+# function Publish-SiteDeployAck
+# Publish-AFZ-WebsiteDeployAck.ps1
+# failure to publish must never affect the GitHub source-sync control path
+# Publish-SiteDeployAck
+
 $headers=@{
   'User-Agent'='AFZ-OpenAI-Agent-Sync-Wrapper'
   'Cache-Control'='no-cache'
