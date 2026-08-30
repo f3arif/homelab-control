@@ -29,10 +29,13 @@ jobs:
         run: |
           import ast
           from pathlib import Path
+
           root=Path('afz-openai-agent/h3-python-worker')
           py=list(root.rglob('*.py'))
           parsed={}
           imports_by_path={}
+          network_roots={'socket','http','urllib','requests','httpx','aiohttp','websocket','websockets'}
+
           for path in py:
               text=path.read_text(encoding='utf-8')
               tree=ast.parse(text, filename=str(path))
@@ -44,28 +47,83 @@ jobs:
                   elif isinstance(node,ast.ImportFrom) and node.module:
                       imports.add(node.module)
               imports_by_path[path]=imports
-              if path.name!='process.py' and any(name=='subprocess' or name.startswith('subprocess.') for name in imports):
+              roots={name.split('.',1)[0] for name in imports}
+              if path.name!='process.py' and 'subprocess' in roots:
                   raise SystemExit(f'subprocess import outside central wrapper: {path}')
+              if roots & network_roots:
+                  raise SystemExit(f'network import forbidden in staged R2: {path}: {sorted(roots & network_roots)}')
+
           proc=(root/'afz_h3_worker/process.py').read_text(encoding='utf-8')
           for needle in ['CREATE_NO_WINDOW','GIT_TERMINAL_PROMPT','GCM_INTERACTIVE','shell=False','taskkill.exe','/T','/F']:
               if needle not in proc: raise SystemExit(f'process invariant missing: {needle}')
+
           probe_path=root/'shadow_probe.py'
           probe_tree=parsed[probe_path]
-          network_or_process_roots={'subprocess','socket','http','urllib','requests','httpx','aiohttp'}
-          for module in imports_by_path[probe_path]:
-              if module.split('.',1)[0] in network_or_process_roots:
-                  raise SystemExit(f'shadow probe gained network/process import: {module}')
           forbidden_calls={'Popen','run_process','CreateProcess','system','popen','urlopen','request','post','put','delete'}
-          forbidden_constants={'/claim','/complete','Register-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask','Unregister-ScheduledTask'}
+          forbidden_authority_constants={'Register-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask','Unregister-ScheduledTask'}
           for node in ast.walk(probe_tree):
               if isinstance(node,ast.Call):
                   fn=node.func
                   name=fn.id if isinstance(fn,ast.Name) else fn.attr if isinstance(fn,ast.Attribute) else ''
                   if name in forbidden_calls:
                       raise SystemExit(f'shadow probe gained execution/network call: {name}')
-              elif isinstance(node,ast.Constant) and isinstance(node.value,str) and node.value in forbidden_constants:
+              elif isinstance(node,ast.Constant) and isinstance(node.value,str) and node.value in forbidden_authority_constants:
                   raise SystemExit(f'shadow probe gained authority constant: {node.value}')
+
+          contracts_path=root/'afz_h3_worker/contracts.py'
+          contracts_tree=parsed[contracts_path]
+          claim_known=None
+          for node in contracts_tree.body:
+              if isinstance(node,ast.Assign):
+                  for target in node.targets:
+                      if isinstance(target,ast.Name) and target.id=='CLAIM_SCHEMA_KNOWN':
+                          claim_known=ast.literal_eval(node.value)
+          if claim_known is not False:
+              raise SystemExit('R2 must keep CLAIM_SCHEMA_KNOWN=False')
+
+          staged_paths=[contracts_path,root/'afz_h3_worker/transport.py']
+          forbidden_live_literals=('http://','https://','X-AFZ-Token','AFZ_HUB_TOKEN')
+          for path in staged_paths:
+              for node in ast.walk(parsed[path]):
+                  if isinstance(node,ast.Constant) and isinstance(node.value,str):
+                      if any(value in node.value for value in forbidden_live_literals):
+                          raise SystemExit(f'live transport/config literal forbidden in R2: {path}')
+
+          transport_path=root/'afz_h3_worker/transport.py'
+          transport_tree=parsed[transport_path]
+          unbound=None
+          for node in transport_tree.body:
+              if isinstance(node,ast.ClassDef) and node.name=='UnboundControlHubTransport':
+                  unbound=node
+          if unbound is None:
+              raise SystemExit('UnboundControlHubTransport missing')
+          class_constants={}
+          methods={}
+          for node in unbound.body:
+              if isinstance(node,ast.Assign) and len(node.targets)==1 and isinstance(node.targets[0],ast.Name):
+                  try: class_constants[node.targets[0].id]=ast.literal_eval(node.value)
+                  except Exception: pass
+              elif isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)):
+                  methods[node.name]=node
+          for name in ('network_enabled','claim_schema_known','routing_authority','scheduling_authority'):
+              if class_constants.get(name) is not False:
+                  raise SystemExit(f'Unbound transport authority invariant failed: {name}')
+          if 'claim' not in methods:
+              raise SystemExit('Unbound transport claim fail-closed method missing')
+          if not any(isinstance(node,ast.Raise) for node in ast.walk(methods['claim'])):
+              raise SystemExit('Unbound transport claim must fail closed')
+
           readme=(root/'README.md').read_text(encoding='utf-8')
-          for needle in ['NON-AUTHORITATIVE','Control Hub / PostgreSQL / Direct Fabric','OneDrive / SharePoint remains emergency fallback only','Prefect is not introduced','python.exe','WinSW or NSSM','Do not use `pythonw.exe`']:
+          for needle in [
+              'NON-AUTHORITATIVE',
+              'Control Hub / PostgreSQL / Direct Fabric',
+              'OneDrive / SharePoint remains emergency fallback only',
+              'Prefect is not introduced',
+              'CLAIM_SCHEMA_KNOWN=False',
+              'claim request/response schema is not yet proven',
+              'python.exe',
+              'WinSW or NSSM',
+              'Do not use `pythonw.exe`',
+          ]:
               if needle not in readme: raise SystemExit(f'architecture invariant missing: {needle}')
           print('H3_PYTHON_SHADOW_SAFETY=PASS')
