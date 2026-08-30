@@ -49,10 +49,10 @@ jobs:
             if health=$(curl --silent --show-error --fail \
               --connect-timeout 3 --max-time 10 \
               http://100.70.25.8:8797/health 2>/dev/null); then
-              if python - "$AFZ_SHA" <<'PY' <<<"$health"
-          import json, sys
-          expected = sys.argv[1].strip().lower()
-          data = json.load(sys.stdin)
+              if HEALTH="$health" EXPECTED="$AFZ_SHA" python - <<'PY'
+          import json, os
+          expected = os.environ['EXPECTED'].strip().lower()
+          data = json.loads(os.environ['HEALTH'])
           endpoint = data.get('windowsWslMemoryAudit') or {}
           assert (data.get('commit') or '').strip().lower() == expected
           assert data.get('version') == '1.8.0'
