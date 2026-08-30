@@ -39,6 +39,42 @@ function Invoke-Adb([string]$adb,[string[]]$a,[switch]$AllowFailure){
   if(-not $AllowFailure -and $code -ne 0){throw "adb failed exit=$code args=$($a -join ' ') output=$($out -join ' | ')"}
   return [pscustomobject]@{exitCode=$code;output=$out}
 }
+function Invoke-AdbTimed([string]$adb,[string[]]$a,[int]$TimeoutSeconds=120){
+  $outFile=Join-Path $env:TEMP ('familyptt-adb-out-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $errFile=Join-Path $env:TEMP ('familyptt-adb-err-'+[guid]::NewGuid().ToString('n')+'.txt')
+  $argLine=(($a|ForEach-Object{if(([string]$_) -match '\s'){ '"'+(([string]$_).Replace('"','\"'))+'"' }else{[string]$_}}) -join ' ')
+  try{
+    $p=Start-Process -FilePath $adb -ArgumentList $argLine -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+    if(-not $p.WaitForExit($TimeoutSeconds*1000)){
+      try{Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}catch{}
+      Start-Sleep -Milliseconds 500
+      $stdout=$(if(Test-Path $outFile){(Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)}else{''})
+      $stderr=$(if(Test-Path $errFile){(Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)}else{''})
+      throw "adb timed out after ${TimeoutSeconds}s args=$($a -join ' ') stdout=$stdout stderr=$stderr"
+    }
+    $p.WaitForExit()
+    $stdout=$(if(Test-Path $outFile){(Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)}else{''})
+    $stderr=$(if(Test-Path $errFile){(Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)}else{''})
+    $text=(($stdout+"`n"+$stderr).Trim())
+    if($p.ExitCode -ne 0){throw "adb failed exit=$($p.ExitCode) args=$($a -join ' ') output=$text"}
+    return [pscustomobject]@{exitCode=$p.ExitCode;output=@($text)}
+  }finally{Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue}
+}
+function Stop-StalePhase1InstallClients{
+  try{
+    $now=Get-Date
+    foreach($p in @(Get-CimInstance Win32_Process -Filter "Name='adb.exe'" -ErrorAction SilentlyContinue)){
+      $cmd=[string]$p.CommandLine
+      if([string]::IsNullOrWhiteSpace($cmd)){continue}
+      if($cmd -notmatch '(?i)\binstall\b' -or $cmd -notlike '*FamilyPTT-standalone-arm64-phase1.apk*'){continue}
+      $created=$p.CreationDate
+      if($created -and (($now-$created).TotalSeconds -ge 120)){
+        Log "STOP_STALE_ADB_INSTALL pid=$($p.ProcessId) ageSeconds=$([int](($now-$created).TotalSeconds))"
+        Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }catch{Log "STALE_INSTALL_SCAN_ERROR $($_.Exception.Message)"}
+}
 function Get-Devices([string]$adb){
   $r=Invoke-Adb $adb @('devices','-l');$rows=@()
   foreach($line in $r.output){$s=[string]$line;if($s -match '^([^\s]+)\s+device\b'){$rows+=[pscustomobject]@{serial=$Matches[1];line=$s}}}
@@ -81,6 +117,7 @@ try{
   $env:USERPROFILE='C:\Users\Faiz';$env:HOME='C:\Users\Faiz';$env:ANDROID_USER_HOME='C:\Users\Faiz'
   if(Test-Path -LiteralPath 'C:\Users\Faiz\.android\adbkey' -PathType Leaf){$env:ADB_VENDOR_KEYS='C:\Users\Faiz\.android\adbkey'}
   $adb=Find-Adb;if(-not $adb){throw 'adb.exe not found'}
+  Stop-StalePhase1InstallClients
   $devices=@(Get-Devices $adb)
   if(-not($devices.serial -contains $deviceA)){throw 'Pixel 6 Pro USB ADB endpoint is not connected'}
 
@@ -98,10 +135,13 @@ try{
   $result.deviceB.serial=$deviceB;Save-Result $result;$null=Mirror-Result $result
 
   foreach($serial in @($deviceA,$deviceB)){
-    $install=Invoke-Adb $adb @('-s',$serial,'install','-r',$apkPath)
+    Log "INSTALL_START serial=$serial timeout=120s mode=no-streaming"
+    $install=Invoke-AdbTimed $adb @('-s',$serial,'install','--no-streaming','-r',$apkPath) 120
     $text=($install.output -join ' ').Trim()
     if($serial -eq $deviceA){$result.deviceA.installResult=$text}else{$result.deviceB.installResult=$text}
+    Save-Result $result;$null=Mirror-Result $result
     if($text -notmatch '(?i)Success'){throw "install did not report Success for $serial`: $text"}
+    Log "INSTALL_PASS serial=$serial output=$text"
   }
   foreach($serial in @($deviceA,$deviceB)){$null=Invoke-Adb $adb @('-s',$serial,'shell','pm','grant',$package,'android.permission.RECORD_AUDIO') -AllowFailure}
   $result.deviceA.recordAudioGranted=Audio-Granted $adb $deviceA;$result.deviceB.recordAudioGranted=Audio-Granted $adb $deviceB
