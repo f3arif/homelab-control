@@ -34,7 +34,7 @@ R3 incorporated the archived AFZ Control Hub source capture from August 25, 2026
 - Worker claim: `POST /api/workers/{worker_id}/claim`, no body, `lease_seconds` default 60 and server clamp 15–7200, with newer `strict_preferred` support.
 - Claim result fields: `job_id`, `project`, `action`, `payload`, `required_capabilities`, `attempt`, `lease_until`.
 - Canonical completion: `POST /api/jobs/{job_id}/complete` with `worker_id`, `ok`, `result`, and `error`.
-- `CLAIM_SCHEMA_KNOWN=True` and `LEASE_RENEWAL_SCHEMA_KNOWN=False`; no renewal route was evidenced, so renewal is not invented.
+- `CLAIM_SCHEMA_KNOWN=True` and `LEASE_RENEWAL_SCHEMA_KNOWN=False`; **no lease-renew endpoint** was present in the captured source or diagnostic archive, so renewal is not invented.
 - The legacy direct-gateway `/claim` and `/complete` envelopes remain modelled separately from canonical Hub routes.
 
 `UnboundControlHubTransport` still performs no live I/O: `network_enabled=False`, `routing_authority=False`, `scheduling_authority=False`.
