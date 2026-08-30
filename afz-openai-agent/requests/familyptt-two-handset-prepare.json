@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "project": "familyptt",
+  "action": "prepare-two-handset-physical-e2e",
+  "issue": 17,
+  "job_id": "familyptt-two-handset-prepare-20260830T0520Z",
+  "device_a": "19161FDEE008XN",
+  "device_b": "192.168.50.69:38209"
+}
