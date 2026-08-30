@@ -20,17 +20,19 @@ function Write-Result($obj,[string]$path){
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
 }
 function Write-H3HookResult($obj){
-  try{
-    if(Test-Path -LiteralPath $mirrorRoot -PathType Container){
-      ($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $h3HookMirror -Encoding UTF8
-    }
-  }catch{}
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $h3HookMirror -Encoding UTF8}}catch{}
 }
 function Invoke-Phase1FamilyPttPrep {
   $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-Apk-Prepare.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
+function Invoke-H3SshKeyAclRepair {
+  # Reuses the previously verified fixed-key/fixed-fingerprint ACL repair before any H3 SSH mutation.
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Repair-H3-SshKeyAcl.ps1'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot *> $null}catch{}
 }
 function Invoke-H3TailscaleUnattended {
   # Typed, fixed-target one-shot. GitHub is the control input; OneDrive is result-only.
@@ -44,8 +46,10 @@ function Invoke-H3TailscaleUnattended {
     return
   }
   try{
+    $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
     $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request 2>&1 | Out-String).Trim()
     $code=$LASTEXITCODE
+    $ErrorActionPreference=$oldEap
     Write-H3HookResult ([ordered]@{schema=1;status=$(if($code -eq 0){'completed'}else{'failed'});exitCode=$code;helperExists=$true;requestExists=$true;output=$raw;time=(Get-Date -Format o)})
   }catch{
     Write-H3HookResult ([ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;error=$_.Exception.Message;detail=($_ | Out-String).Trim();time=(Get-Date -Format o)})
@@ -61,12 +65,11 @@ if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id
 if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 
 # First-stage typed auxiliary requests are idempotent and isolated from RemoteOps.
-# A failure here must never prevent the existing RemoteOps recovery path.
+# Repair only the pinned H3 key ACL, prove its fingerprint/host, then enforce unattended mode.
+Invoke-H3SshKeyAclRepair
 Invoke-H3TailscaleUnattended
 
-# The Phase 1 FamilyPTT prep is a separate typed, idempotent request. It is invoked
-# here only because this helper already runs at the first AFZ-agent startup stage.
-# Its request status controls activation and it cannot mutate network/backend state.
+# The Phase 1 FamilyPTT prep is a separate typed, idempotent request.
 Invoke-Phase1FamilyPttPrep
 
 $statePath=Join-Path $stateRoot ($id+'.json')
