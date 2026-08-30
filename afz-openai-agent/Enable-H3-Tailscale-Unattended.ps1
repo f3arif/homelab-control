@@ -72,10 +72,13 @@ $prior=$null
 try{$prior=[string](Get-ItemProperty -LiteralPath $policyPath -Name UnattendedMode -ErrorAction Stop).UnattendedMode}catch{}
 New-Item -Path $policyPath -Force | Out-Null
 New-ItemProperty -Path $policyPath -Name UnattendedMode -PropertyType String -Value 'always' -Force | Out-Null
+$oldEap=$ErrorActionPreference
+$ErrorActionPreference='Continue'
 $reload=(& $ts syspolicy reload 2>&1 | Out-String).Trim()
 $reloadExit=$LASTEXITCODE
 $ip=(& $ts ip -4 2>&1 | Out-String).Trim()
 $policy=(& $ts syspolicy list 2>&1 | Out-String)
+$ErrorActionPreference=$oldEap
 $policyLine=(($policy -split "`r?`n") | Where-Object {$_ -match '^\s*UnattendedMode\s+'} | Select-Object -First 1)
 $svc=Get-Service Tailscale -ErrorAction Stop
 $ok=($reloadExit -eq 0 -and $ip -eq '100.106.186.118' -and [string]$policyLine -match '\balways\b' -and [string]$svc.Status -eq 'Running')
@@ -94,12 +97,16 @@ foreach($a in $attempts){
   $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',("UserKnownHostsFile="+$known))
   if($a.hostKeyAlias){$args+=@('-o',('HostKeyAlias='+$a.hostKeyAlias))}
   $args+=@($a.target,'powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
+  $oldEap=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
   $out=@(& $ssh @args 2>&1)
   $code=$LASTEXITCODE
+  $ErrorActionPreference=$oldEap
   $text=($out | Out-String).Trim()
   $parsed=$null
   if($code -eq 0 -and $text){try{$parsed=$text | ConvertFrom-Json}catch{}}
-  $entry=[ordered]@{transport=$a.transport;exitCode=$code;parsed=($null -ne $parsed);output=$(if($parsed){$parsed}else{$text.Substring(0,[math]::Min(3000,$text.Length))})}
+  $safeText=$(if($text){$text.Substring(0,[math]::Min(5000,$text.Length))}else{''})
+  $entry=[ordered]@{transport=$a.transport;exitCode=$code;parsed=($null -ne $parsed);output=$(if($parsed){$parsed}else{$safeText})}
   $attemptResults+=$entry
   if($code -eq 0 -and $parsed -and [bool]$parsed.ok){$success=[ordered]@{transport=$a.transport;result=$parsed};break}
 }
