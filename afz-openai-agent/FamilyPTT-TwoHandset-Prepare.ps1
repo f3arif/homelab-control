@@ -13,11 +13,26 @@ $defaultRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-two-
 if([string]::IsNullOrWhiteSpace($RequestPath)){$RequestPath=$defaultRequest}
 $stateRoot=Split-Path -Parent $ResultPath
 $logFile=Join-Path $stateRoot 'prepare.log'
+$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$diagFile=Join-Path $diagRoot 'FAMILYPTT-TWO-HANDSET-PREPARE-LATEST.txt'
+$utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
 function Save-Result($o){$o|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $ResultPath -Encoding UTF8}
+function Mirror-Result($o){
+  try{
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return $false}
+    $mirror=[ordered]@{
+      purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';project='familyptt';jobId=$o.jobId
+      status=$o.status;ok=$o.ok;classification=$o.classification;startedAt=$o.startedAt;finishedAt=$o.finishedAt
+      deviceA=$o.deviceA;deviceB=$o.deviceB;apk=$o.apk;error=$o.error;mirroredAt=(Get-Date -Format o)
+    }
+    [IO.File]::WriteAllText($diagFile,($mirror|ConvertTo-Json -Depth 12),$utf8)
+    return $true
+  }catch{return $false}
+}
 function Publish-Issue($o){
   try{
     $gh=Get-Command gh.exe -ErrorAction SilentlyContinue
@@ -83,7 +98,7 @@ if($deviceA -ne '19161FDEE008XN'){throw 'unexpected DeviceA; only the proven Pix
 if($deviceB -ne '192.168.50.69:38209'){throw 'unexpected DeviceB; only the currently paired Pixel 8 endpoint is allowed'}
 
 $prior=Read-Json $ResultPath
-if($prior -and [string]$prior.jobId -eq $job -and [string]$prior.status -eq 'completed'){Log "SKIP completed job=$job";exit 0}
+if($prior -and [string]$prior.jobId -eq $job -and [string]$prior.status -eq 'completed'){$null=Mirror-Result $prior;Log "SKIP completed job=$job mirrored=true";exit 0}
 
 $result=[ordered]@{
   schema=1;jobId=$job;status='running';ok=$false;classification='TWO_HANDSET_PREPARE_RUNNING';startedAt=(Get-Date -Format o);finishedAt=$null
@@ -93,6 +108,7 @@ $result=[ordered]@{
   error=$null
 }
 Save-Result $result
+$null=Mirror-Result $result
 Log "START job=$job A=$deviceA B=$deviceB"
 
 try{
@@ -129,7 +145,7 @@ try{
     $hash=(Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLowerInvariant()
     $localApks+=$local;$apkInfo+=[ordered]@{name=$name;source=$remote;sha256=$hash;bytes=(Get-Item -LiteralPath $local).Length}
   }
-  $result.apk.count=$localApks.Count;$result.apk.files=$apkInfo;$result.apk.primarySha256=[string]$apkInfo[0].sha256;Save-Result $result
+  $result.apk.count=$localApks.Count;$result.apk.files=$apkInfo;$result.apk.primarySha256=[string]$apkInfo[0].sha256;Save-Result $result;$null=Mirror-Result $result
 
   if($localApks.Count -eq 1){$install=Invoke-Adb $adb @('-s',$deviceB,'install','-r',$localApks[0])}
   else{$args=@('-s',$deviceB,'install-multiple','-r')+$localApks;$install=Invoke-Adb $adb $args}
@@ -155,13 +171,15 @@ try{
 
   $result.ok=$true;$result.status='completed';$result.classification='TWO_HANDSET_READY_PHYSICAL_AUDIBILITY_PENDING';$result.finishedAt=(Get-Date -Format o)
   Save-Result $result
+  $mirrored=Mirror-Result $result
   $published=Publish-Issue $result
-  Log "PASS job=$job pidA=$pidA pidB=$pidB published=$published apkSha=$($result.apk.primarySha256)"
+  Log "PASS job=$job pidA=$pidA pidB=$pidB mirrored=$mirrored published=$published apkSha=$($result.apk.primarySha256)"
   exit 0
 }catch{
   $result.ok=$false;$result.status='failed';$result.classification='TWO_HANDSET_PREPARE_FAILED';$result.error=$_.Exception.Message;$result.finishedAt=(Get-Date -Format o)
   Save-Result $result
+  $mirrored=Mirror-Result $result
   $published=Publish-Issue $result
-  Log "FAIL job=$job error=$($result.error) published=$published"
+  Log "FAIL job=$job error=$($result.error) mirrored=$mirrored published=$published"
   exit 40
 }
