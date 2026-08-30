@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "project": "ops",
+  "action": "audit-wsl-memory-readonly",
+  "request_id": "windows-wsl-memory-audit-20260829-r1",
+  "enabled": true
+}

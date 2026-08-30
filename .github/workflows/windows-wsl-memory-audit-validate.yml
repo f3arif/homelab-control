@@ -5,12 +5,16 @@ on:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
+      - 'afz-openai-agent/requests/windows-wsl-memory-audit.json'
       - '.github/workflows/windows-wsl-memory-audit.yml'
       - '.github/workflows/windows-wsl-memory-audit-validate.yml'
   pull_request:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+      - 'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
+      - 'afz-openai-agent/requests/windows-wsl-memory-audit.json'
       - '.github/workflows/windows-wsl-memory-audit.yml'
       - '.github/workflows/windows-wsl-memory-audit-validate.yml'
 
@@ -28,7 +32,8 @@ jobs:
         run: |
           foreach ($file in @(
             'afz-openai-agent/AFZ-Agent-Control.ps1',
-            'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1'
+            'afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1',
+            'afz-openai-agent/Queue-Orphan-Request-Watcher.ps1'
           )) {
             $tokens = $null
             $errors = $null
@@ -46,10 +51,13 @@ jobs:
       - name: Validate narrow read-only boundary
         shell: python
         run: |
+          import json
           from pathlib import Path
 
           audit = Path('afz-openai-agent/Invoke-Windows-Wsl-Memory-Audit.ps1').read_text(encoding='utf-8')
           control = Path('afz-openai-agent/AFZ-Agent-Control.ps1').read_text(encoding='utf-8')
+          watcher = Path('afz-openai-agent/Queue-Orphan-Request-Watcher.ps1').read_text(encoding='utf-8')
+          request = json.loads(Path('afz-openai-agent/requests/windows-wsl-memory-audit.json').read_text(encoding='utf-8'))
           workflow = Path('.github/workflows/windows-wsl-memory-audit.yml').read_text(encoding='utf-8')
 
           required_audit = [
@@ -94,6 +102,33 @@ jobs:
           ]
           for marker in required_control:
               assert marker in control, f'missing control boundary marker: {marker}'
+
+          required_watcher = [
+              r'afz-openai-agent\requests\windows-wsl-memory-audit.json',
+              r'afz-openai-agent\Invoke-Windows-Wsl-Memory-Audit.ps1',
+              'audit-wsl-memory-readonly',
+              'atomic-local-readonly-request-from-exact-github-source',
+              'AFZ-WINDOWS-WSL-MEMORY-AUDIT-LATEST.json',
+              'EMERGENCY_DIAGNOSTIC_ACK_ONLY',
+              'Process-WslAuditRequest',
+              'Invoke-WslAuditRunner',
+              "[string]$audit.schema -ne 'afz.windows-wsl-memory-audit.v1'",
+              "[string]$audit.computer -ne 'DESKTOP-10SKF0M'",
+              'readOnly=$true',
+          ]
+          for marker in required_watcher:
+              assert marker in watcher, f'missing local watcher marker: {marker}'
+          for marker in ['Invoke-Expression', 'wsl.exe --shutdown', 'docker.exe stop', 'docker compose down', 'Stop-Process', 'Stop-Service']:
+              assert marker.lower() not in watcher.lower(), f'local watcher contains forbidden WSL audit mutation marker: {marker}'
+          assert 'raw.githubusercontent.com' not in watcher
+
+          assert request == {
+              'schema': 1,
+              'project': 'ops',
+              'action': 'audit-wsl-memory-readonly',
+              'request_id': 'windows-wsl-memory-audit-20260829-r1',
+              'enabled': True,
+          }
 
           required_workflow = [
               'workflow_dispatch:',
