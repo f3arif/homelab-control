@@ -1,0 +1,67 @@
+name: H3 Wake Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-wake-recovery-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-wake-recovery
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate one-shot recovery signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          signal='.github/h3-wake-recovery-signal.txt'
+          grep -Fx 'target=h3' "$signal"
+          grep -Fx 'action=wake-once' "$signal"
+          grep -Eq '^reason=[A-Za-z0-9._-]+$' "$signal"
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Request existing Pi wake service once
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Status before:'
+          curl --silent --show-error --max-time 8 http://100.91.50.9:8087/status/h3 || true
+          echo
+          echo 'Wake response:'
+          curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3
+          echo
+
+      - name: Prove H3 returned to tailnet SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            echo "attempt=$attempt"
+            status=$(curl --silent --show-error --max-time 5 http://100.91.50.9:8087/status/h3 2>/dev/null || true)
+            [ -n "$status" ] && echo "pi_status=$status"
+            if nc -z -w 3 100.106.186.118 22; then
+              echo 'H3_SSH_REACHABLE=PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          exit 1
