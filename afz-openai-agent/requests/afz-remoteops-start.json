@@ -1,0 +1,5 @@
+{
+  "id": "afz-remoteops-start-20260830T1832Z",
+  "taskName": "AFZ Remote Ops",
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued FamilyPTT Phase 1 APK preparation job can be claimed. No task definition, command surface, phone network state, or backend configuration is changed."
+}
