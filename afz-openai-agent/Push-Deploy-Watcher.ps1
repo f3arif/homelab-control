@@ -19,6 +19,8 @@ $compareBase='https://api.github.com/repos/f3arif/homelab-control/compare'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $diagFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.json'
 $runtimeProofFile=Join-Path $diagRoot 'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt'
+$sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$runtimeProofSharedFile=Join-Path $sharedDiagRoot 'AFZ-PUSH-WATCHER-RUNTIME-LATEST.txt'
 $jellyfinRequestRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-Visibility-Request.ps1'
 $familyPttPhase1ApkRunner=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
 $familyPttPhase1ApkRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
@@ -127,17 +129,23 @@ function Save-DiagnosticAck([string]$signal,[string]$status,[string]$message){
   }catch{}
 }
 function Save-RuntimeProof{
-  # Startup-only emergency observability. This file is never consumed as control
-  # input and records no secrets; it only proves which watcher script is in memory.
+  # Startup-only emergency observability. These files are never consumed as control
+  # input and record no secrets; they only prove which watcher script is in memory.
   try{
-    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){return}
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container) -and -not(Test-Path -LiteralPath $sharedDiagRoot -PathType Container)){return}
     $task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Push Deploy Watcher' -ErrorAction SilentlyContinue
     $proc=Get-Process -Id $PID -ErrorAction SilentlyContinue
     $scriptHash=$null
     if($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)){
       $scriptHash=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    [ordered]@{
+    $phase1RequestStatus=$null
+    try{
+      if(Test-Path -LiteralPath $familyPttPhase1ApkRequest -PathType Leaf){
+        $phase1RequestStatus=[string]((Get-Content -LiteralPath $familyPttPhase1ApkRequest -Raw -Encoding UTF8|ConvertFrom-Json).status)
+      }
+    }catch{}
+    $proof=[ordered]@{
       schema=1
       purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
       source='windows-main'
@@ -150,8 +158,17 @@ function Save-RuntimeProof{
       scriptSha256=$scriptHash
       intervalSeconds=$IntervalSeconds
       taskState=$(if($task){[string]$task.State}else{'missing'})
+      familyPttPhase1Binding='typed-active-only'
+      familyPttPhase1RequestStatus=$phase1RequestStatus
       time=(Get-Date -Format o)
-    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimeProofFile -Encoding UTF8
+    }
+    $json=$proof|ConvertTo-Json -Depth 5
+    if(Test-Path -LiteralPath $diagRoot -PathType Container){
+      $json | Set-Content -LiteralPath $runtimeProofFile -Encoding UTF8
+    }
+    if(Test-Path -LiteralPath $sharedDiagRoot -PathType Container){
+      [IO.File]::WriteAllText($runtimeProofSharedFile,$json,(New-Object Text.UTF8Encoding($false)))
+    }
   }catch{}
 }
 function Invoke-UpdaterPass([string]$Updater,[string]$Sha,[int]$Pass){
