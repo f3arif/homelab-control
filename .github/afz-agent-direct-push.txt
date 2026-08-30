@@ -1,5 +1,5 @@
 AFZ direct agent source recovery
-reason=familyptt-r12c-r17-exact-sha-unblock
+reason=familyptt-two-handset-physical-prepare
 target=windows-main
-authority=direct-fabric-plus-github
-requested_at=2026-08-28T23:23:00-04:00
+authority=github-exact-sha
+requested_at=2026-08-30T01:22:00-04:00
