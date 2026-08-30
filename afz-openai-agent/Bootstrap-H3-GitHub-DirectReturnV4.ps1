@@ -100,7 +100,9 @@ try{
 # explicitly provisioned in that profile. Remove the visible console at the
 # action boundary instead: wscript.exe is a GUI-subsystem launcher and passes
 # the real PowerShell child exit code back to Task Scheduler.
-`$action=New-ScheduledTaskAction -Execute "`$env:SystemRoot\System32\wscript.exe" -Argument "//B //Nologo ```"$launcherRemote```""
+`$wscript=Join-Path `$env:SystemRoot 'System32\wscript.exe'
+if(-not(Test-Path -LiteralPath `$wscript -PathType Leaf)){throw "wscript.exe missing: `$wscript"}
+`$action=New-ScheduledTaskAction -Execute `$wscript -Argument '//B //Nologo "C:\AFZ\GitHubDirect\Run-H3-GitHub-DirectReturn-Hidden.vbs"'
 `$trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(15) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
 `$principal=New-ScheduledTaskPrincipal -UserId "`$env:USERDOMAIN\`$env:USERNAME" -LogonType Interactive -RunLevel Highest
 `$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
