@@ -18,6 +18,12 @@ function Write-Result($obj,[string]$path){
   $json | Set-Content -LiteralPath $path -Encoding UTF8
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
 }
+function Invoke-Phase1FamilyPttPrep {
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-Apk-Prepare.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
@@ -26,6 +32,11 @@ $id=([string]$req.id).Trim()
 $requestedTask=([string]$req.taskName).Trim()
 if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id'}
 if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
+
+# The Phase 1 FamilyPTT prep is a separate typed, idempotent request. It is invoked
+# here only because this helper already runs at the first AFZ-agent startup stage.
+# Its request status controls activation and it cannot mutate network/backend state.
+Invoke-Phase1FamilyPttPrep
 
 $statePath=Join-Path $stateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
