@@ -1,13 +1,29 @@
 #Requires -Version 5.1
+[CmdletBinding()]
+param(
+  [string]$InstallRoot='C:\AFZ\homelab-control',
+  [string]$RequestPath='',
+  [string]$StatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\familyptt-oneplus-lan-diag\latest.json'
+)
 $ErrorActionPreference='Stop'
 $serial='95038870'
 $pkg='ca.afzeng.familyptt'
 $bridge='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $out=Join-Path $bridge 'FAMILYPTT-ONEPLUS-LAN-DIAG-LATEST.txt'
 $adb='C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
-$result=[ordered]@{schema=1;purpose='FamilyPTT OnePlus LAN-backup physical diagnostic';readOnly=$true;serial=$serial;package=$pkg;startedAt=(Get-Date -Format o);deviceState=$null;model=$null;pid=$null;appTransportLog=@();connectivity=@();wifi=@();classification='RUNNING';error=$null;finishedAt=$null}
-function Save {$result|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $out -Encoding UTF8}
-Save
+if([string]::IsNullOrWhiteSpace($RequestPath)){$RequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-oneplus-lan-diag.json'}
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StatePath) | Out-Null
+function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
+function Save($o){$json=$o|ConvertTo-Json -Depth 10;$json|Set-Content -LiteralPath $StatePath -Encoding UTF8;try{$json|Set-Content -LiteralPath $out -Encoding UTF8}catch{}}
+$req=Read-Json $RequestPath
+if(-not $req){exit 0}
+if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'diagnose-oneplus-lan-backup'){exit 0}
+if([string]$req.status -ne 'active'){exit 0}
+$job=[string]$req.job_id
+$prior=Read-Json $StatePath
+if($prior -and [string]$prior.jobId -eq $job -and [string]$prior.status -eq 'completed'){Save $prior;exit 0}
+$result=[ordered]@{schema=1;jobId=$job;status='running';purpose='FamilyPTT OnePlus LAN-backup physical diagnostic';readOnly=$true;serial=$serial;package=$pkg;startedAt=(Get-Date -Format o);deviceState=$null;model=$null;pid=$null;appTransportLog=@();connectivity=@();wifi=@();classification='RUNNING';error=$null;finishedAt=$null}
+Save $result
 try {
  if(-not(Test-Path -LiteralPath $adb -PathType Leaf)){throw 'adb.exe not found'}
  $devices=@(& $adb devices -l 2>&1)
@@ -29,9 +45,9 @@ try {
  if($appText -match 'LAN_BACKUP_AVAILABLE'){$result.classification='APP_CLASSIFIED_LAN_BACKUP_UI_OR_STATE_PROPAGATION_SUSPECT'}
  elseif($connText -match 'TRANSPORT_WIFI|WIFI'){if($connText -match 'VALIDATED|NET_CAPABILITY_VALIDATED'){$result.classification='ANDROID_REPORTS_VALIDATED_WIFI_DESPITE_BLOCK'}else{$result.classification='WIFI_CONNECTED_NOT_VALIDATED_EXPO_REACHABILITY_STALE_SUSPECT'}}
  else{$result.classification='CONNECTIVITY_EVIDENCE_NEEDS_REVIEW'}
- $result.finishedAt=(Get-Date -Format o);Save;exit 0
+ $result.status='completed';$result.finishedAt=(Get-Date -Format o);Save $result;exit 0
 } catch {
- $result.error=$_.Exception.Message
+ $result.status='failed';$result.error=$_.Exception.Message
  if($result.classification -eq 'RUNNING'){$result.classification='DIAGNOSTIC_FAILED'}
- $result.finishedAt=(Get-Date -Format o);Save;exit 40
+ $result.finishedAt=(Get-Date -Format o);Save $result;exit 40
 }
