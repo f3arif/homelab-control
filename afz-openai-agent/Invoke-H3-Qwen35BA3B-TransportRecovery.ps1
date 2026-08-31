@@ -26,6 +26,7 @@ Set-StrictMode -Version 2.0
 # Launch-H3-Qwen35BA3B-WebsiteTest.ps1
 $jobId='qwen35b-a3b-website-20260830-r1'
 $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1'
+$inspector=Join-Path $InstallRoot 'afz-openai-agent\Inspect-H3-Qwen35BA3B-PostReturn.ps1'
 
 if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){
   [ordered]@{ok=$false;status='failed';classification='QWEN35B_R1_POSTRETURN_ONLY_WRONG_HOST';jobId=$jobId;modelCallIssued=$false;host=$env:COMPUTERNAME}|ConvertTo-Json -Depth 10 -Compress
@@ -52,6 +53,23 @@ if($text -match '127\.0\.0\.1:11434/api/generate' -or $text -match '(?im)^\s*[&]
 $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot | Select-Object -Last 1
 $code=$LASTEXITCODE
 if($raw -is [string]){try{$parsed=$raw|ConvertFrom-Json}catch{$parsed=[ordered]@{raw=[string]$raw}}}else{$parsed=$raw}
+
+$inspection=[ordered]@{ok=$false;status='not-run'}
+if(Test-Path -LiteralPath $inspector -PathType Leaf){
+  try{
+    $inspectRaw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $inspector -InstallRoot $InstallRoot | Select-Object -Last 1
+    $inspectCode=$LASTEXITCODE
+    if($inspectRaw -is [string]){try{$inspectParsed=$inspectRaw|ConvertFrom-Json}catch{$inspectParsed=[ordered]@{raw=[string]$inspectRaw}}}else{$inspectParsed=$inspectRaw}
+    $inspection=[ordered]@{ok=($inspectCode -eq 0);status=$(if($inspectCode -eq 0){'completed'}else{'failed'});exit=$inspectCode;result=$inspectParsed}
+  }catch{
+    $inspection=[ordered]@{ok=$false;status='exception';error=$_.Exception.Message}
+  }
+}else{
+  $inspection=[ordered]@{ok=$false;status='inspector-missing';path=$inspector}
+}
+
+# Post-return recovery status remains separate from source-sync success. An
+# inspection failure must not permit any transport/model replay.
 [ordered]@{
   ok=($code -eq 0)
   status=$(if($code -eq 0){'completed'}else{'failed'})
@@ -60,6 +78,7 @@ if($raw -is [string]){try{$parsed=$raw|ConvertFrom-Json}catch{$parsed=[ordered]@
   modelCallIssued=$false
   postReturnExit=$code
   postReturn=$parsed
+  postReturnInspection=$inspection
   time=(Get-Date -Format o)
-}|ConvertTo-Json -Depth 40 -Compress
+}|ConvertTo-Json -Depth 50 -Compress
 exit $code
