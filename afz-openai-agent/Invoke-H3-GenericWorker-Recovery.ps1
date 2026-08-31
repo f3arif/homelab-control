@@ -91,6 +91,7 @@ $knownCorruptLauncherSha='a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74
 $launcherBackup=$expectedLauncher+'.bak-corrupt-a09e6760'
 $heartbeat='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Heartbeat\h3.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
+$staleResetMinSeconds=120
 
 # Reconstruct exactly the command the console-flash remediation was meant to
 # preserve from the original known-good Generic Worker task action.
@@ -153,7 +154,18 @@ $launcherShaAfter=$null
 $canonicalLauncherSha=$null
 $workerSha=$null
 $started=$false
+$staleTaskReset=$false
+$taskRunAgeSeconds=$null
+$heartbeatAgeBeforeSeconds=$null
+$heartbeatBeforeWrite=$null
+$heartbeatFreshAfterStart=$false
 $classification=''
+
+if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
+  $heartbeatBeforeItem=Get-Item -LiteralPath $heartbeat -ErrorAction Stop
+  $heartbeatBeforeWrite=$heartbeatBeforeItem.LastWriteTime
+  $heartbeatAgeBeforeSeconds=[math]::Round(((Get-Date)-$heartbeatBeforeWrite).TotalSeconds,1)
+}
 
 if($before.Count -gt 0){
   $classification='H3_GENERIC_WORKER_ALREADY_RUNNING'
@@ -202,7 +214,24 @@ if($before.Count -gt 0){
 
   $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
   if([string]$task.State -eq 'Running'){
-    $classification=$(if($launcherRepaired){'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RUNNING'}else{'H3_GENERIC_WORKER_TASK_RUNNING_NO_WORKER'})
+    if(-not $heartbeatBeforeWrite){throw 'Generic Worker task is Running with no worker process, but heartbeat file is missing; refusing stale-task reset without age proof.'}
+    $taskRunAgeSeconds=[math]::Round(((Get-Date)-$taskInfo.LastRunTime).TotalSeconds,1)
+    if($taskRunAgeSeconds -lt $staleResetMinSeconds){throw "Generic Worker task is Running with no worker process but is too recent for reset. runAgeSeconds=$taskRunAgeSeconds minimum=$staleResetMinSeconds"}
+    if($heartbeatAgeBeforeSeconds -lt $staleResetMinSeconds){throw "Generic Worker task is Running with no worker process but heartbeat is too recent for reset. heartbeatAgeSeconds=$heartbeatAgeBeforeSeconds minimum=$staleResetMinSeconds"}
+
+    Stop-ScheduledTask -TaskName $taskName
+    $staleTaskReset=$true
+    $stopDeadline=(Get-Date).AddSeconds(10)
+    do{
+      Start-Sleep -Milliseconds 250
+      $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+      if([string]$task.State -ne 'Running'){break}
+    }while((Get-Date) -lt $stopDeadline)
+    if([string]$task.State -eq 'Running'){throw 'Generic Worker stale task did not leave Running state after bounded Stop-ScheduledTask.'}
+
+    Start-ScheduledTask -TaskName $taskName
+    $started=$true
+    $classification=$(if($launcherRepaired){'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RESET_AND_STARTED'}else{'H3_GENERIC_WORKER_STALE_TASK_RESET_AND_STARTED'})
   }else{
     Start-ScheduledTask -TaskName $taskName
     $started=$true
@@ -220,6 +249,20 @@ if($started){
   }while((Get-Date) -lt $deadline)
 }else{
   $after=@(Get-WorkerProcesses)
+}
+
+if($started -and $after.Count -gt 0 -and $heartbeatBeforeWrite){
+  $heartbeatDeadline=(Get-Date).AddSeconds(45)
+  do{
+    if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
+      $heartbeatNow=Get-Item -LiteralPath $heartbeat -ErrorAction Stop
+      if($heartbeatNow.LastWriteTime -gt $heartbeatBeforeWrite){
+        $heartbeatFreshAfterStart=$true
+        break
+      }
+    }
+    Start-Sleep -Milliseconds 750
+  }while((Get-Date) -lt $heartbeatDeadline)
 }
 
 $postTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -265,7 +308,14 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
   $heartbeatAgeSec=[math]::Round(((Get-Date)-$item.LastWriteTime).TotalSeconds,1)
 }
 
-$mutation=$(if($launcherRepaired -and $started){'REPAIR_KNOWN_CORRUPT_LAUNCHER+START_EXISTING_TASK_ONLY'}elseif($launcherRepaired){'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY'}elseif($started){'START_EXISTING_TASK_ONLY'}else{'NONE'})
+$mutation=$(
+  if($launcherRepaired -and $staleTaskReset){'REPAIR_KNOWN_CORRUPT_LAUNCHER+RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY'}
+  elseif($staleTaskReset){'RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY'}
+  elseif($launcherRepaired -and $started){'REPAIR_KNOWN_CORRUPT_LAUNCHER+START_EXISTING_TASK_ONLY'}
+  elseif($launcherRepaired){'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY'}
+  elseif($started){'START_EXISTING_TASK_ONLY'}
+  else{'NONE'}
+)
 $result=[ordered]@{
   schema=1;host=$env:COMPUTERNAME;taskName=$taskName;taskState=[string]$taskInfo.TaskName;
   lastTaskResult=[int64]$taskInfo.LastTaskResult;lastRunTime=$taskInfo.LastRunTime.ToString('o');
@@ -278,9 +328,11 @@ $result=[ordered]@{
   knownCorruptLauncherSha=$knownCorruptLauncherSha;launcherShaBefore=$launcherShaBefore;launcherShaAfter=$launcherShaAfter;canonicalLauncherSha=$canonicalLauncherSha;
   launcherExists=$launcherExists;launcher=$launcherMeta;launcherProcessCount=$launcherProcesses.Count;launcherProcesses=$launcherProcesses;
   workerScriptExists=$workerScriptExists;workerScript=$workerMeta;expectedWorkerSha=$expectedWorkerSha;workerSha=$workerSha;
-  beforeProcessCount=$before.Count;beforeProcesses=$before;taskStartIssued=$started;
+  beforeProcessCount=$before.Count;beforeProcesses=$before;taskStartIssued=$started;staleTaskReset=$staleTaskReset;
+  staleResetMinSeconds=$staleResetMinSeconds;taskRunAgeSeconds=$taskRunAgeSeconds;heartbeatAgeBeforeSeconds=$heartbeatAgeBeforeSeconds;
   afterProcessCount=$after.Count;afterProcesses=$after;heartbeatPath=$heartbeat;
-  heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;taskEvents=$taskEvents;
+  heartbeatBeforeWrite=$(if($heartbeatBeforeWrite){$heartbeatBeforeWrite.ToString('o')}else{$null});
+  heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;heartbeatFreshAfterStart=$heartbeatFreshAfterStart;taskEvents=$taskEvents;
   classification=$classification;mutation=$mutation;
   capturedAt=(Get-Date).ToString('o')
 }
@@ -288,6 +340,11 @@ if($after.Count -eq 0){
   if([string]::IsNullOrWhiteSpace([string]$result.classification)){$result.classification='H3_GENERIC_WORKER_RECOVERY_FAILED_NO_PROCESS'}
   $result|ConvertTo-Json -Depth 14 -Compress
   exit 12
+}
+if($started -and -not $heartbeatFreshAfterStart){
+  $result.classification='H3_GENERIC_WORKER_RECOVERY_FAILED_NO_FRESH_HEARTBEAT'
+  $result|ConvertTo-Json -Depth 14 -Compress
+  exit 13
 }
 $result|ConvertTo-Json -Depth 14 -Compress
 exit 0
@@ -300,17 +357,17 @@ exit 0
   if([int]$remoteResult.exit -ne 0 -and -not $payload){throw "H3 recovery failed exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   if(-not $payload){throw "H3 recovery returned no JSON. exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   if([string]$payload.host -ne $expectedHost){throw "Unexpected H3 host: $($payload.host)"}
-  if([int]$payload.afterProcessCount -lt 1){
+  if([int]$payload.afterProcessCount -lt 1 -or ([bool]$payload.taskStartIssued -and -not [bool]$payload.heartbeatFreshAfterStart)){
     Save-Result ([ordered]@{
       schema=1;status='failed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
-      error='H3 Generic Worker remains absent after recovery.';
+      error=$(if([int]$payload.afterProcessCount -lt 1){'H3 Generic Worker remains absent after recovery.'}else{'H3 Generic Worker process started but did not publish a fresh heartbeat within the bounded proof window.'});
       systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
-      remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
+      remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;staleTaskReset=[bool]$payload.staleTaskReset;
       hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
       launcherRepaired=[bool]$payload.launcherRepaired;launcherRepairBackup=$payload.launcherRepairBackup;
       expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
-      afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
-      heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
+      afterProcessCount=[int]$payload.afterProcessCount;heartbeatBeforeWrite=$payload.heartbeatBeforeWrite;heartbeatLastWrite=$payload.heartbeatLastWrite;
+      heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;heartbeatFreshAfterStart=[bool]$payload.heartbeatFreshAfterStart;remoteMutation=[string]$payload.mutation;
       sshExit=[int]$remoteResult.exit;sshStderr=[string]$remoteResult.stderr;
       remote=$payload;capturedAt=(Get-Date -Format o)
     })
@@ -320,12 +377,12 @@ exit 0
   Save-Result ([ordered]@{
     schema=1;status='completed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
     systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
-    remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
+    remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;staleTaskReset=[bool]$payload.staleTaskReset;
     hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
     launcherRepaired=[bool]$payload.launcherRepaired;launcherRepairBackup=$payload.launcherRepairBackup;
     expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
-    afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
-    heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
+    afterProcessCount=[int]$payload.afterProcessCount;heartbeatBeforeWrite=$payload.heartbeatBeforeWrite;heartbeatLastWrite=$payload.heartbeatLastWrite;
+    heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;heartbeatFreshAfterStart=[bool]$payload.heartbeatFreshAfterStart;remoteMutation=[string]$payload.mutation;
     remote=$payload;capturedAt=(Get-Date -Format o)
   })
   exit 0
