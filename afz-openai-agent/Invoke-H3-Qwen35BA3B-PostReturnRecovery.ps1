@@ -162,7 +162,11 @@ if(-not `$existing){
 }
 if([string]`$existing.State -ne 'Running'){
   Start-ScheduledTask -TaskName `$taskName
-  `$taskAction=$(if(`$taskAction -eq 'REGISTERED'){'REGISTERED_AND_STARTED'}else{'STARTED_EXISTING'})
+  if(`$taskAction -eq 'REGISTERED'){
+    `$taskAction='REGISTERED_AND_STARTED'
+  }else{
+    `$taskAction='STARTED_EXISTING'
+  }
 }else{
   `$taskAction='ALREADY_RUNNING'
 }
