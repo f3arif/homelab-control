@@ -1,0 +1,64 @@
+name: AFZ Control Health Read Only
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/afz-control-health-readonly-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-control-health-readonly
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read Windows-main control health
+        shell: bash
+        run: |
+          set -euo pipefail
+          health=$(curl --silent --show-error --fail \
+            --connect-timeout 3 --max-time 12 \
+            http://100.70.25.8:8797/health)
+          echo 'WINDOWS_MAIN_CONTROL_HEALTH_BEGIN'
+          python -m json.tool <<<"$health"
+          echo 'WINDOWS_MAIN_CONTROL_HEALTH_END'
+
+      - name: Read H3 reachability only
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'H3_PI_STATUS_BEGIN'
+          curl --silent --show-error --max-time 8 http://100.91.50.9:8087/status/h3 || true
+          echo
+          echo 'H3_PI_STATUS_END'
+          if nc -z -w 3 100.106.186.118 22; then
+            echo 'H3_TCP22_REACHABLE=PASS'
+          else
+            echo 'H3_TCP22_REACHABLE=FAIL'
+          fi
+
+      - name: Enforce read-only workflow contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/afz-control-health-readonly.yml'
+          ! grep -Eq 'curl .*(-X|--request)[[:space:]]+(POST|PUT|PATCH|DELETE)' "$wf"
+          ! grep -Eq '\bssh\b|Start-ScheduledTask|Stop-ScheduledTask|Stop-Process|New-NetFirewallRule|Remove-NetFirewallRule' "$wf"
+          echo 'READ_ONLY_CONTRACT=PASS'
