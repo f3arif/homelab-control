@@ -8,7 +8,7 @@ param(
 # changes tasks, processes, files outside its own ACK files, or deployment state.
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
-$qwenTextAckFile=Join-Path $diagRoot 'AFZ-QWEN35B-WINDOWS-STATE-LATEST.txt'
+$qwenTextAckFile=Join-Path $diagRoot 'AFZ-GITHUB-TRANSPORT-ACK-LATEST.inspect3.txt'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
 $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
