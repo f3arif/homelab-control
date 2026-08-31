@@ -1,0 +1,85 @@
+name: Hermes AFZ Typed MCP Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/hermes-mcp/**'
+      - '.github/workflows/hermes-afz-typed-mcp-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/hermes-mcp/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax checks
+        run: |
+          python3 -m py_compile afz-openai-agent/hermes-mcp/afz_hermes_mcp.py
+          bash -n afz-openai-agent/hermes-mcp/install_hpenvy_afz_mcp.sh
+
+      - name: Unit tests
+        run: python3 -m unittest afz-openai-agent/hermes-mcp/test_afz_hermes_mcp.py -v
+
+      - name: Validate typed read-only contract
+        shell: python
+        run: |
+          from pathlib import Path
+          bridge = Path('afz-openai-agent/hermes-mcp/afz_hermes_mcp.py').read_text()
+          installer = Path('afz-openai-agent/hermes-mcp/install_hpenvy_afz_mcp.sh').read_text()
+
+          required_bridge = [
+              'DEFAULT_BASE_URL = "http://100.70.25.8:8797"',
+              'ALLOWED_HOST = "100.70.25.8"',
+              'ALLOWED_PORT = 8797',
+              '"/health"',
+              '"/api/windows-wsl-memory-audit"',
+              '"action": "audit"',
+              'afz_control_health',
+              'afz_windows_wsl_memory_audit',
+              'MCPServer(',
+          ]
+          for token in required_bridge:
+              if token not in bridge:
+                  raise SystemExit(f'Missing bridge invariant: {token}')
+
+          forbidden_bridge = [
+              'subprocess', 'os.system', 'Popen(', 'shell=True',
+              '/api/control', '/api/update-now', '/api/push-deploy',
+              '/api/h3-qwen27b-benchmark', '/api/queue-orphan-remediation',
+              '/api/jellyfin-visibility-repair', '/api/hpenvy-surfshark-exitnode',
+              '11434', 'ssh ', 'scp ',
+          ]
+          for token in forbidden_bridge:
+              if token.lower() in bridge.lower():
+                  raise SystemExit(f'Forbidden bridge capability: {token}')
+
+          required_installer = [
+              "EXPECTED_USER=\"coolyo\"",
+              "EXPECTED_TS_IP=\"100.71.26.69\"",
+              "'supports_parallel_tool_calls': False",
+              "'tools': {'include': ['afz_control_health','afz_windows_wsl_memory_audit']}",
+              'hermes mcp test afz-fabric',
+              'AFZ_HERMES_MCP_READY_READONLY_TYPED',
+              "'arbitraryShell':False",
+              "'generationTestStarted':False",
+              "'ollamaExposureChanged':False",
+          ]
+          for token in required_installer:
+              if token not in installer:
+                  raise SystemExit(f'Missing installer invariant: {token}')
+
+          forbidden_installer = [
+              'hermes gateway', 'hermes chat', 'ollama ', 'systemctl enable',
+              'sudo ', 'apt install', 'apt-get install', 'curl ', 'wget ',
+          ]
+          for token in forbidden_installer:
+              if token.lower() in installer.lower():
+                  raise SystemExit(f'Forbidden installer behavior: {token}')
