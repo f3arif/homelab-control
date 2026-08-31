@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
-      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1'
       - 'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
       - '.github/workflows/h3-generic-worker-system-recovery-validate.yml'
 
@@ -23,7 +22,6 @@ jobs:
         run: |
           $paths=@(
             'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1',
-            'afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1',
             'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
           )
           foreach($path in $paths){
@@ -36,81 +34,31 @@ jobs:
           }
           'POWERSHELL_PARSE=PASS'
 
-      - name: Prove only approved sync-core reconciliation delta
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1')
-          s=p.read_text(encoding='utf-8-sig')
-          copied_new="  $copied=@()\n  $removed=@()\n"
-          copied_old="  $copied=@()\n"
-          if s.count(copied_new) != 1:
-              raise SystemExit(f'Expected exactly one approved removed-array insertion; found {s.count(copied_new)}')
-          s=s.replace(copied_new,copied_old,1)
-          marker='  # Exact overlay retirement reconciliation.'
-          if s.count(marker) != 1:
-              raise SystemExit(f'Expected exactly one reconciliation block; found {s.count(marker)}')
-          start=s.index(marker)
-          end=s.index('  foreach($ps1 in @(',start)
-          block=s[start:end]
-          for needle in ["$managedRetiredArtifacts=@('requests\\afz-site-deploy.json')",'Remove-Item -LiteralPath $localArtifact -Force','$removed+=$rel']:
-              if needle not in block:
-                  raise SystemExit(f'Missing approved reconciliation marker: {needle}')
-          for needle in ['-Recurse','Get-ChildItem','Stop-Process','Stop-ScheduledTask','Set-ScheduledTask','Disable-ScheduledTask','Enable-ScheduledTask','requests\\*']:
-              if needle in block:
-                  raise SystemExit(f'Forbidden primitive in reconciliation block: {needle}')
-          s=s[:start]+s[end:]
-          state_new="$state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;removed=$removed;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs-managed-retired-artifact-prune';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}"
-          state_old="$state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}"
-          if s.count(state_new) != 1:
-              raise SystemExit(f'Expected exactly one approved state audit change; found {s.count(state_new)}')
-          s=s.replace(state_new,state_old,1)
-          emit_new="Emit ([ordered]@{ok=$true;changed=(($copied.Count -gt 0) -or ($removed.Count -gt 0));remoteSha=$remoteSha;localSha=$localSha;copied=$copied;removed=$removed;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})"
-          emit_old="Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})"
-          if s.count(emit_new) != 1:
-              raise SystemExit(f'Expected exactly one approved changed/removed emit change; found {s.count(emit_new)}')
-          s=s.replace(emit_new,emit_old,1)
-          Path('.normalized-sync-core.ps1').write_text(s,encoding='utf-8',newline='\n')
-          PY
-          actual=$(git hash-object .normalized-sync-core.ps1)
-          rm -f .normalized-sync-core.ps1
-          test "$actual" = 'b2086a00fd196a86b86a7a248f5521e73d984e4e'
-          echo 'SYNC_CORE_BASELINE_AFTER_APPROVED_RECONCILIATION_NORMALIZATION=PASS'
-
-      - name: Verify bounded recovery safety contract
+      - name: Verify GitHub sync still invokes H3 preflight
         shell: powershell
         run: |
           $wrapper=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
+          foreach($needle in @('Invoke-H3-GenericWorker-Recovery.ps1','h3GenericWorkerRecovery')){
+            if(-not $wrapper.Contains($needle)){throw "Wrapper invariant missing: $needle"}
+          }
+          'SYNC_WRAPPER_H3_PREFLIGHT=PASS'
+
+      - name: Verify H3 automatic helper is read-only
+        shell: powershell
+        run: |
           $helper=Get-Content 'afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1' -Raw
-
           foreach($needle in @(
-            'Sync-AFZ-AgentFromGitHub-Core.ps1',
-            'Invoke-H3-GenericWorker-Recovery.ps1',
-            'h3GenericWorkerRecovery'
-          )){if(-not $wrapper.Contains($needle)){throw "Wrapper invariant missing: $needle"}}
-
-          foreach($needle in @(
-            "C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system",
-            "AFZ H3 Generic Worker",
-            "C:\AFZ\H3Worker\AFZ-H3-Worker.ps1",
-            "C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs",
-            'Principal.UserId -match',
-            'Faiz$',
+            'C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system',
+            'AFZ H3 Generic Worker',
+            'C:\AFZ\H3Worker\AFZ-H3-Worker.ps1',
+            'C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs',
             "Principal.LogonType -eq 'Interactive'",
-            'Start-ScheduledTask -TaskName $taskName',
-            'Stop-ScheduledTask -TaskName $taskName',
-            'H3_GENERIC_WORKER_ALREADY_RUNNING',
-            'H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK',
-            'H3_GENERIC_WORKER_STALE_TASK_RESET_AND_STARTED',
-            'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RESET_AND_STARTED',
-            'H3_GENERIC_WORKER_RECOVERY_FAILED_NO_FRESH_HEARTBEAT',
-            '$staleResetMinSeconds=120',
-            '$taskRunAgeSeconds -lt $staleResetMinSeconds',
-            '$heartbeatAgeBeforeSeconds -lt $staleResetMinSeconds',
-            'heartbeatFreshAfterStart',
-            'staleTaskReset',
+            'H3_GENERIC_WORKER_RUNNING',
+            'H3_GENERIC_WORKER_STALE_TASK_RUNNING_AUTHORIZATION_REQUIRED',
+            'H3_GENERIC_WORKER_TASK_NOT_RUNNING_START_ELIGIBLE',
+            'H3_GENERIC_WORKER_LAUNCHER_CORRUPT_REPAIR_REQUIRED',
+            'readOnly=$true',
+            "remoteMutation='NONE'",
             'StrictHostKeyChecking=yes',
             'IdentitiesOnly=yes',
             'RedirectStandardInput $inFile',
@@ -119,43 +67,30 @@ jobs:
             '[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))',
             "'-EncodedCommand',$bootstrapEncoded",
             '[IO.File]::WriteAllText($inFile,$RemoteScript,$utf8)',
-            'hiddenActionVerified',
-            'principalVerified',
             'b61d8eb4e625549836c504d102bc0139d1c97786447e2ea071ac9dbc8f02795e',
-            'a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74e0d06e7d55',
-            '.bak-corrupt-a09e6760',
-            'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY',
-            'RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY',
-            'Generic Worker script hash mismatch; refusing launcher repair/start.',
-            'Known corrupt launcher hash matched but content did not match the audited truncated launcher; refusing write.',
-            '[IO.File]::WriteAllBytes($launcherBackup,[IO.File]::ReadAllBytes($expectedLauncher))',
-            'Move-Item -LiteralPath $tmpLauncher -Destination $expectedLauncher -Force',
-            'Repaired launcher content verification failed.'
-          )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
+            'a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74e0d06e7d55'
+          )){if(-not $helper.Contains($needle)){throw "Read-only H3 invariant missing: $needle"}}
 
-          if($helper.Contains("'-Command','-'")){throw 'Ambiguous PowerShell -Command - stdin transport must not return.'}
-          if($helper -match '(?i)ToBase64String[^\r\n]*RemoteScript'){throw 'Full remote recovery script must never be encoded onto the SSH command line.'}
-          if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM recovery.'}
-          if($helper.Contains("Run-AFZ-H3-Worker-Hidden")){throw 'Recovery must not use the obsolete fuzzy launcher name.'}
           foreach($forbidden in @(
+            'Start-ScheduledTask',
+            'Stop-ScheduledTask',
             'Register-ScheduledTask',
             'Set-ScheduledTask',
             'Unregister-ScheduledTask',
             'Disable-ScheduledTask',
+            'Enable-ScheduledTask',
             'Stop-Process',
             'Set-Acl',
             'icacls.exe',
-            'Remove-Item -LiteralPath $key'
-          )){if($helper.Contains($forbidden)){throw "Forbidden mutation primitive present: $forbidden"}}
+            'New-ItemProperty',
+            'Set-ItemProperty',
+            '[IO.File]::WriteAllBytes',
+            'Move-Item -LiteralPath $tmpLauncher'
+          )){if($helper.Contains($forbidden)){throw "Automatic H3 mutation primitive present: $forbidden"}}
 
-          $startMatches=[regex]::Matches($helper,'Start-ScheduledTask').Count
-          if($startMatches -ne 2){throw "Expected exactly two mutually exclusive Start-ScheduledTask call sites; found $startMatches"}
-          $stopTaskMatches=[regex]::Matches($helper,'Stop-ScheduledTask').Count
-          if($stopTaskMatches -ne 2){throw "Expected one Stop-ScheduledTask call plus one diagnostic error string reference; found $stopTaskMatches"}
-          $actualStopCalls=[regex]::Matches($helper,'Stop-ScheduledTask -TaskName \$taskName').Count
-          if($actualStopCalls -ne 1){throw "Expected exactly one bounded stale-task Stop-ScheduledTask call; found $actualStopCalls"}
+          if($helper.Contains("'-Command','-'")){throw 'Ambiguous PowerShell -Command - stdin transport must not return.'}
+          if($helper -match '(?i)ToBase64String[^\r\n]*RemoteScript'){throw 'Full remote probe script must never be encoded onto the SSH command line.'}
+          if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM preflight.'}
           $encodedMatches=[regex]::Matches($helper,'ToBase64String').Count
           if($encodedMatches -ne 1){throw "Expected exactly one tiny bootstrap encoding operation; found $encodedMatches"}
-          $launcherMoveMatches=[regex]::Matches($helper,'Move-Item -LiteralPath \$tmpLauncher -Destination \$expectedLauncher -Force').Count
-          if($launcherMoveMatches -ne 1){throw "Expected exactly one guarded launcher replacement; found $launcherMoveMatches"}
-          'H3_GENERIC_RECOVERY_SAFETY=PASS'
+          'H3_GENERIC_AUTOMATIC_READ_ONLY=PASS'
