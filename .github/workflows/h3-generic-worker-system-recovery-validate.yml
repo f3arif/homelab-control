@@ -76,7 +76,17 @@ jobs:
             "'-EncodedCommand',$bootstrapEncoded",
             '[IO.File]::WriteAllText($inFile,$RemoteScript,$utf8)',
             'hiddenActionVerified',
-            'principalVerified'
+            'principalVerified',
+            'b61d8eb4e625549836c504d102bc0139d1c97786447e2ea071ac9dbc8f02795e',
+            'a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74e0d06e7d55',
+            '.bak-corrupt-a09e6760',
+            'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY',
+            'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RUNNING',
+            'Generic Worker script hash mismatch; refusing launcher repair/start.',
+            'Known corrupt launcher hash matched but content did not match the audited truncated launcher; refusing write.',
+            '[IO.File]::WriteAllBytes($launcherBackup,[IO.File]::ReadAllBytes($expectedLauncher))',
+            'Move-Item -LiteralPath $tmpLauncher -Destination $expectedLauncher -Force',
+            'Repaired launcher content verification failed.'
           )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
 
           if($helper.Contains("'-Command','-'")){throw 'Ambiguous PowerShell -Command - stdin transport must not return.'}
@@ -99,4 +109,6 @@ jobs:
           if($startMatches -ne 1){throw "Expected exactly one Start-ScheduledTask occurrence; found $startMatches"}
           $encodedMatches=[regex]::Matches($helper,'ToBase64String').Count
           if($encodedMatches -ne 1){throw "Expected exactly one tiny bootstrap encoding operation; found $encodedMatches"}
+          $launcherMoveMatches=[regex]::Matches($helper,'Move-Item -LiteralPath \$tmpLauncher -Destination \$expectedLauncher -Force').Count
+          if($launcherMoveMatches -ne 1){throw "Expected exactly one guarded launcher replacement; found $launcherMoveMatches"}
           'H3_GENERIC_RECOVERY_SAFETY=PASS'
