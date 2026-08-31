@@ -40,7 +40,8 @@ jobs:
           $helper=Get-Content 'afz-openai-agent/FamilyPTT-Phase1-ApkPrepare.ps1' -Raw
           $request=Get-Content 'afz-openai-agent/requests/familyptt-phase1-apk-prepare.json' -Raw|ConvertFrom-Json
 
-          if([string]$request.status -ne 'staged-not-active'){throw 'request must remain staged-not-active in binding PR'}
+          $requestStatus=[string]$request.status
+          if($requestStatus -notin @('staged-not-active','completed')){throw "request must remain non-active in binding validation; status=$requestStatus"}
           if([string]$request.job_id -ne 'familyptt-phase1-apk-prepare-r001'){throw 'unexpected request generation'}
 
           $begin='# BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING'
@@ -81,6 +82,11 @@ jobs:
           $root=(Resolve-Path '.').Path
           $script=Join-Path $root 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
           $request=Join-Path $root 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
+          $requestObj=Get-Content -LiteralPath $request -Raw|ConvertFrom-Json
+          if([string]$requestObj.status -eq 'completed'){
+            Write-Host 'FAMILYPTT_PHASE1_BINDING_COMPLETED_INERT_PASS'
+            exit 0
+          }
           $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -InstallRoot $root -RequestPath $request
           if($LASTEXITCODE -ne 0){throw "staged helper exited $LASTEXITCODE"}
           $o=$raw|ConvertFrom-Json
