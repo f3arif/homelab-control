@@ -36,30 +36,27 @@ jobs:
                   raise SystemExit(f'Expected one copied-array anchor, found {s.count(a1)}')
               s=s.replace(a1,r1,1)
 
-              a2="""    if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
-  }
-
-  foreach($ps1 in @("""
-              block="""    if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
-  }
-
-  # Exact overlay retirement reconciliation. Git intentionally removed the one-time
-  # AFZ website active request after the verified R8 cutover. Overlay-style copying
-  # must not leave that retired control file behind locally forever.
-  # This is deliberately narrow: no directory mirror, wildcard prune, or recursive
-  # deletion. A managed artifact is removed only when the exact downloaded Git SHA
-  # does not contain that same relative file.
-  $managedRetiredArtifacts=@('requests\\afz-site-deploy.json')
-  foreach($rel in $managedRetiredArtifacts){
-    $sourceArtifact=Join-Path $src $rel
-    $localArtifact=Join-Path $dst $rel
-    if(-not(Test-Path -LiteralPath $sourceArtifact -PathType Leaf) -and (Test-Path -LiteralPath $localArtifact -PathType Leaf)){
-      Remove-Item -LiteralPath $localArtifact -Force
-      $removed+=$rel
-    }
-  }
-
-  foreach($ps1 in @("""
+              a2="    if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}\n  }\n\n  foreach($ps1 in @(" 
+              block=(
+                  "    if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}\n"
+                  "  }\n\n"
+                  "  # Exact overlay retirement reconciliation. Git intentionally removed the one-time\n"
+                  "  # AFZ website active request after the verified R8 cutover. Overlay-style copying\n"
+                  "  # must not leave that retired control file behind locally forever.\n"
+                  "  # This is deliberately narrow: no directory mirror, wildcard prune, or recursive\n"
+                  "  # deletion. A managed artifact is removed only when the exact downloaded Git SHA\n"
+                  "  # does not contain that same relative file.\n"
+                  "  $managedRetiredArtifacts=@('requests\\afz-site-deploy.json')\n"
+                  "  foreach($rel in $managedRetiredArtifacts){\n"
+                  "    $sourceArtifact=Join-Path $src $rel\n"
+                  "    $localArtifact=Join-Path $dst $rel\n"
+                  "    if(-not(Test-Path -LiteralPath $sourceArtifact -PathType Leaf) -and (Test-Path -LiteralPath $localArtifact -PathType Leaf)){\n"
+                  "      Remove-Item -LiteralPath $localArtifact -Force\n"
+                  "      $removed+=$rel\n"
+                  "    }\n"
+                  "  }\n\n"
+                  "  foreach($ps1 in @(" 
+              )
               if s.count(a2) != 1:
                   raise SystemExit(f'Expected one copy-loop anchor, found {s.count(a2)}')
               s=s.replace(a2,block,1)
