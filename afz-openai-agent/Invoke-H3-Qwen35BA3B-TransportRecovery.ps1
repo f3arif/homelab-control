@@ -21,6 +21,7 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-transport-recover
 $statePath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-QWEN35B-TRANSPORT-RECOVERY-LATEST.json'
+$mirrorTextPath=Join-Path $mirrorRoot 'AFZ-QWEN35B-TRANSPORT-RECOVERY-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 
@@ -31,7 +32,12 @@ function Read-Json([string]$Path){
 function Save-State($o){
   $json=$o|ConvertTo-Json -Depth 30 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
-  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
+  try{
+    if(Test-Path -LiteralPath $mirrorRoot -PathType Container){
+      [IO.File]::WriteAllText($mirrorPath,$json,$utf8)
+      [IO.File]::WriteAllText($mirrorTextPath,$json,$utf8)
+    }
+  }catch{}
   Write-Output $json
 }
 function Test-Tcp([string]$HostName,[int]$Port,[int]$TimeoutMs=1200){
