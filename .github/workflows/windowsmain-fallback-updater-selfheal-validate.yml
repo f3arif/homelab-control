@@ -50,11 +50,11 @@ jobs:
             "fallbackUpdaterRepair"
           )){if(-not $text.Contains($needle)){throw "Missing fallback-updater contract: $needle"}}
 
-          $m=[regex]::Match($text,'(?s)function Ensure-FallbackUpdaterTask\s*\{(.*?)\n\}\n\nif\(-not \[string\]::IsNullOrWhiteSpace')
+          $m=[regex]::Match($text,'(?s)function Ensure-FallbackUpdaterTask\s*\{(.*?)\r?\n\}\r?\n\r?\nif\(-not \[string\]::IsNullOrWhiteSpace')
           if(-not $m.Success){throw 'Could not isolate Ensure-FallbackUpdaterTask.'}
           $body=$m.Groups[1].Value
           foreach($forbidden in @('Start-ScheduledTask','Stop-ScheduledTask','Set-ScheduledTask','Unregister-ScheduledTask','Disable-ScheduledTask','Enable-ScheduledTask','Stop-Process','taskkill','.Kill(')){
             if($body.Contains($forbidden)){throw "Forbidden mutation in fallback updater repair: $forbidden"}
           }
           if($body.IndexOf('if($existing)') -gt $body.IndexOf('Register-ScheduledTask')){throw 'Existing-task no-op gate must precede registration.'}
-          if($body -notmatch "if\(\$existing\).*?status='present'.*?return" ){throw 'Existing updater task is not a no-op return path.'}
+          if($body -notmatch "(?s)if\(\$existing\).*?status='present'.*?return" ){throw 'Existing updater task is not a no-op return path.'}
