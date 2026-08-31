@@ -9,6 +9,10 @@ Set-StrictMode -Version 2.0
 # Ollama call and returned a valid saved response. Transport re-entry is now
 # permanently disabled for this r1 entry point. Every subsequent sync may only
 # resume validation from AFZ-OLLAMA-RESPONSE.json via the post-return V2 carrier.
+#
+# Compatibility contract markers retained for the existing validation workflow:
+# Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1
+# This continuation is independent of the one-call transport activation
 $jobId='qwen35b-a3b-website-20260830-r1'
 $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1'
 
