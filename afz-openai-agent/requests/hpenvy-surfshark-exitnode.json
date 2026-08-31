@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "hpenvy-surfshark-exitnode-audit-20260831-r1",
+  "taskName": "HP Envy Surfshark Exit Node",
+  "target": "coolyo@100.71.26.69",
+  "mode": "audit",
+  "expectedIngress": "tailscale0",
+  "expectedEgress": "surfshark",
+  "authority": "github-exact-sha",
+  "oneDriveRole": "backup-only",
+  "requestedAt": "2026-08-31T10:16:00-04:00"
+}
