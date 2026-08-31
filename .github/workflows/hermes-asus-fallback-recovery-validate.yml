@@ -1,0 +1,50 @@
+name: Hermes ASUS Fallback Recovery Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Repair-Hermes-ASUS-Fallback.ps1'
+      - '.github/workflows/hermes-asus-fallback-recovery-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Repair-Hermes-ASUS-Fallback.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent\Repair-Hermes-ASUS-Fallback.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
+      - name: Validate guarded recovery contract
+        shell: powershell
+        run: |
+          $s=Get-Content 'afz-openai-agent\Repair-Hermes-ASUS-Fallback.ps1' -Raw
+          foreach($required in @(
+            'DESKTOP-10SKF0M',
+            'f50b5bb0fa5b48caef753c790bf0b09a3570918a',
+            'qwen3.5:4b',
+            'http://127.0.0.1:11434/v1',
+            'http://127.0.0.1:11434/api/show',
+            'hermes-agent.incomplete-',
+            'Move-Item -LiteralPath $installDir -Destination $backupDir',
+            '-Commit $pin -ForceCommit',
+            "Join-Path $binDir 'hermes.exe'",
+            "Join-Path $binDir 'hermes.cmd'",
+            "'HERMES_ASUS_FALLBACK_READY_LOCAL_OLLAMA_64K'",
+            'preservedIncompleteInstall=$backupDir',
+            'commitVerified=$true',
+            'gatewayStarted=$false',
+            'generationTestStarted=$false',
+            'ollamaExposureChanged=$false'
+          )){if(-not $s.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule','Remove-Item -LiteralPath $backupDir','Remove-Item -Recurse','git clean','git reset --hard')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden recovery behavior: $forbidden"}}
