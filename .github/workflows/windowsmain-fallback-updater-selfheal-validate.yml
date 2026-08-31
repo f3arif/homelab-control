@@ -57,4 +57,4 @@ jobs:
             if($body.Contains($forbidden)){throw "Forbidden mutation in fallback updater repair: $forbidden"}
           }
           if($body.IndexOf('if($existing)') -gt $body.IndexOf('Register-ScheduledTask')){throw 'Existing-task no-op gate must precede registration.'}
-          if($body -notmatch "(?s)if\(\$existing\).*?status='present'.*?return" ){throw 'Existing updater task is not a no-op return path.'}
+          if($body -notmatch '(?s)if\(\$existing\).*?status=''present''.*?return'){throw 'Existing updater task is not a no-op return path.'}
