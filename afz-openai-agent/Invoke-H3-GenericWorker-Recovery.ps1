@@ -30,6 +30,12 @@ function Save-Result($o){
 }
 
 function Invoke-H3([string]$RemoteScript){
+  # Keep the full recovery body off the Windows process command line. Windows
+  # PowerShell's special `-Command -` stdin mode proved unreliable through the
+  # OpenSSH server (exit 0 with blank stdout/stderr), so use a tiny encoded
+  # bootstrap that explicitly consumes stdin and invokes exactly that body.
+  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 recovery stdin was empty.''};Invoke-Expression $script'
+  $bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
   $args=@(
     '-i',$key,
     '-o','IdentitiesOnly=yes',
@@ -38,7 +44,7 @@ function Invoke-H3([string]$RemoteScript){
     '-o','StrictHostKeyChecking=yes',
     '-o',('UserKnownHostsFile='+$known),
     $target,
-    'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command','-'
+    'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded
   )
   $inFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-in-'+[guid]::NewGuid().ToString('n')+'.ps1')
   $outFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-out-'+[guid]::NewGuid().ToString('n')+'.txt')
@@ -153,7 +159,7 @@ exit 0
   $remoteResult=Invoke-H3 $remote
   if([int]$remoteResult.exit -ne 0){throw "H3 recovery failed exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   $jsonLine=@(([string]$remoteResult.stdout -split "`r?`n")|Where-Object{$_ -match '^\{.*\}$'}|Select-Object -Last 1)
-  if(-not $jsonLine){throw "H3 recovery returned no JSON. stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
+  if(-not $jsonLine){throw "H3 recovery returned no JSON. exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   $payload=$jsonLine|ConvertFrom-Json -ErrorAction Stop
   if([string]$payload.host -ne $expectedHost){throw "Unexpected H3 host: $($payload.host)"}
   if([int]$payload.afterProcessCount -lt 1){throw 'H3 Generic Worker remains absent after recovery.'}

@@ -70,16 +70,17 @@ jobs:
             'StrictHostKeyChecking=yes',
             'IdentitiesOnly=yes',
             'RedirectStandardInput $inFile',
-            "'-Command','-'",
+            '[Console]::In.ReadToEnd()',
+            'Invoke-Expression $script',
+            '[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))',
+            "'-EncodedCommand',$bootstrapEncoded",
+            '[IO.File]::WriteAllText($inFile,$RemoteScript,$utf8)',
             'hiddenActionVerified',
             'principalVerified'
           )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
 
-          foreach($legacyTransport in @(
-            '[Convert]::ToBase64String',
-            "'-EncodedCommand'"
-          )){if($helper.Contains($legacyTransport)){throw "Legacy command-line transport must not return: $legacyTransport"}}
-
+          if($helper.Contains("'-Command','-'")){throw 'Ambiguous PowerShell -Command - stdin transport must not return.'}
+          if($helper -match '(?i)ToBase64String[^\r\n]*RemoteScript'){throw 'Full remote recovery script must never be encoded onto the SSH command line.'}
           if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM recovery.'}
           if($helper.Contains("Run-AFZ-H3-Worker-Hidden")){throw 'Recovery must not use the obsolete fuzzy launcher name.'}
           foreach($forbidden in @(
@@ -96,4 +97,6 @@ jobs:
 
           $startMatches=[regex]::Matches($helper,'Start-ScheduledTask').Count
           if($startMatches -ne 1){throw "Expected exactly one Start-ScheduledTask occurrence; found $startMatches"}
+          $encodedMatches=[regex]::Matches($helper,'ToBase64String').Count
+          if($encodedMatches -ne 1){throw "Expected exactly one tiny bootstrap encoding operation; found $encodedMatches"}
           'H3_GENERIC_RECOVERY_SAFETY=PASS'
