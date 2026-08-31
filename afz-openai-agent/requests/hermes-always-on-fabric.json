@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "id": "hermes-always-on-fabric-preflight-20260831-r1",
+  "action": "hermes-fabric-rollout",
+  "phase": "preflight",
+  "status": "active",
+  "primary": {
+    "role": "persistent-controller",
+    "target": "coolyo@100.71.26.69",
+    "host": "hpenvy",
+    "platform": "ubuntu",
+    "provider": "openai-api",
+    "provider_source": "reuse-existing-local-afz-openai-credential-if-present"
+  },
+  "secondary": {
+    "role": "windows-execution-and-fallback",
+    "target": "windows-main",
+    "host": "DESKTOP-10SKF0M",
+    "platform": "windows",
+    "hermes_home": "C:\\ProgramData\\AFZ\\Hermes",
+    "provider": "custom-ollama",
+    "base_url": "http://127.0.0.1:11434/v1"
+  },
+  "accelerator": {
+    "role": "gpu-model-worker",
+    "target": "h3",
+    "host": "DESKTOP-H3R6CQN",
+    "change_in_this_phase": false
+  },
+  "context_length": 65536,
+  "hermes_commit": "f50b5bb0fa5b48caef753c790bf0b09a3570918a",
+  "start_gateway": false,
+  "run_generation_test": false,
+  "expose_ollama": false,
+  "control_plane": "github",
+  "oneDriveRole": "emergency-observability-only",
+  "requestedAt": "2026-08-31"
+}
