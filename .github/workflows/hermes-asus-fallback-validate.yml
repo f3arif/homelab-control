@@ -44,6 +44,7 @@ jobs:
           foreach($required in @(
             'qwen3.5:4b',
             'http://127.0.0.1:11434/v1',
+            'http://127.0.0.1:11434/api/show',
             "'HERMES_ASUS_FALLBACK_READY_LOCAL_OLLAMA_64K'",
             "'HERMES_ASUS_INSTALL_STARTED'",
             "'HERMES_ASUS_INSTALL_FAILED'",
@@ -55,4 +56,4 @@ jobs:
             'generationTestStarted=$false',
             'ollamaExposureChanged=$false'
           )){if(-not $s.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden behavior: $forbidden"}}
+          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule','show ''qwen3.5:4b'' --json','show $Model --json')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden behavior: $forbidden"}}
