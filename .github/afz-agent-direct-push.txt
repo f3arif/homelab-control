@@ -1,6 +1,6 @@
 AFZ direct agent source recovery
-reason=h3-generic-worker-stale-task-reset-g3
-request_commit=5eb36a64481fa7fea278e851bb0656ff49e69988
+reason=h3-tailscale-recurrence-live-probe
+request_commit=d9dadafb6d420db5159b67b0dab6577da4700945
 target=windows-main
 authority=github-exact-sha
-requested_at=2026-08-31T11:04:00-04:00
+requested_at=2026-08-31T11:39:00-04:00
