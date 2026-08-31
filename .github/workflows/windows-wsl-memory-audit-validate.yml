@@ -98,7 +98,7 @@ jobs:
           assert audit.count("$publishRoot = 'C:\\Users\\Faiz\\OneDrive - AFZ Engineering Inc\\AFZ Shared\\AFZ Workers\\Results'") == 1
 
           required_control = [
-              "version='1.8.0'",
+              "version='1.10.0'",
               "'/api/windows-wsl-memory-audit'",
               "Invoke-WindowsWslMemoryAudit",
               "actions=@('audit')",
