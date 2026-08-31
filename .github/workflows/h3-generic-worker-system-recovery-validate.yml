@@ -36,13 +36,48 @@ jobs:
           }
           'POWERSHELL_PARSE=PASS'
 
-      - name: Prove preserved sync core is byte-identical
+      - name: Prove only approved sync-core reconciliation delta
         shell: bash
         run: |
           set -euo pipefail
-          actual=$(git hash-object afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1)
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub-Core.ps1')
+          s=p.read_text(encoding='utf-8-sig')
+          copied_new="  $copied=@()\n  $removed=@()\n"
+          copied_old="  $copied=@()\n"
+          if s.count(copied_new) != 1:
+              raise SystemExit(f'Expected exactly one approved removed-array insertion; found {s.count(copied_new)}')
+          s=s.replace(copied_new,copied_old,1)
+          marker='  # Exact overlay retirement reconciliation.'
+          if s.count(marker) != 1:
+              raise SystemExit(f'Expected exactly one reconciliation block; found {s.count(marker)}')
+          start=s.index(marker)
+          end=s.index('  foreach($ps1 in @(',start)
+          block=s[start:end]
+          for needle in ["$managedRetiredArtifacts=@('requests\\afz-site-deploy.json')",'Remove-Item -LiteralPath $localArtifact -Force','$removed+=$rel']:
+              if needle not in block:
+                  raise SystemExit(f'Missing approved reconciliation marker: {needle}')
+          for needle in ['-Recurse','Get-ChildItem','Stop-Process','Stop-ScheduledTask','Set-ScheduledTask','Disable-ScheduledTask','Enable-ScheduledTask','requests\\*']:
+              if needle in block:
+                  raise SystemExit(f'Forbidden primitive in reconciliation block: {needle}')
+          s=s[:start]+s[end:]
+          state_new="$state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;removed=$removed;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs-managed-retired-artifact-prune';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}"
+          state_old="$state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}"
+          if s.count(state_new) != 1:
+              raise SystemExit(f'Expected exactly one approved state audit change; found {s.count(state_new)}')
+          s=s.replace(state_new,state_old,1)
+          emit_new="Emit ([ordered]@{ok=$true;changed=(($copied.Count -gt 0) -or ($removed.Count -gt 0));remoteSha=$remoteSha;localSha=$localSha;copied=$copied;removed=$removed;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})"
+          emit_old="Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})"
+          if s.count(emit_new) != 1:
+              raise SystemExit(f'Expected exactly one approved changed/removed emit change; found {s.count(emit_new)}')
+          s=s.replace(emit_new,emit_old,1)
+          Path('.normalized-sync-core.ps1').write_text(s,encoding='utf-8',newline='\n')
+          PY
+          actual=$(git hash-object .normalized-sync-core.ps1)
+          rm -f .normalized-sync-core.ps1
           test "$actual" = 'b2086a00fd196a86b86a7a248f5521e73d984e4e'
-          echo 'SYNC_CORE_BLOB_IDENTITY=PASS'
+          echo 'SYNC_CORE_BASELINE_AFTER_APPROVED_RECONCILIATION_NORMALIZATION=PASS'
 
       - name: Verify bounded recovery safety contract
         shell: powershell
