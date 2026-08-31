@@ -1,3 +1,0 @@
-schema=1
-purpose=validate-updater-strict-child-sync-result
-mutation=none
