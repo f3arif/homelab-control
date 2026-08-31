@@ -3,11 +3,11 @@
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
 $requestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\jellyfin-userstore-audit.json'
-$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-Restart-Preflight.ps1'
+$helper=Join-Path $InstallRoot 'afz-openai-agent\tools\Jellyfin-HomeVideos-Wedding-Forensics.ps1'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\jellyfin-userstore-audit'
 $stateFile=Join-Path $stateRoot 'latest.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-$diagFile=Join-Path $diagRoot 'JELLYFIN-RESTART-PREFLIGHT-LATEST.txt'
+$diagFile=Join-Path $diagRoot 'JELLYFIN-HOME-WEDDING-FORENSICS-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
@@ -20,7 +20,7 @@ $job=[string]$req.job_id
 if($job -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid Jellyfin userstore audit job_id'}
 $prior=Read-Json $stateFile
 if($prior -and [string]$prior.job_id -eq $job -and [string]$prior.status -in @('completed','failed')){exit 0}
-if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){throw "Jellyfin restart preflight helper missing: $helper"}
+if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){throw "Jellyfin Home/Wedding forensic helper missing: $helper"}
 $started=Get-Date
 try{
   $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper 2>&1 | ForEach-Object {[string]$_})
