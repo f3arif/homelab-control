@@ -42,7 +42,10 @@ jobs:
             'IdentitiesOnly=yes',
             'QWEN35B_POSTRETURN_RECOVERY_STARTED_FROM_SAVED_RESPONSE',
             'modelCallIssuedByRecovery=$false',
-            'Recover-H3-Qwen35BA3B-PostReturn.ps1'
+            'Recover-H3-Qwen35BA3B-PostReturn.ps1',
+            'Set-ScheduledTask -TaskName `$taskName -Action `$action -Principal `$principal -Settings `$settings',
+            "`$taskAction='REFRESHED_EXISTING'",
+            "`$taskAction='REFRESHED_AND_STARTED'"
           )){if(-not $carrier.Contains($needle)){throw "carrier invariant missing: $needle"}}
           if($carrier -match '127\.0\.0\.1:11434/api/generate'){throw 'carrier must not contain Ollama generate endpoint'}
           if($carrier -match '(?im)^\s*[&]?\s*ollama(?:\.exe)?\s'){throw 'carrier must not invoke Ollama CLI'}
