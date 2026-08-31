@@ -1,0 +1,100 @@
+name: TEMP H3 Protected Gate Patch
+
+on:
+  push:
+    branches: [fix/h3-protected-stale-task-gate]
+    paths:
+      - '.github/workflows/temp-h3-protected-gate-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/h3-protected-stale-task-gate
+          fetch-depth: 0
+      - name: Remove automatic stale task reset
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1')
+          s=p.read_text(encoding='utf-8')
+          old="""  $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+  if([string]$task.State -eq 'Running'){
+    if(-not $heartbeatBeforeWrite){throw 'Generic Worker task is Running with no worker process, but heartbeat file is missing; refusing stale-task reset without age proof.'}
+    $taskRunAgeSeconds=[math]::Round(((Get-Date)-$taskInfo.LastRunTime).TotalSeconds,1)
+    if($taskRunAgeSeconds -lt $staleResetMinSeconds){throw \"Generic Worker task is Running with no worker process but is too recent for reset. runAgeSeconds=$taskRunAgeSeconds minimum=$staleResetMinSeconds\"}
+    if($heartbeatAgeBeforeSeconds -lt $staleResetMinSeconds){throw \"Generic Worker task is Running with no worker process but heartbeat is too recent for reset. heartbeatAgeSeconds=$heartbeatAgeBeforeSeconds minimum=$staleResetMinSeconds\"}
+
+    Stop-ScheduledTask -TaskName $taskName
+    $staleTaskReset=$true
+    $stopDeadline=(Get-Date).AddSeconds(10)
+    do{
+      Start-Sleep -Milliseconds 250
+      $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+      if([string]$task.State -ne 'Running'){break}
+    }while((Get-Date) -lt $stopDeadline)
+    if([string]$task.State -eq 'Running'){throw 'Generic Worker stale task did not leave Running state after bounded Stop-ScheduledTask.'}
+
+    Start-ScheduledTask -TaskName $taskName
+    $started=$true
+    $classification=$(if($launcherRepaired){'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RESET_AND_STARTED'}else{'H3_GENERIC_WORKER_STALE_TASK_RESET_AND_STARTED'})
+  }else{
+    Start-ScheduledTask -TaskName $taskName
+    $started=$true
+    $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
+  }
+"""
+          new="""  $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+  if([string]$task.State -eq 'Running'){
+    # A Running scheduled task with no worker process is a protected reset boundary.
+    # Preserve diagnostics, but never stop/restart it from automatic source sync.
+    $taskRunAgeSeconds=[math]::Round(((Get-Date)-$taskInfo.LastRunTime).TotalSeconds,1)
+    $classification=$(if($launcherRepaired){'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RUNNING_AUTHORIZATION_REQUIRED'}else{'H3_GENERIC_WORKER_STALE_TASK_RUNNING_AUTHORIZATION_REQUIRED'})
+  }else{
+    Start-ScheduledTask -TaskName $taskName
+    $started=$true
+    $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
+  }
+"""
+          if s.count(old)!=1:
+              raise SystemExit(f'stale reset block count={s.count(old)} expected=1')
+          s=s.replace(old,new,1)
+          old_mut="""$mutation=$(
+  if($launcherRepaired -and $staleTaskReset){'REPAIR_KNOWN_CORRUPT_LAUNCHER+RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY'}
+  elseif($staleTaskReset){'RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY'}
+  elseif($launcherRepaired -and $started){'REPAIR_KNOWN_CORRUPT_LAUNCHER+START_EXISTING_TASK_ONLY'}
+  elseif($launcherRepaired){'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY'}
+  elseif($started){'START_EXISTING_TASK_ONLY'}
+  else{'NONE'}
+)
+"""
+          new_mut="""$mutation=$(
+  if($launcherRepaired -and $started){'REPAIR_KNOWN_CORRUPT_LAUNCHER+START_EXISTING_TASK_ONLY'}
+  elseif($launcherRepaired){'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY'}
+  elseif($started){'START_EXISTING_TASK_ONLY'}
+  else{'NONE'}
+)
+"""
+          if s.count(old_mut)!=1:
+              raise SystemExit(f'mutation block count={s.count(old_mut)} expected=1')
+          s=s.replace(old_mut,new_mut,1)
+          if 'Stop-ScheduledTask' in s:
+              raise SystemExit('Stop-ScheduledTask remains in automatic H3 recovery helper')
+          if s.count('Start-ScheduledTask -TaskName $taskName') != 1:
+              raise SystemExit('expected exactly one guarded Start-ScheduledTask call')
+          p.write_text(s,encoding='utf-8',newline='\n')
+      - name: Commit protected-gate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1
+          git diff --cached --check
+          git commit -m 'Restore protected gate for H3 stale task reset'
+          git push origin HEAD:fix/h3-protected-stale-task-gate
