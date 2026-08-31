@@ -61,14 +61,14 @@ jobs:
         shell: powershell
         run: |
           $name='Global\AFZUpdaterMutexCI-'+[guid]::NewGuid().ToString('n')
-          $escaped=$name.Replace("'","''")
-          $child="`$m=New-Object Threading.Mutex(`$false,'$escaped');`$null=`$m.WaitOne();[Environment]::Exit(0)"
-          $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
-          $p=Start-Process powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -PassThru -Wait
-          if($p.ExitCode -ne 0){throw 'Mutex-owner child failed.'}
           $m=New-Object Threading.Mutex($false,$name)
+          $escaped=$name.Replace("'","''")
+          $child="`$childMutex=New-Object Threading.Mutex(`$false,'$escaped');`$null=`$childMutex.WaitOne();[Environment]::Exit(0)"
+          $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
           $caught=$false;$owned=$false
           try{
+            $p=Start-Process powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -PassThru -Wait
+            if($p.ExitCode -ne 0){throw 'Mutex-owner child failed.'}
             try{$owned=$m.WaitOne([TimeSpan]::FromSeconds(5))}
             catch [System.Threading.AbandonedMutexException]{$caught=$true;$owned=$true}
             if(-not $caught){throw 'Expected AbandonedMutexException was not observed.'}
