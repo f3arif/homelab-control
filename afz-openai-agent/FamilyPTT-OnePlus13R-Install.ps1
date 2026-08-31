@@ -19,7 +19,14 @@ $stateRoot=Split-Path -Parent $ResultPath
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
-function Save($o){$o|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $ResultPath -Encoding UTF8;try{if(Test-Path -LiteralPath $bridgeRoot -PathType Container){$o|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $diagPath -Encoding UTF8}}catch{}}
+function Save($o){
+  $o|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $ResultPath -Encoding UTF8
+  try{
+    if(Test-Path -LiteralPath $bridgeRoot -PathType Container){
+      $o|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $diagPath -Encoding UTF8
+    }
+  }catch{}
+}
 function Find-Adb{
   $c=Get-Command adb.exe -ErrorAction SilentlyContinue|Select-Object -First 1
   if($c){if($c.Source){return [string]$c.Source};if($c.Path){return [string]$c.Path}}
