@@ -42,7 +42,8 @@ jobs:
         run: |
           $r=Get-Content 'afz-openai-agent\requests\h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
           if([int]$r.schema -ne 1){throw 'schema'}
-          if([string]$r.action -ne 'install-and-configure'){throw 'action'}
+          if([string]$r.action -ne 'emergency-fallback-disabled'){throw 'primary Hermes request must remain disabled while emergency fallback owns execution'}
+          if([string]$r.status -ne 'EMERGENCY_FALLBACK'){throw 'fallback status'}
           if([string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){throw 'target'}
           if([string]$r.provider -ne 'custom'){throw 'provider'}
           if([string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'base_url must be loopback only'}
