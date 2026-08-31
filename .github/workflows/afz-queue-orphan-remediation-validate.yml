@@ -45,7 +45,7 @@ jobs:
           control=Path('afz-openai-agent/AFZ-Agent-Control.ps1').read_text()
           runner=Path('afz-openai-agent/Invoke-AFZ-Queue-Orphan-Remediation.ps1').read_text()
           required_control=[
-            "version='1.8.0'",
+            "version='1.10.0'",
             "'/api/queue-orphan-remediation'",
             'Test-DeployPeer',
             "@('audit','apply')",

@@ -109,12 +109,26 @@ function Invoke-JellyfinVisibilityRepair([string]$Action){
   if([string]::IsNullOrWhiteSpace($raw)){throw 'Jellyfin visibility runner returned empty output'}
   try{return ($raw|ConvertFrom-Json)}catch{throw "Jellyfin visibility runner returned invalid JSON: $raw"}
 }
+function Invoke-HPEnvySurfsharkExitNode([string]$Action){
+  if($Action -notin @('audit','apply')){throw 'unsupported HP Envy Surfshark action'}
+  $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Surfshark-ExitNode.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-surfshark-exitnode.json'
+  if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){throw "HP Envy Surfshark runner missing: $runner"}
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){throw "HP Envy Surfshark request missing: $request"}
+  $contract=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+  if([string]$contract.taskName -ne 'HP Envy Surfshark Exit Node'){throw 'HP Envy Surfshark request task mismatch'}
+  if([string]$contract.target -ne 'coolyo@100.71.26.69'){throw 'HP Envy Surfshark request target mismatch'}
+  if(([string]$contract.mode).Trim().ToLowerInvariant() -ne $Action){throw 'HP Envy Surfshark request mode mismatch'}
+  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -InstallRoot $InstallRoot -RequestPath $request 2>&1 | Out-String).Trim()
+  if([string]::IsNullOrWhiteSpace($raw)){throw 'HP Envy Surfshark runner returned empty output'}
+  try{return ($raw|ConvertFrom-Json)}catch{throw "HP Envy Surfshark runner returned invalid JSON: $raw"}
+}
 
 $listener=New-Object Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")}
 $listener.Start()
-Log "START version=1.9.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly jellyfinVisibilityRepair=typed prospectEngineProbe=enabled"
+Log "START version=1.10.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly jellyfinVisibilityRepair=typed hpEnvySurfsharkExitNode=typed-fixed-target prospectEngineProbe=enabled"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
@@ -167,14 +181,23 @@ try{
       $r=Invoke-JellyfinVisibilityRepair $action;Log "Jellyfin visibility action=$action sha=$sha requested by $ip";Send-Json $ctx 200 $r;continue
     }
 
+    if($path -eq '/api/hpenvy-surfshark-exitnode' -and $ctx.Request.HttpMethod -eq 'POST'){
+      if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='HP Envy Surfshark peer not authorized';client=$ip};continue}
+      $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
+      $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
+      if($action -notin @('audit','apply')){Send-Json $ctx 400 @{ok=$false;error='unsupported HP Envy Surfshark action'};continue}
+      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}$' -or $sha -ne $current){Send-Json $ctx 409 @{ok=$false;error='HP Envy Surfshark source mismatch';current=$current;requested=$sha};continue}
+      $r=Invoke-HPEnvySurfsharkExitNode $action;Log "HP Envy Surfshark action=$action classification=$([string]$r.classification) sha=$sha requested by $ip";Send-Json $ctx 200 $r;continue
+    }
+
     if(-not ((Get-AllowedClients) -contains $ip)){Send-Json $ctx 403 @{ok=$false;error='client not allowlisted';client=$ip};continue}
     if($ctx.Request.HttpMethod -eq 'OPTIONS'){Send-Json $ctx 200 @{ok=$true};continue}
     if($path -eq ''){$html=@'
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark, guarded queue-orphan remediation, read-only Windows WSL audit, and guarded Jellyfin visibility recovery are available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> · GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark, guarded queue-orphan remediation, read-only Windows WSL audit, guarded Jellyfin visibility recovery, and fixed-target HP Envy Surfshark exit-node control are available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading status…</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
 '@;Send-Html $ctx $html;continue}
     if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){
       $u=Get-LastUpdate;$w=Get-WatcherState;$b=Get-BenchmarkState;$p=Get-ProspectEngineHealth;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
-      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.9.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});queueOrphanRemediation=@{typed=$true;route='/api/queue-orphan-remediation';actions=@('audit','apply');arbitraryShell=$false};windowsWslMemoryAudit=@{typed=$true;route='/api/windows-wsl-memory-audit';actions=@('audit');readOnly=$true;arbitraryShell=$false};jellyfinVisibilityRepair=@{typed=$true;route='/api/jellyfin-visibility-repair';actions=@('audit','repair-exact-screenshot-user');exactScreenshotMatchRequired=$true;arbitraryShell=$false};time=(Get-Date -Format o)};continue
+      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.10.0';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});queueOrphanRemediation=@{typed=$true;route='/api/queue-orphan-remediation';actions=@('audit','apply');arbitraryShell=$false};windowsWslMemoryAudit=@{typed=$true;route='/api/windows-wsl-memory-audit';actions=@('audit');readOnly=$true;arbitraryShell=$false};jellyfinVisibilityRepair=@{typed=$true;route='/api/jellyfin-visibility-repair';actions=@('audit','repair-exact-screenshot-user');exactScreenshotMatchRequired=$true;arbitraryShell=$false};hpEnvySurfsharkExitNode=@{typed=$true;route='/api/hpenvy-surfshark-exitnode';actions=@('audit','apply');fixedTarget='coolyo@100.71.26.69';localAuthorizationSentinelRequired=$true;arbitraryShell=$false};time=(Get-Date -Format o)};continue
     }
     if($path -eq '/api/update-now' -and $ctx.Request.HttpMethod -eq 'POST'){$r=Start-Update;Log "fallback update requested by $ip";Send-Json $ctx 202 $r;continue}
     if($path -eq '/api/control' -and $ctx.Request.HttpMethod -eq 'POST'){$req=Read-Json $ctx;$action=[string]$req.action;if($action -notin @('update-agent','update-openai-agent','pull-agent-now')){Send-Json $ctx 400 @{ok=$false;error='unsupported action'};continue};$r=Start-Update;Log "control action=$action requested by $ip";Send-Json $ctx 202 $r;continue}
