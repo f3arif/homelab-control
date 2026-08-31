@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteTest.ps1'
+      - 'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1'
+      - 'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1'
+      - 'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
       - 'afz-openai-agent/requests/h3-qwen35b-a3b-website-test.json'
       - '.github/workflows/h3-qwen35b-a3b-validate.yml'
 
@@ -21,17 +25,30 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $path='afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteTest.ps1'
-          $tokens=$null;$errors=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
-          if($errors.Count -gt 0){throw ('PowerShell parse failure: '+($errors.Message -join '; '))}
+          $files=@(
+            'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteTest.ps1',
+            'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1',
+            'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1',
+            'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1',
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+          )
+          foreach($path in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){throw ("PowerShell parse failure in ${path}: "+($errors.Message -join '; '))}
+          }
 
-      - name: Enforce one-call fair-comparison contract
+      - name: Enforce one-call fair-comparison and transport contract
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $request=Get-Content 'afz-openai-agent/requests/h3-qwen35b-a3b-website-test.json' -Raw|ConvertFrom-Json
           $runner=Get-Content 'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteTest.ps1' -Raw
+          $launcher=Get-Content 'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1' -Raw
+          $carrier=Get-Content 'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1' -Raw
+          $bootstrap=Get-Content 'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1' -Raw
+          $sync=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
+
           if([string]$request.job_id -ne 'qwen35b-a3b-website-20260830-r1'){throw 'unexpected job id'}
           if([string]$request.model -ne 'qwen3.6:35b-a3b'){throw 'unexpected model'}
           if([int]$request.context -ne 16384){throw 'context must be 16384 for comparison'}
@@ -41,6 +58,7 @@ jobs:
           $routes=@($request.required_routes|ForEach-Object {[string]$_})
           if($routes.Count -ne 5){throw 'five routes required'}
           foreach($route in $expected){if($routes -notcontains $route){throw "missing route $route"}}
+
           foreach($needle in @(
             "`$Model='qwen3.6:35b-a3b'",
             "`$Context=16384",
@@ -60,10 +78,44 @@ jobs:
             "& curl.exe -sS --max-time 10800",
             "& ollama list",
             "& ollama ps"
-          )){if(-not $runner.Contains($needle)){throw "required invariant missing: $needle"}}
+          )){if(-not $runner.Contains($needle)){throw "required runner invariant missing: $needle"}}
           if($runner -match '(?i)ollama\s+pull'){throw 'runner must not pull models automatically'}
           if($runner -match '(?i)ollama\s+stop'){throw 'runner must not unload another model'}
           if($runner -match '(?i)Invoke-Expression|\biex\b'){throw 'dynamic expression execution forbidden'}
           $callCount=([regex]::Matches($runner,"127\.0\.0\.1:11434/api/generate")).Count
           if($callCount -ne 1){throw "expected exactly one Ollama generate endpoint occurrence; found $callCount"}
-          Write-Host 'QWEN35B_A3B_ONE_CALL_CONTRACT=PASS'
+
+          foreach($needle in @(
+            'Model-CallProtected',
+            'model_call_attempted',
+            'ollama_post_started',
+            "AFZ H3 Qwen35B A3B Benchmark",
+            'LogonType Interactive',
+            'Start-H3-Qwen35BA3B-WebsiteTest.ps1'
+          )){if(-not $launcher.Contains($needle)){throw "launcher guard missing: $needle"}}
+
+          foreach($needle in @(
+            '4C-ED-FB-3F-B0-9E',
+            '192.168.50.255',
+            '100.106.186.118',
+            'StrictHostKeyChecking=yes',
+            "'powershell.exe','-NoProfile','-NonInteractive','-Command','-'",
+            'Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1'
+          )){if(-not $carrier.Contains($needle)){throw "carrier boundary missing: $needle"}}
+
+          foreach($needle in @(
+            'AFZ Edge Backup',
+            'AFZ H3 Qwen35B A3B Transport',
+            'ExecutionTimeLimit ([TimeSpan]::Zero)',
+            'maxModelCalls=1'
+          )){if(-not $bootstrap.Contains($needle)){throw "bootstrap boundary missing: $needle"}}
+
+          foreach($needle in @(
+            'Start-Qwen35BOneShot',
+            'qwen35b-a3b-website-20260830-r1',
+            'activation-v1.json',
+            "max_model_calls -ne 1",
+            "status='bootstrap-started'"
+          )){if(-not $sync.Contains($needle)){throw "one-shot sync activation missing: $needle"}}
+
+          Write-Host 'QWEN35B_A3B_ONE_CALL_DIRECT_TRANSPORT_CONTRACT=PASS'
