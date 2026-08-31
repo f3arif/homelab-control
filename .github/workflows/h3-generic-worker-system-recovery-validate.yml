@@ -60,14 +60,20 @@ jobs:
             "C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system",
             "AFZ H3 Generic Worker",
             "C:\AFZ\H3Worker\AFZ-H3-Worker.ps1",
+            "C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs",
+            "[string]`$task.Principal.UserId -match '(?i)(^|\\\\)Faiz$'",
+            "[string]`$task.Principal.LogonType -eq 'Interactive'",
             'Start-ScheduledTask -TaskName $taskName',
             'H3_GENERIC_WORKER_ALREADY_RUNNING',
             'H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK',
             'StrictHostKeyChecking=yes',
-            'IdentitiesOnly=yes'
+            'IdentitiesOnly=yes',
+            'hiddenActionVerified',
+            'principalVerified'
           )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
 
           if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM recovery.'}
+          if($helper.Contains("Run-AFZ-H3-Worker-Hidden")){throw 'Recovery must not use the obsolete fuzzy launcher name.'}
           foreach($forbidden in @(
             'Register-ScheduledTask',
             'Set-ScheduledTask',
