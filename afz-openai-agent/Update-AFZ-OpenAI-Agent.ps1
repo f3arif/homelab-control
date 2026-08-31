@@ -92,7 +92,13 @@ function Write-TransportDiagnosticAck {
 }
 
 try{
-  $locked=$mutex.WaitOne([TimeSpan]::FromSeconds(60))
+  try{
+    $locked=$mutex.WaitOne([TimeSpan]::FromSeconds(60))
+  }catch [System.Threading.AbandonedMutexException]{
+    # WaitOne grants this thread ownership before reporting an abandoned owner.
+    # Continue under the acquired mutex so a crashed prior updater cannot deadlock recovery.
+    $locked=$true
+  }
   if(-not $locked){throw 'Another AFZ updater instance remained active for more than 60 seconds'}
 
   if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
