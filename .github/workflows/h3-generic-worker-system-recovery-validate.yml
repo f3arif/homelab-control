@@ -100,8 +100,17 @@ jobs:
             'Faiz$',
             "Principal.LogonType -eq 'Interactive'",
             'Start-ScheduledTask -TaskName $taskName',
+            'Stop-ScheduledTask -TaskName $taskName',
             'H3_GENERIC_WORKER_ALREADY_RUNNING',
             'H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK',
+            'H3_GENERIC_WORKER_STALE_TASK_RESET_AND_STARTED',
+            'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RESET_AND_STARTED',
+            'H3_GENERIC_WORKER_RECOVERY_FAILED_NO_FRESH_HEARTBEAT',
+            '$staleResetMinSeconds=120',
+            '$taskRunAgeSeconds -lt $staleResetMinSeconds',
+            '$heartbeatAgeBeforeSeconds -lt $staleResetMinSeconds',
+            'heartbeatFreshAfterStart',
+            'staleTaskReset',
             'StrictHostKeyChecking=yes',
             'IdentitiesOnly=yes',
             'RedirectStandardInput $inFile',
@@ -116,7 +125,7 @@ jobs:
             'a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74e0d06e7d55',
             '.bak-corrupt-a09e6760',
             'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY',
-            'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RUNNING',
+            'RESET_STALE_RUNNING_TASK+START_EXISTING_TASK_ONLY',
             'Generic Worker script hash mismatch; refusing launcher repair/start.',
             'Known corrupt launcher hash matched but content did not match the audited truncated launcher; refusing write.',
             '[IO.File]::WriteAllBytes($launcherBackup,[IO.File]::ReadAllBytes($expectedLauncher))',
@@ -131,7 +140,6 @@ jobs:
           foreach($forbidden in @(
             'Register-ScheduledTask',
             'Set-ScheduledTask',
-            'Stop-ScheduledTask',
             'Unregister-ScheduledTask',
             'Disable-ScheduledTask',
             'Stop-Process',
@@ -141,7 +149,11 @@ jobs:
           )){if($helper.Contains($forbidden)){throw "Forbidden mutation primitive present: $forbidden"}}
 
           $startMatches=[regex]::Matches($helper,'Start-ScheduledTask').Count
-          if($startMatches -ne 1){throw "Expected exactly one Start-ScheduledTask occurrence; found $startMatches"}
+          if($startMatches -ne 2){throw "Expected exactly two mutually exclusive Start-ScheduledTask call sites; found $startMatches"}
+          $stopTaskMatches=[regex]::Matches($helper,'Stop-ScheduledTask').Count
+          if($stopTaskMatches -ne 2){throw "Expected one Stop-ScheduledTask call plus one diagnostic error string reference; found $stopTaskMatches"}
+          $actualStopCalls=[regex]::Matches($helper,'Stop-ScheduledTask -TaskName \$taskName').Count
+          if($actualStopCalls -ne 1){throw "Expected exactly one bounded stale-task Stop-ScheduledTask call; found $actualStopCalls"}
           $encodedMatches=[regex]::Matches($helper,'ToBase64String').Count
           if($encodedMatches -ne 1){throw "Expected exactly one tiny bootstrap encoding operation; found $encodedMatches"}
           $launcherMoveMatches=[regex]::Matches($helper,'Move-Item -LiteralPath \$tmpLauncher -Destination \$expectedLauncher -Force').Count
