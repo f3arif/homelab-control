@@ -91,6 +91,16 @@ function Invoke-H3([string]$RemoteScript){
     Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
   }
 }
+function Invoke-PostReturnRecovery {
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){return [ordered]@{ok=$false;status='helper-missing';path=$helper}}
+  try{
+    $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot | Select-Object -Last 1
+    $code=$LASTEXITCODE
+    if($raw -is [string]){try{$parsed=$raw|ConvertFrom-Json}catch{$parsed=[ordered]@{status='invalid-json';raw=[string]$raw}}}else{$parsed=$raw}
+    return [ordered]@{ok=($code -eq 0);status=$(if($code -eq 0){'completed'}else{'helper-failed'});exit=$code;result=$parsed}
+  }catch{return [ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message}}
+}
 
 try{
   if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "windows-main-only recovery; host=$env:COMPUTERNAME"}
@@ -98,9 +108,16 @@ try{
   if([string]$identity.User.Value -ne 'S-1-5-18'){throw "35B transport recovery must run as SYSTEM; identity=$([string]$identity.Name)"}
   foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required path missing: $p"}}
 
+  # This continuation is independent of the one-call transport activation. It can
+  # only consume the already-saved successful Ollama response and contains no model call.
+  $postReturnRecovery=Invoke-PostReturnRecovery
+
   $prior=Read-Json $statePath
   if($prior -and [string]$prior.jobId -eq $jobId -and [string]$prior.status -eq 'completed'){
-    Save-State $prior
+    $wrapped=[ordered]@{}
+    foreach($p in $prior.PSObject.Properties){$wrapped[$p.Name]=$p.Value}
+    $wrapped['postReturnRecovery']=$postReturnRecovery
+    Save-State $wrapped
     exit 0
   }
 
@@ -117,7 +134,7 @@ try{
     throw '35B recovery is allowed only for the proven pre-H3 SSH private-key permission failure.'
   }
 
-  Save-State ([ordered]@{schema=1;status='running';classification='QWEN35B_SYSTEM_TRANSPORT_RECOVERY_RUNNING';jobId=$jobId;benchmarkSha=$benchmarkSha;maxModelCalls=1;transport='SYSTEM-key+strict-ssh+encoded-stdin+existing-H3-launcher-guard';modelCallIssuedByRecovery=$false;time=(Get-Date -Format o)})|Out-Null
+  Save-State ([ordered]@{schema=1;status='running';classification='QWEN35B_SYSTEM_TRANSPORT_RECOVERY_RUNNING';jobId=$jobId;benchmarkSha=$benchmarkSha;maxModelCalls=1;transport='SYSTEM-key+strict-ssh+encoded-stdin+existing-H3-launcher-guard';modelCallIssuedByRecovery=$false;postReturnRecovery=$postReturnRecovery;time=(Get-Date -Format o)})|Out-Null
 
   if(-not(Test-Tcp $h3Ip 22 1200)){Send-H3Wake}
   $online=$false
@@ -156,7 +173,7 @@ try {
   if(-not [bool]$proof.ok){throw ('H3 35B launcher returned ok=false: '+[string]$proof.message)}
   $protected=($proof.PSObject.Properties.Name -contains 'protected' -and [bool]$proof.protected) -or ($proof.PSObject.Properties.Name -contains 'model_call_attempted' -and [bool]$proof.model_call_attempted)
   $classification=$(if([bool]$proof.already -and $protected){'QWEN35B_EXISTING_MODEL_CALL_PROTECTED'}elseif($protected){'QWEN35B_SINGLE_GUARDED_MODEL_CALL_STARTED'}elseif([bool]$proof.already){'QWEN35B_EXISTING_GUARDED_STATE_RETURNED'}else{'QWEN35B_GUARDED_LAUNCHER_RETURNED'})
-  $final=[ordered]@{schema=1;status='completed';classification=$classification;jobId=$jobId;benchmarkSha=$benchmarkSha;maxModelCalls=1;transport='SYSTEM-key+strict-ssh+encoded-stdin+existing-H3-launcher-guard';modelCallIssuedByRecovery=$false;h3Proof=$proof;time=(Get-Date -Format o)}
+  $final=[ordered]@{schema=1;status='completed';classification=$classification;jobId=$jobId;benchmarkSha=$benchmarkSha;maxModelCalls=1;transport='SYSTEM-key+strict-ssh+encoded-stdin+existing-H3-launcher-guard';modelCallIssuedByRecovery=$false;postReturnRecovery=$postReturnRecovery;h3Proof=$proof;time=(Get-Date -Format o)}
   Save-State $final
   exit 0
 }catch{
