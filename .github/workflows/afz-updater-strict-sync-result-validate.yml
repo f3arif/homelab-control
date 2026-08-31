@@ -15,6 +15,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Windows PowerShell 5.1 parse
         shell: powershell
@@ -47,6 +49,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          git fetch --no-tags origin main
           $base=git show origin/main:afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1
           $head=Get-Content -LiteralPath 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
           $baseMutations=@('New-NetFirewallRule','Remove-NetFirewallRule','Register-ScheduledTask','Set-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask')
