@@ -14,7 +14,13 @@ $adb='C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
 if([string]::IsNullOrWhiteSpace($RequestPath)){$RequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-oneplus-lan-diag.json'}
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StatePath) | Out-Null
 function Read-Json([string]$p){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $p -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
-function Save($o){$json=$o|ConvertTo-Json -Depth 10;$json|Set-Content -LiteralPath $StatePath -Encoding UTF8;try{$json|Set-Content -LiteralPath $out -Encoding UTF8}catch{}}
+function Save($o){
+  $json=$o|ConvertTo-Json -Depth 10
+  $json|Set-Content -LiteralPath $StatePath -Encoding UTF8
+  try{
+    $json|Set-Content -LiteralPath $out -Encoding UTF8
+  }catch{}
+}
 $req=Read-Json $RequestPath
 if(-not $req){exit 0}
 if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'diagnose-oneplus-lan-backup'){exit 0}
