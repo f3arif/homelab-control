@@ -17,6 +17,7 @@ New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 function Write-Result($obj,[string]$path){
   $json=$obj | ConvertTo-Json -Depth 12
   $json | Set-Content -LiteralPath $path -Encoding UTF8
+  # OneDrive is backup-only. A backup write must never affect GitHub/Direct Fabric execution.
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
 }
 function Write-H3HookResult($obj){
@@ -43,7 +44,7 @@ function Invoke-H3SshKeyAclRepair {
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot *> $null}catch{}
 }
 function Invoke-H3TailscaleUnattended {
-  # Typed, fixed-target one-shot. GitHub is the control input; OneDrive is result-only.
+  # Typed, fixed-target one-shot. GitHub is the control input; OneDrive is backup-only.
   # The helper can only enforce H3's Tailscale UnattendedMode=always and verify it.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Enable-H3-Tailscale-Unattended.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-tailscale-unattended.json'
@@ -63,6 +64,15 @@ function Invoke-H3TailscaleUnattended {
     Write-H3HookResult ([ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;error=$_.Exception.Message;detail=($_ | Out-String).Trim();time=(Get-Date -Format o)})
   }
 }
+function Invoke-HPEnvySurfsharkExitNode {
+  # GitHub-controlled fixed-target helper. The committed request is read-only by default.
+  # Apply mode is additionally blocked by a machine-local authorization sentinel so a
+  # GitHub edit alone cannot alter HP Envy networking.
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Surfshark-ExitNode.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-surfshark-exitnode.json'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
@@ -76,6 +86,9 @@ if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 # Repair only the pinned H3 key ACL, prove its fingerprint/host, then enforce unattended mode.
 Invoke-H3SshKeyAclRepair
 Invoke-H3TailscaleUnattended
+
+# HP Envy audit is fixed-target and read-only unless a separate local authorization gate is present.
+Invoke-HPEnvySurfsharkExitNode
 
 # FamilyPTT requests are independently typed and idempotent.
 Invoke-Phase1FamilyPttPrep
