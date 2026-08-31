@@ -78,6 +78,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $taskName='AFZ H3 Generic Worker'
 $workerScript='C:\AFZ\H3Worker\AFZ-H3-Worker.ps1'
+$expectedLauncher='C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs'
 $heartbeat='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Heartbeat\h3.txt'
 
 function Get-WorkerProcesses {
@@ -95,15 +96,23 @@ $principal=[ordered]@{userId=[string]$task.Principal.UserId;logonType=[string]$t
 $hiddenActionOk=$false
 foreach($a in $actions){
   $exe=[IO.Path]::GetFileName([string]$a.execute)
-  if($exe -ieq 'wscript.exe' -and [string]$a.arguments -match '(?i)//B' -and [string]$a.arguments -match '(?i)Generic.*Worker|Run-AFZ-H3-Worker-Hidden'){$hiddenActionOk=$true}
+  $argText=[string]$a.arguments
+  if(
+    $exe -ieq 'wscript.exe' -and
+    $argText -match '(?i)(?:^|\s)//B(?:\s|$)' -and
+    $argText -match '(?i)(?:^|\s)//Nologo(?:\s|$)' -and
+    $argText -match [regex]::Escape($expectedLauncher)
+  ){$hiddenActionOk=$true}
 }
+$principalOk=([string]$task.Principal.UserId -match '(?i)(^|\\)Faiz$' -and [string]$task.Principal.LogonType -eq 'Interactive')
 
 $started=$false
 $classification=''
 if($before.Count -gt 0){
   $classification='H3_GENERIC_WORKER_ALREADY_RUNNING'
 }else{
-  if(-not $hiddenActionOk){throw 'Generic Worker is absent but its task is not the expected hidden wscript launcher; refusing to start.'}
+  if(-not $hiddenActionOk){throw "Generic Worker is absent but task action does not match exact hidden launcher $expectedLauncher; refusing to start."}
+  if(-not $principalOk){throw 'Generic Worker is absent but task principal is not the expected Faiz/Interactive principal; refusing to start.'}
   Start-ScheduledTask -TaskName $taskName
   $started=$true
   $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
@@ -127,7 +136,8 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
 $result=[ordered]@{
   schema=1;host=$env:COMPUTERNAME;taskName=$taskName;taskState=[string]$task.State;
   lastTaskResult=[int64]$taskInfo.LastTaskResult;lastRunTime=$taskInfo.LastRunTime.ToString('o');
-  actions=$actions;principal=$principal;hiddenActionVerified=$hiddenActionOk;
+  expectedLauncher=$expectedLauncher;actions=$actions;principal=$principal;
+  hiddenActionVerified=$hiddenActionOk;principalVerified=$principalOk;
   beforeProcessCount=$before.Count;beforeProcesses=$before;taskStartIssued=$started;
   afterProcessCount=$after.Count;afterProcesses=$after;heartbeatPath=$heartbeat;
   heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;
@@ -151,7 +161,8 @@ exit 0
     schema=1;status='completed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
     systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
     remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
-    hiddenActionVerified=[bool]$payload.hiddenActionVerified;beforeProcessCount=[int]$payload.beforeProcessCount;
+    hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
+    expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
     afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
     heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
     remote=$payload;capturedAt=(Get-Date -Format o)
