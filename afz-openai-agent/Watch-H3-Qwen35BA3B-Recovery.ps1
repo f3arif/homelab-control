@@ -15,6 +15,8 @@ $watchRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-recovery-watch'
 $watchState=Join-Path $watchRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirror=Join-Path $mirrorRoot 'AFZ-QWEN35B-RECOVERY-WATCH-LATEST.txt'
+$piWakeUri='http://100.91.50.9:8087/wake/h3'
+$piStatusUri='http://100.91.50.9:8087/status/h3'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $watchRoot|Out-Null
 
@@ -22,7 +24,7 @@ function Read-Json([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
   try{return Get-Content -LiteralPath $Path -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}
 }
-function Save-Watch([string]$Status,[string]$Message,$RecoveryState=$null,[int]$Attempt=0){
+function Save-Watch([string]$Status,[string]$Message,$RecoveryState=$null,[int]$Attempt=0,$Wake=$null){
   $o=[ordered]@{
     schema=1
     status=$Status
@@ -32,6 +34,7 @@ function Save-Watch([string]$Status,[string]$Message,$RecoveryState=$null,[int]$
     modelCallIssuedByWatch=$false
     attempt=$Attempt
     retryDelaySeconds=$RetryDelaySeconds
+    piWake=$Wake
     recoveryState=$RecoveryState
     time=(Get-Date -Format o)
   }
@@ -49,6 +52,12 @@ function Is-ProtectedCompletion($State){
     'QWEN35B_EXISTING_GUARDED_STATE_RETURNED',
     'QWEN35B_GUARDED_LAUNCHER_RETURNED'
   ))
+}
+function Request-PiWake {
+  $o=[ordered]@{attempted=$true;status=$null;wake=$null;error=$null}
+  try{$o.status=[string](Invoke-WebRequest -Uri $piStatusUri -UseBasicParsing -TimeoutSec 6).Content}catch{}
+  try{$o.wake=[string](Invoke-WebRequest -Uri $piWakeUri -UseBasicParsing -TimeoutSec 8).Content}catch{$o.error=$_.Exception.Message}
+  return [pscustomobject]$o
 }
 
 if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "windows-main-only watch; host=$env:COMPUTERNAME"}
@@ -70,7 +79,8 @@ try{
       exit 0
     }
 
-    Save-Watch 'running' 'Attempting bounded SYSTEM transport recovery; no model call is issued by the watch itself.' $state $attempt
+    $wake=Request-PiWake
+    Save-Watch 'running' 'Requested Pi wake fallback, then starting bounded SYSTEM transport recovery; the watch itself cannot issue a model call.' $state $attempt $wake
     $raw=''
     $code=0
     try{
@@ -83,11 +93,11 @@ try{
 
     $state=Read-Json $recoveryState
     if(Is-ProtectedCompletion $state){
-      Save-Watch 'completed' 'SYSTEM recovery reached guarded launch/protected state; no further retries will occur.' $state $attempt
+      Save-Watch 'completed' 'SYSTEM recovery reached guarded launch/protected state; no further retries will occur.' $state $attempt $wake
       exit 0
     }
 
-    Save-Watch 'waiting' ("Recovery attempt remained pre-model or unreachable; retrying after ${RetryDelaySeconds}s. exit=$code") $state $attempt
+    Save-Watch 'waiting' ("Recovery attempt remained pre-model or unreachable; retrying after ${RetryDelaySeconds}s. exit=$code") $state $attempt $wake
     Start-Sleep -Seconds $RetryDelaySeconds
   }
 }finally{
