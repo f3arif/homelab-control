@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "hermes-asus-fallback-install-20260831-r1",
+  "action": "install-and-configure",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "role": "windows-execution-and-fallback",
+  "provider": "custom",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "qwen3.5:4b",
+  "context_length": 65536,
+  "required_model_context": 64000,
+  "hermes_commit": "f50b5bb0fa5b48caef753c790bf0b09a3570918a",
+  "install_scope": "faiz-user-standard-native-windows",
+  "skip_interactive_setup": true,
+  "skip_computer_use": true,
+  "start_gateway": false,
+  "run_generation_test": false,
+  "expose_ollama": false,
+  "control_plane": "github",
+  "oneDriveRole": "emergency-observability-and-bootstrap-only"
+}
