@@ -64,8 +64,9 @@ jobs:
             'HERMES_READY_LOCAL_OLLAMA_64K',
             'HERMES_INSTALLED_CONFIG_INCOMPLETE',
             'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT',
-            "'-Command','-'",
+            "'-File','-'",
             '-RedirectStandardInput $inFile'
           )){
             if(-not $s.Contains($required)){throw "Missing audit-only invariant: $required"}
           }
+          if($s.Contains("'-Command','-'")){throw 'Windows OpenSSH PowerShell -Command - stdin transport is forbidden for this audit'}
