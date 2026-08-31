@@ -62,12 +62,13 @@ $ready=($launcherPresent -and $version -and $reachable -and $configOk -and $sele
 $classification=$(if($ready){'HERMES_READY_LOCAL_OLLAMA_64K'}elseif($launcherPresent){'HERMES_INSTALLED_CONFIG_INCOMPLETE'}else{'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT'})
 [ordered]@{schema=1;ok=[bool]$ready;classification=$classification;host=$env:COMPUTERNAME;launcherPresent=$launcherPresent;version=$version;configPresent=$configPresent;configModel=$model;configProvider=$provider;configBaseUrl=$baseUrl;configContextLength=$context;apiKeyPresent=$apiKeyPresent;ollamaReachable=$reachable;baseModelPresent=$basePresent;baseModelContext=$baseContext;hermesAliasPresent=$aliasPresent;hermesAliasContext=$aliasContext;selectedModelContext=$selectedContext;generationTestStarted=$false;gatewayStarted=$false;capturedAt=(Get-Date -Format o)}|ConvertTo-Json -Depth 6 -Compress
 '@
-$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
-$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
+$inFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.ps1')
 $outFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.out')
 $errFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.err')
+$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command','-')
 try{
-  $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+  [IO.File]::WriteAllText($inFile,$remote,$utf8)
+  $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
   if(-not $p.WaitForExit(90000)){try{$p.Kill()}catch{};throw 'H3 Hermes audit exceeded 90 seconds.'}
   $stdout=$(if(Test-Path $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
   $stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
@@ -81,4 +82,4 @@ try{
 }catch{
   Save-Audit ([ordered]@{schema=1;ok=$false;classification='HERMES_POSTTIMEOUT_AUDIT_TRANSPORT_FAILED';jobId=$id;recoveryMode='post-timeout-audit-only';error=$_.Exception.Message;generationTestStarted=$false;gatewayStarted=$false;capturedAt=(Get-Date -Format o)})
   exit 75
-}finally{Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue}
+}finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
