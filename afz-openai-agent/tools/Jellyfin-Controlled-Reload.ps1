@@ -2,12 +2,13 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
+$ConfirmPreference='None'
 $expectedData='C:\Users\Faiz\AppData\Local\Jellyfin'
 $db=Join-Path $expectedData 'data\jellyfin.db'
 $taskName='Jellyfin Server'
 $backupBase='C:\AFZ\MediaCatalog\Backups'
 $baseUri='http://127.0.0.1:8096'
-Write-Output 'AFZ_JELLYFIN_CONTROLLED_RELOAD_V4'
+Write-Output 'AFZ_JELLYFIN_CONTROLLED_RELOAD_V5'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'USER_LIBRARY_WRITE=false'
 Write-Output 'PREFERENCE_WRITE=false'
@@ -44,7 +45,7 @@ try {
     $closed=$false
     try{$closed=$dp.CloseMainWindow()}catch{}
     if($closed){Start-Sleep -Seconds 3}
-    if(Get-Process -Id $oldPid -ErrorAction SilentlyContinue){Stop-Process -Id $oldPid -ErrorAction Stop}
+    if(Get-Process -Id $oldPid -ErrorAction SilentlyContinue){Stop-Process -Id $oldPid -Force -Confirm:$false -ErrorAction Stop}
     $deadline=(Get-Date).AddSeconds(20)
     do{Start-Sleep -Milliseconds 500;$still=Get-Process -Id $oldPid -ErrorAction SilentlyContinue}while($still -and (Get-Date)-lt $deadline)
     if($still){throw 'OLD_PID_DID_NOT_STOP'}
