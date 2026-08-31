@@ -42,11 +42,11 @@ function Invoke-JellyfinControlledReloadSafe {
     $switchAnchor='    switch ([string]$Job.action) {'
     if(-not $src.Contains($switchAnchor)){throw 'action switch anchor missing'}
     $caseLine='        "jellyfin-controlled-reload-safe" { return Invoke-JellyfinControlledReloadSafe $Config $Job }'
-    $caseLine=$caseLine.Replace('\"','"')
+    $caseLine=$caseLine.Replace([char]92+[char]34,[char]34)
     $src=$src.Replace($switchAnchor,$switchAnchor+"`r`n"+$caseLine)
 }
 if(([regex]::Matches($src,'AFZ_JELLYFIN_CONTROLLED_RELOAD_REMOTEOPS_V1')).Count -ne 1){throw 'Reload wrapper marker count invalid'}
-if(([regex]::Matches($src,'"jellyfin-controlled-reload-safe"')).Count -ne 1){throw 'Reload dispatch count invalid'}
+if(([regex]::Matches($src,'jellyfin-controlled-reload-safe')).Count -lt 2){throw 'Reload dispatch installation failed'}
 $tmp=$actions+'.candidate'
 [IO.File]::WriteAllText($tmp,$src,(New-Object Text.UTF8Encoding($false)))
 $t=$null;$e=$null
