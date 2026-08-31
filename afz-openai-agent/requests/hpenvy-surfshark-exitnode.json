@@ -1,12 +1,13 @@
 {
   "schema": 1,
-  "id": "hpenvy-surfshark-exitnode-audit-20260831-r1",
+  "id": "hpenvy-surfshark-exitnode-apply-20260831-r2",
   "taskName": "HP Envy Surfshark Exit Node",
   "target": "coolyo@100.71.26.69",
-  "mode": "audit",
+  "mode": "apply",
   "expectedIngress": "tailscale0",
   "expectedEgress": "surfshark",
-  "authority": "github-exact-sha",
+  "authority": "github-exact-sha-plus-local-authorization-sentinel",
   "oneDriveRole": "backup-only",
-  "requestedAt": "2026-08-31T10:16:00-04:00"
+  "requestedAt": "2026-08-31",
+  "safety": "Apply only if the existing machine-local authorization sentinel is present; otherwise fail closed without changing HP Envy networking. Preserve Tailscale table 52, LAN/private routing, locally generated HP Envy traffic, and Tailscale netfilter admission."
 }
