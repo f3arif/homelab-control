@@ -1,5 +1,5 @@
 {
-  "id": "afz-remoteops-start-20260830T2309Z",
+  "id": "afz-remoteops-start-20260831T0022-pixel6-pr14",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued read-only FamilyPTT OnePlus LAN-backup diagnostic can be claimed. No task definition, phone/app state, permissions, network state, router/WAN, or backend configuration is changed."
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued Pixel 6 Pro PR14 LAN-fix installer can be claimed. Do not modify OnePlus, Pixel 8, task definitions, network state, router/WAN, or backend configuration."
 }
