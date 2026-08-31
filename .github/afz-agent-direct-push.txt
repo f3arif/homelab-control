@@ -1,5 +1,5 @@
 AFZ direct agent source recovery
-reason=h3-tailscale-unattended-g1
+reason=h3-generic-worker-recovery-g2
 target=windows-main
 authority=github-exact-sha
-requested_at=2026-08-30T17:51:00-04:00
+requested_at=2026-08-30T20:53:00-04:00
