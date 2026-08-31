@@ -2,7 +2,7 @@
   "schema": 1,
   "project": "familyptt",
   "action": "install-oneplus13r",
-  "job_id": "familyptt-oneplus13r-install-20260830T2142",
+  "job_id": "familyptt-oneplus13r-install-r002-20260830T2142",
   "status": "active",
   "apk_sha256": "4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b",
   "package_id": "ca.afzeng.familyptt",
