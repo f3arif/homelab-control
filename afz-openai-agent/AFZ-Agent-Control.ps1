@@ -164,7 +164,7 @@ try{
     }
 
     if($path -eq '/api/windows-wsl-memory-audit' -and $ctx.Request.HttpMethod -eq 'POST'){
-      if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='WSL memory audit peer not authorized';client=$ip};continue}
+      if(-not((Test-DeployPeer $ip) -or ((Get-AllowedClients) -contains $ip))){Send-Json $ctx 403 @{ok=$false;error='WSL memory audit peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
       $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
       if($action -ne 'audit'){Send-Json $ctx 400 @{ok=$false;error='unsupported WSL memory audit action'};continue}
