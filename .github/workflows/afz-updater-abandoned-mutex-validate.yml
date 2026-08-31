@@ -36,12 +36,13 @@ jobs:
         shell: powershell
         run: |
           $text=Get-Content 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
+          $contentionMarker="if(-not `$locked){throw 'Another AFZ updater instance remained active for more than 60 seconds'}"
           foreach($needle in @(
             "Global\AFZOpenAIAgentUpdater",
             '$mutex.WaitOne([TimeSpan]::FromSeconds(60))',
             'catch [System.Threading.AbandonedMutexException]',
             '$locked=$true',
-            "if(-not $locked){throw 'Another AFZ updater instance remained active for more than 60 seconds'}",
+            $contentionMarker,
             'if($locked){try{$mutex.ReleaseMutex()}catch{}}',
             '$mutex.Dispose()'
           )){
@@ -50,7 +51,7 @@ jobs:
           $wait=$text.IndexOf('$mutex.WaitOne([TimeSpan]::FromSeconds(60))')
           $catch=$text.IndexOf('catch [System.Threading.AbandonedMutexException]')
           $locked=$text.IndexOf('$locked=$true',$catch)
-          $contention=$text.IndexOf("if(-not $locked){throw 'Another AFZ updater instance remained active for more than 60 seconds'}")
+          $contention=$text.IndexOf($contentionMarker)
           if(-not($wait -ge 0 -and $catch -gt $wait -and $locked -gt $catch -and $contention -gt $locked)){
             throw 'Abandoned mutex recovery must occur before the ordinary contention guard.'
           }
