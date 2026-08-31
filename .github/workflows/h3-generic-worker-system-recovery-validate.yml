@@ -69,9 +69,16 @@ jobs:
             'H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK',
             'StrictHostKeyChecking=yes',
             'IdentitiesOnly=yes',
+            'RedirectStandardInput $inFile',
+            "'-Command','-'",
             'hiddenActionVerified',
             'principalVerified'
           )){if(-not $helper.Contains($needle)){throw "Recovery invariant missing: $needle"}}
+
+          foreach($legacyTransport in @(
+            '[Convert]::ToBase64String',
+            "'-EncodedCommand'"
+          )){if($helper.Contains($legacyTransport)){throw "Legacy command-line transport must not return: $legacyTransport"}}
 
           if($helper.Contains('C:\Users\Faiz\.ssh\afz_h3_worker')){throw 'Interactive/user H3 key must not be used by SYSTEM recovery.'}
           if($helper.Contains("Run-AFZ-H3-Worker-Hidden")){throw 'Recovery must not use the obsolete fuzzy launcher name.'}
