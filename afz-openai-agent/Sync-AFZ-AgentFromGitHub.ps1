@@ -94,6 +94,58 @@ function Start-Qwen35BOneShot {
   }
 }
 
+function Publish-Qwen35BDiagnostic {
+  param([string]$SyncedSha,$Activation)
+  # Emergency observability only. This mirror is never read as execution authority.
+  # It must never start/retry a task and failure to publish must never affect source sync.
+  try {
+    $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+    if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){
+      return [ordered]@{ok=$false;status='diag-root-missing'}
+    }
+    function Read-DiagJson([string]$Path){
+      if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+      try{return Get-Content -LiteralPath $Path -Raw|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message;path=$Path}}
+    }
+
+    $jobId='qwen35b-a3b-website-20260830-r1'
+    $activationPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-request\'+$jobId+'-activation-v1.json'
+    $bootstrapPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-bootstrap\latest.json'
+    $carrierPath='C:\Users\Faiz\AppData\Local\AFZ\H3Qwen35BA3BCarrier\'+$jobId+'.json'
+    $mirrorStatePath='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\h3\'+$jobId+'-state.json'
+    $mirrorResultPath='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\h3\'+$jobId+'-result.json'
+    $taskName='AFZ H3 Qwen35B A3B Transport'
+    $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskInfo=if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null}
+
+    $diag=[ordered]@{
+      schema=1
+      purpose='QWEN35B_READ_ONLY_DIAGNOSTIC'
+      source='windows-main'
+      jobId=$jobId
+      model='qwen3.6:35b-a3b'
+      maxModelCalls=1
+      syncedSha=$SyncedSha
+      activation=$Activation
+      activationMarker=Read-DiagJson $activationPath
+      bootstrap=Read-DiagJson $bootstrapPath
+      carrier=Read-DiagJson $carrierPath
+      mirroredH3State=Read-DiagJson $mirrorStatePath
+      mirroredH3Result=Read-DiagJson $mirrorResultPath
+      transportTaskExists=[bool]$task
+      transportTaskState=$(if($task){[string]$task.State}else{$null})
+      transportTaskLastResult=$(if($taskInfo){[int64]$taskInfo.LastTaskResult}else{$null})
+      transportTaskLastRun=$(if($taskInfo){$taskInfo.LastRunTime.ToString('o')}else{$null})
+      observedAt=(Get-Date -Format o)
+    }
+    $path=Join-Path $diagRoot 'AFZ-QWEN35B-DIAGNOSTIC-LATEST.json'
+    $diag|ConvertTo-Json -Depth 30|Set-Content -LiteralPath $path -Encoding UTF8
+    return [ordered]@{ok=$true;status='published';path=$path}
+  } catch {
+    return [ordered]@{ok=$false;status='publish-failed';error=$_.Exception.Message}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -145,12 +197,14 @@ try{
   # The activation marker is written at bootstrap start, so later source syncs
   # cannot replay this job. H3 also independently guards model_call_attempted.
   $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha
+  $qwen35BDiagnostic=Publish-Qwen35BDiagnostic -SyncedSha $resolvedSha -Activation $qwen35BActivation
 
   $out=[ordered]@{}
   foreach($p in $result.PSObject.Properties){$out[$p.Name]=$p.Value}
   $out['fallbackUpdaterRepair']=$fallbackUpdaterRepair
   $out['h3GenericWorkerRecovery']=$recovery
   $out['qwen35BA3BActivation']=$qwen35BActivation
+  $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
   $out|ConvertTo-Json -Depth 30 -Compress
   exit 0
 }finally{
