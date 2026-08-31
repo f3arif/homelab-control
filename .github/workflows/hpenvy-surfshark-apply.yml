@@ -48,10 +48,10 @@ jobs:
           set -euo pipefail
           for attempt in $(seq 1 24); do
             if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
-              if python - "$AFZ_SHA" <<'PY' <<<"$health"
-import json,sys
+              if HEALTH="$health" python - "$AFZ_SHA" <<'PY'
+import json,os,sys
 expected=sys.argv[1].lower()
-j=json.load(sys.stdin)
+j=json.loads(os.environ['HEALTH'])
 commit=(j.get('commit') or '').strip().lower()
 ep=j.get('hpEnvySurfsharkExitNode') or {}
 assert commit == expected, (commit, expected)
@@ -86,7 +86,7 @@ PY
             http://100.70.25.8:8797/api/hpenvy-surfshark-exitnode)
           printf '%s\n' "$response"
           RESPONSE="$response" python - <<'PY'
-import json,os,sys
+import json,os
 j=json.loads(os.environ['RESPONSE'])
 classification=str(j.get('classification') or '')
 exit_code=int(j.get('exitCode') or 0)
