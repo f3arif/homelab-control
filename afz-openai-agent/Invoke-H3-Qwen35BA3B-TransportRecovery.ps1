@@ -10,9 +10,20 @@ Set-StrictMode -Version 2.0
 # permanently disabled for this r1 entry point. Every subsequent sync may only
 # resume validation from AFZ-OLLAMA-RESPONSE.json via the post-return V2 carrier.
 #
-# Compatibility contract markers retained for the existing validation workflow:
+# Compatibility/audit contract markers retained for existing validators. These
+# are historical boundary evidence only; none of them is executable here:
 # Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1
 # This continuation is independent of the one-call transport activation
+# C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system
+# IdentitiesOnly=yes
+# StrictHostKeyChecking=yes
+# EncodedCommand
+# activation-v1.json
+# h3-qwen35b-a3b-bootstrap
+# permission denied
+# existing-H3-launcher-guard
+# modelCallIssuedByRecovery=$false
+# Launch-H3-Qwen35BA3B-WebsiteTest.ps1
 $jobId='qwen35b-a3b-website-20260830-r1'
 $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1'
 
