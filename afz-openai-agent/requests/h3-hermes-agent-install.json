@@ -1,8 +1,9 @@
 {
   "schema": 1,
   "id": "h3-hermes-agent-install-20260831-r1",
-  "action": "emergency-fallback-disabled",
-  "status": "EMERGENCY_FALLBACK",
+  "action": "install-and-configure",
+  "status": "AUDIT_ONLY",
+  "recovery_mode": "post-timeout-audit-only",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "provider": "custom",
