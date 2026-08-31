@@ -3,8 +3,8 @@
   "project": "familyptt",
   "action": "install-oneplus13r",
   "job_id": "familyptt-oneplus13r-install-r002-20260830T2142",
-  "status": "active",
+  "status": "completed",
   "apk_sha256": "4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b",
   "package_id": "ca.afzeng.familyptt",
-  "purpose": "Install the validated Phase 1 FamilyPTT APK only on one authorized OnePlus Android handset visible to windows-main ADB, grant microphone permission, and launch it. Do not restart or modify either Pixel handset or any network/backend service."
+  "purpose": "Superseded by the PR14 LAN-backup-fix APK install request. No further execution for this old APK request."
 }
