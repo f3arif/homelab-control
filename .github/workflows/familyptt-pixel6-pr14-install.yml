@@ -1,0 +1,95 @@
+name: FamilyPTT Pixel 6 Pro PR14 Install
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/familyptt-pixel6-pr14-install-signal.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: familyptt-pixel6-pr14-install
+  cancel-in-progress: false
+
+jobs:
+  install-pixel6pro:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 8
+    steps:
+      - name: Install validated PR14 APK on Pixel 6 Pro only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedHost = 'DESKTOP-10SKF0M'
+          $serial = '19161FDEE008XN'
+          $pkg = 'ca.afzeng.familyptt'
+          $component = 'ca.afzeng.familyptt/.MainActivity'
+          $expectedSha = 'ec9a0db9534abfbf54e90e3ada47c9b298b4c1c608e483d5b465632bd71a8ff1'
+          $adb = 'C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+          $apk = 'C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius\FamilyPTT-standalone-arm64-pr14-lanfix.apk'
+          $resultPath = 'C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius\FAMILYPTT-PIXEL6PRO-PR14-INSTALL-LATEST.txt'
+
+          Write-Host "host=$env:COMPUTERNAME"
+          if ($env:COMPUTERNAME -ne $expectedHost) {
+            throw "HOST_GUARD_FAILED expected=$expectedHost actual=$env:COMPUTERNAME"
+          }
+          if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) { throw "ADB_NOT_FOUND:$adb" }
+          if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw "APK_NOT_FOUND:$apk" }
+
+          $sha = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "apkSha256=$sha"
+          if ($sha -ne $expectedSha) { throw "APK_SHA_MISMATCH:$sha" }
+
+          $env:USERPROFILE='C:\Users\Faiz'
+          $env:HOME='C:\Users\Faiz'
+          $env:ANDROID_USER_HOME='C:\Users\Faiz'
+          if (Test-Path -LiteralPath 'C:\Users\Faiz\.android\adbkey') { $env:ADB_VENDOR_KEYS='C:\Users\Faiz\.android\adbkey' }
+
+          $devices = @(& $adb devices 2>&1 | ForEach-Object { [string]$_ })
+          Write-Host ('adbDevices=' + ($devices -join ' | '))
+          if (-not ($devices | Where-Object { $_ -match ('^' + [regex]::Escape($serial) + '\s+device$') })) {
+            throw "PIXEL6PRO_ADB_NOT_CONNECTED:$serial"
+          }
+
+          $model = ((& $adb -s $serial shell getprop ro.product.model 2>&1) -join '').Trim()
+          Write-Host "model=$model"
+
+          $install = @(& $adb -s $serial install -r $apk 2>&1 | ForEach-Object { [string]$_ })
+          $installCode = $LASTEXITCODE
+          Write-Host "installExit=$installCode"
+          Write-Host ('installResult=' + ($install -join ' | '))
+          if ($installCode -ne 0 -or (($install -join ' ') -notmatch '(?i)Success')) {
+            throw "ADB_INSTALL_FAILED:$installCode"
+          }
+
+          & $adb -s $serial shell pm grant $pkg android.permission.RECORD_AUDIO
+          $perm = @(& $adb -s $serial shell dumpsys package $pkg 2>&1 | ForEach-Object { [string]$_ })
+          $granted = (($perm -join "`n") -match 'android\.permission\.RECORD_AUDIO:\s+granted=true')
+          Write-Host "recordAudioGranted=$($granted.ToString().ToLowerInvariant())"
+          if (-not $granted) { throw 'RECORD_AUDIO_NOT_GRANTED' }
+
+          & $adb -s $serial shell am force-stop $pkg | Out-Null
+          & $adb -s $serial shell am start -W -n $component
+          if ($LASTEXITCODE -ne 0) { throw "APP_LAUNCH_FAILED:$LASTEXITCODE" }
+          Start-Sleep -Seconds 7
+
+          $pid = ((& $adb -s $serial shell pidof $pkg 2>&1) -join '').Trim()
+          Write-Host "pid=$pid"
+          if ([string]::IsNullOrWhiteSpace($pid)) { throw 'APP_PID_MISSING' }
+
+          $result = @(
+            'ok=true'
+            'classification=PIXEL6PRO_PR14_FAMILYPTT_INSTALLED_READY'
+            "host=$env:COMPUTERNAME"
+            "serial=$serial"
+            "model=$model"
+            "apkSha256=$sha"
+            "recordAudioGranted=true"
+            "pid=$pid"
+            "finishedAt=$(Get-Date -Format o)"
+          ) -join "`r`n"
+          Write-Host $result
+          try { $result | Set-Content -LiteralPath $resultPath -Encoding UTF8 } catch { Write-Warning "Result mirror failed: $($_.Exception.Message)" }
