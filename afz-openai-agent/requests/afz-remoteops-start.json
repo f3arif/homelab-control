@@ -1,5 +1,5 @@
 {
-  "id": "afz-remoteops-start-20260831T1016-hpenvy-surfshark-audit",
+  "id": "afz-remoteops-start-20260831-hpenvy-surfshark-apply-r2",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the fixed-target HP Envy Surfshark exit-node read-only audit can run from the GitHub-controlled request. Do not apply routing changes, alter Tailscale netfilter mode, change router/WAN state, or treat OneDrive as a command source. OneDrive is backup-only."
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the fixed-target HP Envy Surfshark exit-node guarded apply request can run from GitHub. The HP Envy carrier must fail closed unless the existing machine-local authorization sentinel is present. If authorized, route only public Internet traffic entering tailscale0 through surfshark, preserve Tailscale table 52 and LAN/private routes, keep HP Envy locally generated traffic on its normal management path, preserve Tailscale netfilter admission, and verify post-state. OneDrive is backup-only."
 }
