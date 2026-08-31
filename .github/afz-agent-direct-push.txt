@@ -1,5 +1,5 @@
 AFZ direct agent source recovery
-reason=h3-generic-worker-recovery-g2
+reason=h3-generic-worker-recovery-g3
 target=windows-main
 authority=github-exact-sha
-requested_at=2026-08-30T20:53:00-04:00
+requested_at=2026-08-30T21:28:00-04:00
