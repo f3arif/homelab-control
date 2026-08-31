@@ -100,14 +100,15 @@ jobs:
             '100.106.186.118',
             'StrictHostKeyChecking=yes',
             "'powershell.exe','-NoProfile','-NonInteractive','-Command','-'",
-            'Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1'
+            'Launch-H3-Qwen35BA3B-WebsiteTest.ps1'
           )){if(-not $carrier.Contains($needle)){throw "carrier boundary missing: $needle"}}
 
           foreach($needle in @(
             'AFZ Edge Backup',
             'AFZ H3 Qwen35B A3B Transport',
             'ExecutionTimeLimit ([TimeSpan]::Zero)',
-            'maxModelCalls=1'
+            'maxModelCalls=1',
+            'Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1'
           )){if(-not $bootstrap.Contains($needle)){throw "bootstrap boundary missing: $needle"}}
 
           foreach($needle in @(
