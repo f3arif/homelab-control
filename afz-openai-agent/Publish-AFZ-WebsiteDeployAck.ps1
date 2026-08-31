@@ -5,9 +5,10 @@ param(
 )
 
 # Emergency observability only. This script never reads control input and never
-# changes tasks, processes, files outside its own ACK file, or deployment state.
+# changes tasks, processes, files outside its own ACK files, or deployment state.
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $ackFile=Join-Path $diagRoot 'AFZ-WEBSITE-DEPLOY-ACK-LATEST.json'
+$qwenTextAckFile=Join-Path $diagRoot 'AFZ-QWEN35B-WINDOWS-STATE-LATEST.txt'
 $watchStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-site-deploy\request-watcher.json'
 $resultPath='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy\latest.json'
 $activeRequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-site-deploy.json'
@@ -16,6 +17,13 @@ $r5JobId='afz-site-git-cutover-r5-20260828T1151'
 $h3HotfixMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\gh-argument-binding-v1.json'
 $h3PostmortemHookPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-hotfix\postmortem-hook-latest.json'
 $h3PostmortemMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-postmortem\postmortem-v1.json'
+$qwenTransportHelperPath=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
+$qwenPostReturnCarrierPath=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1'
+$qwenPostReturnToolPath=Join-Path $InstallRoot 'afz-openai-agent\tools\Recover-H3-Qwen35BA3B-PostReturn.ps1'
+$qwenTransportStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-transport-recovery\latest.json'
+$qwenPostReturnStatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-postreturn-recovery\latest.json'
+$qwenActivationPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-request\qwen35b-a3b-website-20260830-r1-activation-v1.json'
+$qwenBootstrapPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-bootstrap\latest.json'
 
 function Read-SafeJson([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
@@ -27,6 +35,10 @@ function First-TaskAction($Task){
   if($a.Count -eq 0){return $null}
   return $a[0]
 }
+function Safe-FileHash([string]$Path){
+  if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+  try{return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()}catch{return $null}
+}
 
 try {
   if(-not(Test-Path -LiteralPath $diagRoot -PathType Container)){exit 0}
@@ -36,6 +48,10 @@ try {
   $h3Hotfix=Read-SafeJson $h3HotfixMarkerPath
   $h3PostHook=Read-SafeJson $h3PostmortemHookPath
   $h3PostMarker=Read-SafeJson $h3PostmortemMarkerPath
+  $qwenTransportState=Read-SafeJson $qwenTransportStatePath
+  $qwenPostReturnState=Read-SafeJson $qwenPostReturnStatePath
+  $qwenActivation=Read-SafeJson $qwenActivationPath
+  $qwenBootstrap=Read-SafeJson $qwenBootstrapPath
   $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
   $legacy=Get-ScheduledTask -TaskName 'AFZ Website Sync to Pi' -ErrorAction SilentlyContinue
   $siteWatcher=Get-ScheduledTask -TaskName 'AFZ Website Git Deploy Request Watcher' -ErrorAction SilentlyContinue
@@ -66,6 +82,20 @@ try {
     source='windows-main'
     controlPlane='github'
     component='AFZ Website Deploy Post-State ACK'
+    qwen35BReadOnly=$true
+    qwen35BModelAction='NONE'
+    qwen35BTransportHelperExists=(Test-Path -LiteralPath $qwenTransportHelperPath -PathType Leaf)
+    qwen35BTransportHelperSha256=Safe-FileHash $qwenTransportHelperPath
+    qwen35BPostReturnCarrierExists=(Test-Path -LiteralPath $qwenPostReturnCarrierPath -PathType Leaf)
+    qwen35BPostReturnCarrierSha256=Safe-FileHash $qwenPostReturnCarrierPath
+    qwen35BPostReturnToolExists=(Test-Path -LiteralPath $qwenPostReturnToolPath -PathType Leaf)
+    qwen35BPostReturnToolSha256=Safe-FileHash $qwenPostReturnToolPath
+    qwen35BTransportStateExists=(Test-Path -LiteralPath $qwenTransportStatePath -PathType Leaf)
+    qwen35BTransportState=$qwenTransportState
+    qwen35BPostReturnStateExists=(Test-Path -LiteralPath $qwenPostReturnStatePath -PathType Leaf)
+    qwen35BPostReturnState=$qwenPostReturnState
+    qwen35BActivationState=$qwenActivation
+    qwen35BBootstrapState=$qwenBootstrap
     h3ReturnHotfixMarkerExists=(Test-Path -LiteralPath $h3HotfixMarkerPath -PathType Leaf)
     h3ReturnHotfixStatus=$(if($h3Hotfix){[string]$h3Hotfix.status}else{$null})
     h3ReturnHotfixReason=$(if($h3Hotfix){[string]$h3Hotfix.reason}else{$null})
@@ -108,14 +138,19 @@ try {
     siteWatcherTaskState=$(if($siteWatcher){[string]$siteWatcher.State}else{'missing'})
     time=(Get-Date -Format o)
   }
-  $payload | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  $payloadJson=$payload | ConvertTo-Json -Depth 30
+  $payloadJson | Set-Content -LiteralPath $ackFile -Encoding UTF8
+  $payloadJson | Set-Content -LiteralPath $qwenTextAckFile -Encoding UTF8
 } catch {
   try {
     if(Test-Path -LiteralPath $diagRoot -PathType Container){
-      [ordered]@{
+      $errorPayload=[ordered]@{
         schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';source='windows-main';controlPlane='github'
-        component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message;time=(Get-Date -Format o)
-      } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ackFile -Encoding UTF8
+        component='AFZ Website Deploy Post-State ACK';status='probe-error';message=$_.Exception.Message
+        qwen35BReadOnly=$true;qwen35BModelAction='NONE';time=(Get-Date -Format o)
+      } | ConvertTo-Json -Depth 4
+      $errorPayload | Set-Content -LiteralPath $ackFile -Encoding UTF8
+      $errorPayload | Set-Content -LiteralPath $qwenTextAckFile -Encoding UTF8
     }
   } catch {}
 }
