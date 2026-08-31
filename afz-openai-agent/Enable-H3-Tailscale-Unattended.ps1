@@ -45,6 +45,13 @@ if([string]$req.status -ne 'active'){throw 'Request is not active'}
 if([string]$req.target.hostname -ne $expectedHost -or [string]$req.target.lanIp -ne $lanIp -or [string]$req.target.tailscaleIp -ne $tailscaleIp){throw 'H3 target identity mismatch'}
 if([string]$req.expected.unattendedPolicy -ne 'always' -or [string]$req.expected.tailscaleIp -ne $tailscaleIp){throw 'Expected-state mismatch'}
 
+# Always capture current H3 state before consulting the idempotent unattended-mode cache.
+# This is read-only and prevents a stale historical PASS from masquerading as live health.
+$liveProbe=Join-Path $InstallRoot 'afz-openai-agent\Probe-H3-Tailscale-Live.ps1'
+if(Test-Path -LiteralPath $liveProbe -PathType Leaf){
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $liveProbe -InstallRoot $InstallRoot *> $null}catch{}
+}
+
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
   try{
     $priorState=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
