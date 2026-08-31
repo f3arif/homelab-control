@@ -28,6 +28,14 @@ function Invoke-Phase1FamilyPttPrep {
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
+function Invoke-FamilyPttOnePlusInstall {
+  # Typed/idempotent install request for one authorized OnePlus Android handset only.
+  # The helper verifies the fixed APK hash and never touches either Pixel or network/backend state.
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-OnePlus13R-Install.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-oneplus13r-install.json'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
 function Invoke-H3SshKeyAclRepair {
   # Reuses the previously verified fixed-key/fixed-fingerprint ACL repair before any H3 SSH mutation.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Repair-H3-SshKeyAcl.ps1'
@@ -69,8 +77,9 @@ if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 Invoke-H3SshKeyAclRepair
 Invoke-H3TailscaleUnattended
 
-# The Phase 1 FamilyPTT prep is a separate typed, idempotent request.
+# FamilyPTT requests are independently typed and idempotent.
 Invoke-Phase1FamilyPttPrep
+Invoke-FamilyPttOnePlusInstall
 
 $statePath=Join-Path $stateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
