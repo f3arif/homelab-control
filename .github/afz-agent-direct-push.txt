@@ -1,5 +1,6 @@
 AFZ direct agent source recovery
-reason=h3-generic-worker-recovery-g3
+reason=familyptt-pixel6pro-pr14-install
+request_commit=2bcc9f2594fb9851b4a816be5f822a3fcf8186bc
 target=windows-main
 authority=github-exact-sha
-requested_at=2026-08-30T21:28:00-04:00
+requested_at=2026-08-31T00:22:00-04:00
