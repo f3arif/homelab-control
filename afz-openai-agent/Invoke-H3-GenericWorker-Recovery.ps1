@@ -85,8 +85,33 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $taskName='AFZ H3 Generic Worker'
 $workerScript='C:\AFZ\H3Worker\AFZ-H3-Worker.ps1'
+$expectedWorkerSha='b61d8eb4e625549836c504d102bc0139d1c97786447e2ea071ac9dbc8f02795e'
 $expectedLauncher='C:\AFZ\H3Worker\Run-AFZ-H3-Worker-Task-Hidden.vbs'
+$knownCorruptLauncherSha='a09e67601c7261dc38d430c62f01395df4649cb10a487a7ae9aa74e0d06e7d55'
+$launcherBackup=$expectedLauncher+'.bak-corrupt-a09e6760'
 $heartbeat='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Heartbeat\h3.txt'
+$utf8=New-Object Text.UTF8Encoding($false)
+
+# Reconstruct exactly the command the console-flash remediation was meant to
+# preserve from the original known-good Generic Worker task action.
+$canonicalWorkerCommand='"C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\AFZ\H3Worker\AFZ-H3-Worker.ps1"'
+$canonicalEscaped=$canonicalWorkerCommand.Replace('"','""')
+$canonicalLauncher=@(
+  'Option Explicit',
+  'Dim shell, cmd, rc',
+  'Set shell = CreateObject("WScript.Shell")',
+  ('cmd = "'+$canonicalEscaped+'"'),
+  'rc = shell.Run(cmd, 0, True)',
+  'WScript.Quit rc'
+) -join "`r`n"
+$knownCorruptLauncher=@(
+  'Option Explicit',
+  'Dim shell, cmd, rc',
+  'Set shell = CreateObject("WScript.Shell")',
+  'cmd = """C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe"" "',
+  'rc = shell.Run(cmd, 0, True)',
+  'WScript.Quit rc'
+) -join "`r`n"
 
 function Get-WorkerProcesses {
   @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop |
@@ -97,6 +122,9 @@ function Get-LauncherProcesses {
   @(Get-CimInstance Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction SilentlyContinue |
     Where-Object { [string]$_.CommandLine -like ('*'+$expectedLauncher+'*') } |
     Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+}
+function Get-Sha([string]$Path){
+  (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
 }
 
 $before=@(Get-WorkerProcesses)
@@ -118,25 +146,81 @@ foreach($a in $actions){
 }
 $principalOk=([string]$task.Principal.UserId -match '(?i)(^|\\)Faiz$' -and [string]$task.Principal.LogonType -eq 'Interactive')
 
+$launcherRepaired=$false
+$launcherRepairBackup=$null
+$launcherShaBefore=$null
+$launcherShaAfter=$null
+$canonicalLauncherSha=$null
+$workerSha=$null
 $started=$false
 $classification=''
+
 if($before.Count -gt 0){
   $classification='H3_GENERIC_WORKER_ALREADY_RUNNING'
 }else{
   if(-not $hiddenActionOk){throw "Generic Worker is absent but task action does not match exact hidden launcher $expectedLauncher; refusing to start."}
   if(-not $principalOk){throw 'Generic Worker is absent but task principal is not the expected Faiz/Interactive principal; refusing to start.'}
-  Start-ScheduledTask -TaskName $taskName
-  $started=$true
-  $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
+  if(-not(Test-Path -LiteralPath $workerScript -PathType Leaf)){throw "Expected Generic Worker script is missing: $workerScript"}
+  $workerSha=Get-Sha $workerScript
+  if($workerSha -ne $expectedWorkerSha){throw "Generic Worker script hash mismatch; refusing launcher repair/start. actual=$workerSha expected=$expectedWorkerSha"}
+  if(-not(Test-Path -LiteralPath $expectedLauncher -PathType Leaf)){throw "Expected hidden launcher is missing; refusing reconstruction without the known corrupt source file: $expectedLauncher"}
+
+  $launcherShaBefore=Get-Sha $expectedLauncher
+  $launcherContentBefore=[IO.File]::ReadAllText($expectedLauncher)
+  $canonicalBytes=$utf8.GetBytes($canonicalLauncher)
+  $shaAlg=[Security.Cryptography.SHA256]::Create()
+  try{$canonicalLauncherSha=([BitConverter]::ToString($shaAlg.ComputeHash($canonicalBytes))).Replace('-','').ToLowerInvariant()}finally{$shaAlg.Dispose()}
+
+  if($launcherShaBefore -eq $knownCorruptLauncherSha){
+    if($launcherContentBefore -cne $knownCorruptLauncher){throw 'Known corrupt launcher hash matched but content did not match the audited truncated launcher; refusing write.'}
+    if(Test-Path -LiteralPath $launcherBackup -PathType Leaf){
+      $backupSha=Get-Sha $launcherBackup
+      if($backupSha -ne $knownCorruptLauncherSha){throw "Launcher backup already exists with unexpected hash: $launcherBackup sha=$backupSha"}
+    }else{
+      [IO.File]::WriteAllBytes($launcherBackup,[IO.File]::ReadAllBytes($expectedLauncher))
+    }
+    $launcherRepairBackup=$launcherBackup
+    $tmpLauncher=$expectedLauncher+'.repair-'+[guid]::NewGuid().ToString('n')+'.tmp'
+    try{
+      [IO.File]::WriteAllText($tmpLauncher,$canonicalLauncher,$utf8)
+      $tmpSha=Get-Sha $tmpLauncher
+      if($tmpSha -ne $canonicalLauncherSha){throw "Temporary canonical launcher hash mismatch: $tmpSha"}
+      Move-Item -LiteralPath $tmpLauncher -Destination $expectedLauncher -Force
+    }finally{
+      if(Test-Path -LiteralPath $tmpLauncher){Remove-Item -LiteralPath $tmpLauncher -Force -ErrorAction SilentlyContinue}
+    }
+    $launcherShaAfter=Get-Sha $expectedLauncher
+    if($launcherShaAfter -ne $canonicalLauncherSha){throw "Repaired launcher verification failed: $launcherShaAfter"}
+    if([IO.File]::ReadAllText($expectedLauncher) -cne $canonicalLauncher){throw 'Repaired launcher content verification failed.'}
+    $launcherRepaired=$true
+  }elseif($launcherShaBefore -eq $canonicalLauncherSha){
+    if($launcherContentBefore -cne $canonicalLauncher){throw 'Canonical launcher hash matched but content verification failed.'}
+    $launcherShaAfter=$launcherShaBefore
+  }else{
+    throw "Hidden launcher is neither the audited corrupt file nor the canonical repaired file; refusing write/start. sha=$launcherShaBefore"
+  }
+
+  $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+  if([string]$task.State -eq 'Running'){
+    $classification=$(if($launcherRepaired){'H3_GENERIC_WORKER_LAUNCHER_REPAIRED_STALE_TASK_RUNNING'}else{'H3_GENERIC_WORKER_TASK_RUNNING_NO_WORKER'})
+  }else{
+    Start-ScheduledTask -TaskName $taskName
+    $started=$true
+    $classification='H3_GENERIC_WORKER_STARTED_EXISTING_HIDDEN_TASK'
+  }
 }
 
-$deadline=(Get-Date).AddSeconds(35)
 $after=@()
-do{
-  Start-Sleep -Milliseconds 750
+if($started){
+  $deadline=(Get-Date).AddSeconds(35)
+  do{
+    Start-Sleep -Milliseconds 750
+    $after=@(Get-WorkerProcesses)
+    if($after.Count -gt 0){break}
+  }while((Get-Date) -lt $deadline)
+}else{
   $after=@(Get-WorkerProcesses)
-  if($after.Count -gt 0){break}
-}while((Get-Date) -lt $deadline)
+}
 
 $postTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $postTaskInfo=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
@@ -181,23 +265,30 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
   $heartbeatAgeSec=[math]::Round(((Get-Date)-$item.LastWriteTime).TotalSeconds,1)
 }
 
+$mutation=$(if($launcherRepaired -and $started){'REPAIR_KNOWN_CORRUPT_LAUNCHER+START_EXISTING_TASK_ONLY'}elseif($launcherRepaired){'REPAIR_KNOWN_CORRUPT_LAUNCHER_ONLY'}elseif($started){'START_EXISTING_TASK_ONLY'}else{'NONE'})
 $result=[ordered]@{
-  schema=1;host=$env:COMPUTERNAME;taskName=$taskName;taskState=[string]$task.State;
+  schema=1;host=$env:COMPUTERNAME;taskName=$taskName;taskState=[string]$taskInfo.TaskName;
   lastTaskResult=[int64]$taskInfo.LastTaskResult;lastRunTime=$taskInfo.LastRunTime.ToString('o');
   postTaskState=$(if($postTask){[string]$postTask.State}else{$null});
   postLastTaskResult=$(if($postTaskInfo){[int64]$postTaskInfo.LastTaskResult}else{$null});
   postLastRunTime=$(if($postTaskInfo){$postTaskInfo.LastRunTime.ToString('o')}else{$null});
   expectedLauncher=$expectedLauncher;actions=$actions;principal=$principal;
   hiddenActionVerified=$hiddenActionOk;principalVerified=$principalOk;
+  launcherRepaired=$launcherRepaired;launcherRepairBackup=$launcherRepairBackup;
+  knownCorruptLauncherSha=$knownCorruptLauncherSha;launcherShaBefore=$launcherShaBefore;launcherShaAfter=$launcherShaAfter;canonicalLauncherSha=$canonicalLauncherSha;
   launcherExists=$launcherExists;launcher=$launcherMeta;launcherProcessCount=$launcherProcesses.Count;launcherProcesses=$launcherProcesses;
-  workerScriptExists=$workerScriptExists;workerScript=$workerMeta;
+  workerScriptExists=$workerScriptExists;workerScript=$workerMeta;expectedWorkerSha=$expectedWorkerSha;workerSha=$workerSha;
   beforeProcessCount=$before.Count;beforeProcesses=$before;taskStartIssued=$started;
   afterProcessCount=$after.Count;afterProcesses=$after;heartbeatPath=$heartbeat;
   heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;taskEvents=$taskEvents;
-  classification=$classification;mutation=$(if($started){'START_EXISTING_TASK_ONLY'}else{'NONE'});
+  classification=$classification;mutation=$mutation;
   capturedAt=(Get-Date).ToString('o')
 }
-if($after.Count -eq 0){$result.classification='H3_GENERIC_WORKER_RECOVERY_FAILED_NO_PROCESS';$result|ConvertTo-Json -Depth 14 -Compress;exit 12}
+if($after.Count -eq 0){
+  if([string]::IsNullOrWhiteSpace([string]$result.classification)){$result.classification='H3_GENERIC_WORKER_RECOVERY_FAILED_NO_PROCESS'}
+  $result|ConvertTo-Json -Depth 14 -Compress
+  exit 12
+}
 $result|ConvertTo-Json -Depth 14 -Compress
 exit 0
 '@
@@ -216,6 +307,7 @@ exit 0
       systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
       remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
       hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
+      launcherRepaired=[bool]$payload.launcherRepaired;launcherRepairBackup=$payload.launcherRepairBackup;
       expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
       afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
       heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
@@ -230,6 +322,7 @@ exit 0
     systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
     remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
     hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
+    launcherRepaired=[bool]$payload.launcherRepaired;launcherRepairBackup=$payload.launcherRepairBackup;
     expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
     afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
     heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
