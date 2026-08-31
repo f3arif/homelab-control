@@ -63,7 +63,9 @@ jobs:
             'gatewayStarted=$false',
             'HERMES_READY_LOCAL_OLLAMA_64K',
             'HERMES_INSTALLED_CONFIG_INCOMPLETE',
-            'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT'
+            'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT',
+            "'-Command','-'",
+            '-RedirectStandardInput $inFile'
           )){
             if(-not $s.Contains($required)){throw "Missing audit-only invariant: $required"}
           }
