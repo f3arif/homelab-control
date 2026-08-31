@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "project": "familyptt",
+  "action": "diagnose-oneplus-lan-backup",
+  "job_id": "familyptt-oneplus-lan-diag-20260830T2307",
+  "status": "active",
+  "serial": "95038870",
+  "package_id": "ca.afzeng.familyptt",
+  "purpose": "Read-only physical LAN-backup investigation on the OnePlus 13R. Capture FamilyPTT transport logs plus Android connectivity and Wi-Fi state. Do not restart apps, change permissions, change Wi-Fi/mobile data, alter router/WAN, press PTT, or modify backend services."
+}
