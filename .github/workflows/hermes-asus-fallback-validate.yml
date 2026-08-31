@@ -1,0 +1,58 @@
+name: Hermes ASUS Fallback Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Invoke-Hermes-ASUS-Fallback.ps1'
+      - 'afz-openai-agent/requests/hermes-asus-fallback-install.json'
+      - '.github/workflows/hermes-asus-fallback-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Invoke-Hermes-ASUS-Fallback.ps1'
+      - 'afz-openai-agent/requests/hermes-asus-fallback-install.json'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent\Invoke-Hermes-ASUS-Fallback.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
+      - name: Validate ASUS fallback safety contract
+        shell: powershell
+        run: |
+          $r=Get-Content 'afz-openai-agent\requests\hermes-asus-fallback-install.json' -Raw|ConvertFrom-Json
+          if([int]$r.schema -ne 1 -or [string]$r.action -ne 'install-and-configure' -or [string]$r.status -ne 'active'){throw 'request state'}
+          if([string]$r.target -ne 'windows-main' -or [string]$r.host -ne 'DESKTOP-10SKF0M'){throw 'target'}
+          if([string]$r.provider -ne 'custom' -or [string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'provider'}
+          if([string]$r.model -ne 'qwen3.5:4b' -or [int]$r.context_length -ne 65536 -or [int]$r.required_model_context -ne 64000){throw 'model context'}
+          if([string]$r.hermes_commit -ne 'f50b5bb0fa5b48caef753c790bf0b09a3570918a'){throw 'pin'}
+          if([string]$r.install_scope -ne 'faiz-user-standard-native-windows'){throw 'scope'}
+          if(-not [bool]$r.skip_interactive_setup -or -not [bool]$r.skip_computer_use){throw 'unattended flags'}
+          if([bool]$r.start_gateway -or [bool]$r.run_generation_test -or [bool]$r.expose_ollama){throw 'unsafe flags'}
+          if([string]$r.control_plane -ne 'github'){throw 'control plane'}
+          $s=Get-Content 'afz-openai-agent\Invoke-Hermes-ASUS-Fallback.ps1' -Raw
+          foreach($required in @(
+            'qwen3.5:4b',
+            'http://127.0.0.1:11434/v1',
+            "'HERMES_ASUS_FALLBACK_READY_LOCAL_OLLAMA_64K'",
+            "'HERMES_ASUS_INSTALL_STARTED'",
+            "'HERMES_ASUS_INSTALL_FAILED'",
+            '-SkipSetup',
+            '-SkipComputerUse',
+            '-Commit $Pin',
+            'commitVerified=$true',
+            'gatewayStarted=$false',
+            'generationTestStarted=$false',
+            'ollamaExposureChanged=$false'
+          )){if(-not $s.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden behavior: $forbidden"}}
