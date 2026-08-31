@@ -1,0 +1,59 @@
+name: Home Assistant Runtime Discovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: homeassistant-runtime-discovery
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet read-only discovery lane
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Home Assistant default endpoint on known AFZ nodes
+        shell: bash
+        run: |
+          set -u
+          found=0
+          printf 'HOME_ASSISTANT_DISCOVERY_V1\n'
+          while IFS='|' read -r name ip; do
+            [ -n "$name" ] || continue
+            url="http://${ip}:8123/"
+            headers="$(mktemp)"
+            body="$(mktemp)"
+            code=$(curl --silent --show-error --location \
+              --connect-timeout 2 --max-time 6 \
+              --dump-header "$headers" --output "$body" \
+              --write-out '%{http_code}' "$url" 2>/dev/null || true)
+            server=$(awk 'BEGIN{IGNORECASE=1} /^server:/{sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}' "$headers")
+            location=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/\r$/,""); sub(/^[^:]*:[[:space:]]*/,""); print; exit}' "$headers")
+            signature='none'
+            if grep -Eiq 'home-assistant|home assistant|hass-loading-screen|ha-panel-lovelace|frontend_latest' "$body"; then
+              signature='home-assistant'
+              found=$((found+1))
+            fi
+            printf 'node=%s ip=%s port=8123 http=%s signature=%s server=%q location=%q\n' \
+              "$name" "$ip" "${code:-000}" "$signature" "$server" "$location"
+            rm -f "$headers" "$body"
+          done <<'NODES'
+          windows-main|100.70.25.8
+          h3|100.106.186.118
+          hp|100.71.26.69
+          lenovo|100.99.242.89
+          pi|100.91.50.9
+          NODES
+          printf 'matches=%s\n' "$found"
+          exit 0
