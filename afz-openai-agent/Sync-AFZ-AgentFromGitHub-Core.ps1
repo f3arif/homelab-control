@@ -104,6 +104,7 @@ try{
   $dst=Join-Path $InstallRoot 'afz-openai-agent'
   New-Item -ItemType Directory -Force -Path $dst | Out-Null
   $copied=@()
+  $removed=@()
   foreach($f in @(Get-ChildItem -LiteralPath $src -Recurse -File)){
     $rel=$f.FullName.Substring($src.Length).TrimStart('\')
     $target=Join-Path $dst $rel
@@ -111,6 +112,22 @@ try{
     $needs=$true
     if(Test-Path $target){try{$needs=((Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)}catch{$needs=$true}}
     if($needs){Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $copied+=$rel}
+  }
+
+  # Exact overlay retirement reconciliation. Git intentionally removed the one-time
+  # AFZ website active request after the verified R8 cutover. Overlay-style copying
+  # must not leave that retired control file behind locally forever.
+  # This is deliberately narrow: no directory mirror, wildcard prune, or recursive
+  # deletion. A managed artifact is removed only when the exact downloaded Git SHA
+  # does not contain that same relative file.
+  $managedRetiredArtifacts=@('requests\afz-site-deploy.json')
+  foreach($rel in $managedRetiredArtifacts){
+    $sourceArtifact=Join-Path $src $rel
+    $localArtifact=Join-Path $dst $rel
+    if(-not(Test-Path -LiteralPath $sourceArtifact -PathType Leaf) -and (Test-Path -LiteralPath $localArtifact -PathType Leaf)){
+      Remove-Item -LiteralPath $localArtifact -Force
+      $removed+=$rel
+    }
   }
 
   foreach($ps1 in @(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter '*.ps1' -ErrorAction SilentlyContinue)){
@@ -187,11 +204,11 @@ try{
     }catch{throw "Ridge16K transport recovery migration failed: $($_.Exception.Message)"}
   }
 
-  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
+  $state=[ordered]@{remoteSha=$remoteSha;syncedAt=(Get-Date -Format o);installRoot=$InstallRoot;copied=$copied;removed=$removed;compatibility='windows-powershell-5.1-dpapi-health-json-responses-zeroarg-utf8-ui-fast-signal-toolargs-managed-retired-artifact-prune';ridge16kTransportRecoveryReset=$ridgeRecoveryReset;refTransport=$refTransport}
   $state|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $stateFile -Encoding UTF8
   $h3ReturnRecovery=Invoke-H3ReturnRecovery $remoteSha
   $h3ReturnPublisherHotfix=Invoke-H3ReturnPublisherHotfix $remoteSha
   $h3ConsoleFlashRemediation=Invoke-H3ConsoleFlashRemediation $remoteSha
   Publish-SiteDeployAck
-  Emit ([ordered]@{ok=$true;changed=($copied.Count -gt 0);remoteSha=$remoteSha;localSha=$localSha;copied=$copied;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})
+  Emit ([ordered]@{ok=$true;changed=(($copied.Count -gt 0) -or ($removed.Count -gt 0));remoteSha=$remoteSha;localSha=$localSha;copied=$copied;removed=$removed;ridge16kTransportRecoveryReset=$ridgeRecoveryReset;h3ReturnRecovery=$h3ReturnRecovery;h3ReturnPublisherHotfix=$h3ReturnPublisherHotfix;h3ConsoleFlashRemediation=$h3ConsoleFlashRemediation;installRoot=$InstallRoot;refTransport=$refTransport})
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
