@@ -107,7 +107,9 @@ if(`$text -match '127\.0\.0\.1:11434/api/generate' -or `$text -match '(?i)\bcurl
 `$existing=Get-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue
 if(`$existing){
   `$info=Get-ScheduledTaskInfo -TaskName `$taskName -ErrorAction SilentlyContinue
-  [pscustomobject]@{ok=`$true;already=`$true;task=`$taskName;state=[string]`$existing.State;lastResult=$(if(`$info){[int64]`$info.LastTaskResult}else{`$null});script=`$scriptPath;recoverySha='$recoverySha'}|ConvertTo-Json -Compress
+  `$lastResult=`$null
+  if(`$info){`$lastResult=[int64]`$info.LastTaskResult}
+  [pscustomobject]@{ok=`$true;already=`$true;task=`$taskName;state=[string]`$existing.State;lastResult=`$lastResult;script=`$scriptPath;recoverySha='$recoverySha'}|ConvertTo-Json -Compress
   exit 0
 }
 `$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg
