@@ -37,14 +37,23 @@ jobs:
             'http://127.0.0.1:11434/api/show',
             'hermes-agent.incomplete-',
             'Move-Item -LiteralPath $installDir -Destination $backupDir',
+            'clone --no-checkout --filter=blob:none',
+            'core.sparseCheckout true',
+            'core.sparseCheckoutCone false',
+            '!/contributors/',
+            '!/website/',
+            'fetch --depth 1 origin $pin',
+            'checkout --detach FETCH_HEAD',
+            'sparsePrestageVerified=$true',
             '-Commit $pin -ForceCommit',
             'hermes.exe',
             'hermes.cmd',
             "'HERMES_ASUS_FALLBACK_READY_LOCAL_OLLAMA_64K'",
+            "'HERMES_ASUS_RECOVERY_FAILED'",
             'preservedIncompleteInstall=$backupDir',
             'commitVerified=$true',
             'gatewayStarted=$false',
             'generationTestStarted=$false',
             'ollamaExposureChanged=$false'
           )){if(-not $s.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule','Remove-Item -LiteralPath $backupDir','Remove-Item -Recurse','git clean','git reset --hard')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden recovery behavior: $forbidden"}}
+          foreach($forbidden in @('/chat/completions','ollama create','gateway start','gateway install','Register-ScheduledTask','New-NetFirewallRule','Set-NetFirewallRule','Remove-Item -LiteralPath $backupDir','Remove-Item -Recurse','git clean','git reset --hard','checkout -f','checkout --force')){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden recovery behavior: $forbidden"}}
