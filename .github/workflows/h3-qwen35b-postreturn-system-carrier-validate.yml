@@ -1,0 +1,51 @@
+name: Validate H3 Qwen 35B Post-Return SYSTEM Carrier
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1'
+      - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
+      - '.github/workflows/h3-qwen35b-postreturn-system-carrier-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell 5.1 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($path in @(
+            'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1',
+            'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){throw ("PowerShell parse failure in $path`: "+($errors.Message -join '; '))}
+          }
+      - name: Enforce saved-response-only carrier contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $carrier=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1' -Raw
+          $transport=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1' -Raw
+          foreach($needle in @(
+            "`$jobId='qwen35b-a3b-website-20260830-r1'",
+            "`$recoverySha='5817bd2d55275526f3d90b72f93e3c76ea713e40'",
+            "`$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'",
+            'StrictHostKeyChecking=yes',
+            'IdentitiesOnly=yes',
+            'QWEN35B_POSTRETURN_RECOVERY_STARTED_FROM_SAVED_RESPONSE',
+            'modelCallIssuedByRecovery=$false',
+            'Recover-H3-Qwen35BA3B-PostReturn.ps1'
+          )){if(-not $carrier.Contains($needle)){throw "carrier invariant missing: $needle"}}
+          if($carrier -match '127\.0\.0\.1:11434/api/generate'){throw 'carrier must not contain Ollama generate endpoint'}
+          if($carrier -match '(?im)^\s*[&]?\s*ollama(?:\.exe)?\s'){throw 'carrier must not invoke Ollama CLI'}
+          if(-not $transport.Contains('Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1')){throw 'transport recovery must chain post-return helper'}
+          if(-not $transport.Contains('This continuation is independent of the one-call transport activation')){throw 'transport post-return safety marker missing'}
+          Write-Host 'QWEN35B_POSTRETURN_SYSTEM_CARRIER_CONTRACT=PASS'
