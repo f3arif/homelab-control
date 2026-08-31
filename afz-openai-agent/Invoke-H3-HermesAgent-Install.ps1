@@ -12,166 +12,73 @@ if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Hermes reque
 $req=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8|ConvertFrom-Json
 $id=([string]$req.id).Trim()
 if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid Hermes request identity.'}
-if([string]$req.action -ne 'install-and-configure' -or [string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'Hermes request target mismatch.'}
-if([string]$req.provider -ne 'custom' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'Hermes provider must remain local custom Ollama.'}
-if([string]$req.base_model -ne 'qwen3.6:35b-a3b' -or [string]$req.hermes_model -ne 'qwen3.6:35b-a3b-hermes64k'){throw 'Hermes model request mismatch.'}
-if([int]$req.context_length -ne 65536){throw 'Hermes context length must be 65536.'}
-if([string]$req.hermes_commit -ne 'fc0a10a924ce31a7badd0d7a202dcc0779ef7942'){throw 'Hermes commit pin mismatch.'}
-if(-not [bool]$req.skip_interactive_setup -or [bool]$req.start_gateway -or [bool]$req.run_generation_test){throw 'Hermes request safety flags mismatch.'}
+if([string]$req.action -ne 'install-and-configure' -or [string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'Hermes audit target mismatch.'}
+if([string]$req.recovery_mode -ne 'post-timeout-audit-only'){throw 'Hermes runner is restricted to post-timeout audit-only mode.'}
+if([string]$req.base_url -ne 'http://127.0.0.1:11434/v1' -or [int]$req.context_length -ne 65536){throw 'Hermes audit request mismatch.'}
+if([bool]$req.start_gateway -or [bool]$req.run_generation_test){throw 'Hermes audit safety flags mismatch.'}
 
-$stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-agent'
-$statePath=Join-Path $stateRoot ($id+'.json')
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
 $target='Faiz@100.106.186.118'
-$wakeUrl='http://100.91.50.9:8087/wake/h3'
+$auditRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-agent-audit'
+$auditPath=Join-Path $auditRoot ($id+'.json')
+$mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$mirrorPath=Join-Path $mirrorRoot 'H3-HERMES-POSTTIMEOUT-AUDIT-LATEST.json'
 $utf8=New-Object Text.UTF8Encoding($false)
-New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
+New-Item -ItemType Directory -Force -Path $auditRoot|Out-Null
 
-function Save-State($o){$json=$o|ConvertTo-Json -Depth 20 -Compress;[IO.File]::WriteAllText($statePath,$json,$utf8);Write-Output $json}
-function Read-State{if(-not(Test-Path -LiteralPath $statePath -PathType Leaf)){return $null};try{return Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json}catch{return $null}}
-function Test-H3Port{
-  try{$tcp=New-Object Net.Sockets.TcpClient;try{$iar=$tcp.BeginConnect('100.106.186.118',22,$null,$null);if(-not $iar.AsyncWaitHandle.WaitOne(2500,$false)){return $false};$tcp.EndConnect($iar);return $true}finally{$tcp.Dispose()}}catch{return $false}
+function Save-Audit($o){
+  $json=$o|ConvertTo-Json -Depth 12 -Compress
+  [IO.File]::WriteAllText($auditPath,$json,$utf8)
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,($o|ConvertTo-Json -Depth 12),$utf8)}}catch{}
+  Write-Output $json
 }
-function Ensure-H3Awake{
-  if(Test-H3Port){return}
-  try{Invoke-WebRequest -Uri $wakeUrl -UseBasicParsing -TimeoutSec 10|Out-Null}catch{}
-  $deadline=(Get-Date).AddMinutes(3)
-  do{Start-Sleep -Seconds 5;if(Test-H3Port){return}}while((Get-Date)-lt $deadline)
-  throw 'H3 did not become reachable on SSH after bounded wake attempt.'
-}
-function Invoke-H3([string]$RemoteScript){
-  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Hermes stdin was empty.''};Invoke-Expression $script'
-  $bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
-  $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded)
-  $inFile=Join-Path $env:TEMP ('afz-h3-hermes-in-'+[guid]::NewGuid().ToString('n')+'.ps1')
-  $outFile=Join-Path $env:TEMP ('afz-h3-hermes-out-'+[guid]::NewGuid().ToString('n')+'.txt')
-  $errFile=Join-Path $env:TEMP ('afz-h3-hermes-err-'+[guid]::NewGuid().ToString('n')+'.txt')
-  try{
-    [IO.File]::WriteAllText($inFile,$RemoteScript,$utf8)
-    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
-    if(-not $p.WaitForExit(1200000)){try{$p.Kill()}catch{};throw 'H3 Hermes install exceeded bounded execution window.'}
-    return [ordered]@{exit=[int]$p.ExitCode;stdout=$(if(Test-Path $outFile){[IO.File]::ReadAllText($outFile)}else{''});stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile)}else{''})}
-  }finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
-}
-
-$prior=Read-State
-if($prior -and [bool]$prior.ok -and [string]$prior.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K'){Save-State $prior;exit 0}
-foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required H3 transport path missing: $p"}}
-Ensure-H3Awake
+$prior=$null
+if(Test-Path -LiteralPath $auditPath -PathType Leaf){try{$prior=Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
+if($prior -and [string]$prior.classification -notmatch 'AUDIT_TRANSPORT_FAILED$'){Save-Audit $prior;exit 0}
+foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required elevated H3 audit path missing: $p"}}
 
 $remote=@'
 $ErrorActionPreference='Stop'
-Set-StrictMode -Version 2.0
-$jobId='__JOB_ID__'
-$hermesCommit='fc0a10a924ce31a7badd0d7a202dcc0779ef7942'
 $baseModel='qwen3.6:35b-a3b'
-$hermesModel='qwen3.6:35b-a3b-hermes64k'
-$contextLength=65536
+$aliasModel='qwen3.6:35b-a3b-hermes64k'
 $endpoint='http://127.0.0.1:11434/v1'
-$expectedHost='DESKTOP-H3R6CQN'
-$utf8=New-Object Text.UTF8Encoding($false)
-$hermesHome=Join-Path $env:LOCALAPPDATA 'hermes'
-$launcher=Join-Path $hermesHome 'bin\hermes.exe'
-$config=Join-Path $hermesHome 'config.yaml'
-$installedNow=$false
-$modelCreated=$false
-$selectedModel=$null
-$version=$null
-
-function Find-Ollama{
-  $cmd=Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1
-  if($cmd){if($cmd.Source){return [string]$cmd.Source};if($cmd.Path){return [string]$cmd.Path}}
-  foreach($p in @((Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'),'C:\Program Files\Ollama\ollama.exe')){if(Test-Path -LiteralPath $p -PathType Leaf){return $p}}
-  return $null
-}
-function Get-Context([string]$Ollama,[string]$Model){
-  $txt=(& $Ollama show --modelfile $Model 2>&1|Out-String);if($LASTEXITCODE -ne 0){return 0}
-  $m=[regex]::Matches($txt,'(?im)^\s*PARAMETER\s+num_ctx\s+(\d+)\s*$');if($m.Count -eq 0){return 0};return [int]$m[$m.Count-1].Groups[1].Value
-}
-function Publish($Result){
-  if([bool]$Result.retryable){return $false}
-  try{
-    $gh=Get-Command gh.exe -ErrorAction SilentlyContinue|Select-Object -First 1;if(-not $gh){return $false}
-    $ghPath=$(if($gh.Path){[string]$gh.Path}else{[string]$gh.Source});if([string]::IsNullOrWhiteSpace($ghPath)){return $false}
-    $body="[H3-HERMES] job=$jobId; classification=$($Result.classification); ok=$($Result.ok); hermes=$($Result.version); model=$($Result.model); context=$($Result.contextLength); endpoint=loopback-only; generationTestStarted=false."
-    & $ghPath issue comment 9 --repo f3arif/faiz-homelab --body $body *> $null
-    return ($LASTEXITCODE -eq 0)
-  }catch{return $false}
-}
-function Emit($Result,[int]$Code){$Result.publishedToGitHub=Publish $Result;$json=$Result|ConvertTo-Json -Depth 12 -Compress;Write-Output ('AFZ_HERMES_RESULT_JSON='+$json);exit $Code}
-
-try{
-  if($env:COMPUTERNAME -ne $expectedHost){throw "H3 host mismatch: $env:COMPUTERNAME"}
-  $busy=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object {$c=[string]$_.CommandLine;$c -and ($c -match '(?i)Qwen27B|Qwen35B|Qwen38-27B-Website-Benchmark|WebsiteBenchmark|35B.*Website')}|ForEach-Object {[string]$_.Name+'#'+[string]$_.ProcessId})
-
-  if(-not(Test-Path -LiteralPath $launcher -PathType Leaf)){
-    $url='https://raw.githubusercontent.com/NousResearch/hermes-agent/'+$hermesCommit+'/scripts/install.ps1'
-    $text=Invoke-RestMethod -Uri $url -TimeoutSec 60
-    if([string]::IsNullOrWhiteSpace([string]$text)){throw 'Pinned Hermes installer download was empty.'}
-    & ([scriptblock]::Create([string]$text)) -SkipSetup -Commit $hermesCommit
-    if(-not(Test-Path -LiteralPath $launcher -PathType Leaf)){throw 'Hermes launcher missing after install.'}
-    $installedNow=$true
-  }
-  $version=((& $launcher --version 2>&1|Out-String).Trim());if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)){throw 'hermes --version failed.'}
-
-  if($busy.Count -gt 0){
-    Emit ([ordered]@{schema=1;ok=$false;retryable=$true;classification='HERMES_INSTALLED_CONFIG_DEFERRED_PROTECTED_H3_BUSY';jobId=$jobId;host=$env:COMPUTERNAME;installedNow=$installedNow;version=$version;model=$null;contextLength=$contextLength;baseUrl=$endpoint;protectedWorkDetected=$busy;generationTestStarted=$false;capturedAt=(Get-Date -Format o)}) 75
-  }
-
-  $ollama=Find-Ollama;if(-not $ollama){throw 'Ollama CLI was not found on H3.'}
-  $tags=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 15
-  $names=@($tags.models|ForEach-Object {[string]$_.name});if($baseModel -notin $names){throw "Required H3 base model is not installed: $baseModel"}
-  $baseContext=Get-Context $ollama $baseModel
-  if($baseContext -ge 64000){$selectedModel=$baseModel}else{
-    $aliasContext=$(if($hermesModel -in $names){Get-Context $ollama $hermesModel}else{0})
-    if($aliasContext -lt 64000){
-      $mf=Join-Path $env:TEMP ('afz-hermes-'+[guid]::NewGuid().ToString('n')+'.Modelfile')
-      try{[IO.File]::WriteAllText($mf,("FROM $baseModel`r`nPARAMETER num_ctx $contextLength`r`n"),$utf8);& $ollama create $hermesModel -f $mf *> $null;if($LASTEXITCODE -ne 0){throw 'ollama create for Hermes alias failed.'}}finally{Remove-Item -LiteralPath $mf -Force -ErrorAction SilentlyContinue}
-      $modelCreated=$true
-    }
-    if((Get-Context $ollama $hermesModel) -lt 64000){throw 'Hermes Ollama alias context verification failed.'}
-    $selectedModel=$hermesModel
-  }
-
-  New-Item -ItemType Directory -Force -Path $hermesHome|Out-Null
-  $expected=@(
-    'model:',
-    ('  default: "'+$selectedModel+'"'),
-    '  provider: custom',
-    ('  base_url: "'+$endpoint+'"'),
-    '  api_key: ollama',
-    ('  context_length: '+$contextLength)
-  ) -join "`r`n"
-  if(Test-Path -LiteralPath $config -PathType Leaf){
-    $existing=[IO.File]::ReadAllText($config)
-    $same=($existing -match [regex]::Escape('provider: custom') -and $existing -match [regex]::Escape($endpoint) -and $existing -match [regex]::Escape($selectedModel) -and $existing -match 'context_length:\s*65536')
-    if(-not $same){
-      $backup=$config+'.afz-pre-hermes-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.bak';Copy-Item -LiteralPath $config -Destination $backup -Force
-      throw "Existing Hermes config was preserved and requires merge; backup=$backup"
-    }
-  }else{[IO.File]::WriteAllText($config,($expected+"`r`n"),$utf8)}
-
-  $models=Invoke-RestMethod -Uri ($endpoint+'/models') -TimeoutSec 15
-  $ids=@($models.data|ForEach-Object {[string]$_.id});if($selectedModel -notin $ids){throw "Configured model not visible from Ollama OpenAI API: $selectedModel"}
-  Emit ([ordered]@{schema=1;ok=$true;retryable=$false;classification='HERMES_READY_LOCAL_OLLAMA_64K';jobId=$jobId;host=$env:COMPUTERNAME;installedNow=$installedNow;version=$version;model=$selectedModel;baseModel=$baseModel;modelAliasCreated=$modelCreated;contextLength=$contextLength;baseUrl=$endpoint;configPath=$config;protectedWorkDetected=@();generationTestStarted=$false;capturedAt=(Get-Date -Format o)}) 0
-}catch{
-  $msg=$_.Exception.Message
-  $retryable=($msg -notmatch '^Existing Hermes config was preserved')
-  Emit ([ordered]@{schema=1;ok=$false;retryable=$retryable;classification=$(if($retryable){'HERMES_SETUP_RETRYABLE'}else{'HERMES_SETUP_FAILED'});jobId=$jobId;host=$env:COMPUTERNAME;installedNow=$installedNow;version=$version;model=$selectedModel;contextLength=$contextLength;baseUrl=$endpoint;error=$msg;generationTestStarted=$false;capturedAt=(Get-Date -Format o)}) $(if($retryable){75}else{1})
-}
+$home=Join-Path $env:LOCALAPPDATA 'hermes'
+$launcher=Join-Path $home 'bin\hermes.exe'
+$config=Join-Path $home 'config.yaml'
+function Value([string]$t,[string]$p){$m=[regex]::Match($t,$p,[Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::Multiline);if($m.Success){return ([string]$m.Groups[1].Value).Trim().Trim('"').Trim("'")};return $null}
+function OllamaPath{$c=Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1;if($c){return [string]$c.Source};foreach($p in @((Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'),'C:\Program Files\Ollama\ollama.exe')){if(Test-Path $p){return $p}};return $null}
+function Ctx([string]$o,[string]$m){if(-not $o){return 0};$t=(& $o show --modelfile $m 2>&1|Out-String);if($LASTEXITCODE -ne 0){return 0};$x=[regex]::Matches($t,'(?im)^\s*PARAMETER\s+num_ctx\s+(\d+)\s*$');if($x.Count){return [int]$x[$x.Count-1].Groups[1].Value};return 0}
+$launcherPresent=Test-Path -LiteralPath $launcher -PathType Leaf
+$version=$null;if($launcherPresent){$v=(& $launcher --version 2>&1|Out-String).Trim();if($LASTEXITCODE -eq 0){$version=$v}}
+$configPresent=Test-Path -LiteralPath $config -PathType Leaf
+$model=$null;$provider=$null;$baseUrl=$null;$context=0;$apiKeyPresent=$false
+if($configPresent){$t=[IO.File]::ReadAllText($config);$model=Value $t '^\s*default\s*:\s*([^#\r\n]+)';$provider=Value $t '^\s*provider\s*:\s*([^#\r\n]+)';$baseUrl=Value $t '^\s*base_url\s*:\s*([^#\r\n]+)';$cv=Value $t '^\s*context_length\s*:\s*(\d+)';if($cv -match '^\d+$'){$context=[int]$cv};$apiKeyPresent=($t -match '(?im)^\s*api_key\s*:\s*\S+')}
+$o=OllamaPath;$reachable=$false;$names=@();if($o){try{$tags=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 10;$names=@($tags.models|ForEach-Object{[string]$_.name});$reachable=$true}catch{}}
+$basePresent=($baseModel -in $names);$aliasPresent=($aliasModel -in $names);$baseContext=$(if($basePresent){Ctx $o $baseModel}else{0});$aliasContext=$(if($aliasPresent){Ctx $o $aliasModel}else{0});$selectedContext=$(if($model -eq $aliasModel){$aliasContext}elseif($model -eq $baseModel){$baseContext}else{0})
+$configOk=($configPresent -and $model -in @($baseModel,$aliasModel) -and $provider -eq 'custom' -and $baseUrl -eq $endpoint -and $context -eq 65536 -and $apiKeyPresent)
+$ready=($launcherPresent -and $version -and $reachable -and $configOk -and $selectedContext -ge 64000)
+$classification=$(if($ready){'HERMES_READY_LOCAL_OLLAMA_64K'}elseif($launcherPresent){'HERMES_INSTALLED_CONFIG_INCOMPLETE'}else{'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT'})
+[ordered]@{schema=1;ok=[bool]$ready;classification=$classification;host=$env:COMPUTERNAME;launcherPresent=$launcherPresent;version=$version;configPresent=$configPresent;configModel=$model;configProvider=$provider;configBaseUrl=$baseUrl;configContextLength=$context;apiKeyPresent=$apiKeyPresent;ollamaReachable=$reachable;baseModelPresent=$basePresent;baseModelContext=$baseContext;hermesAliasPresent=$aliasPresent;hermesAliasContext=$aliasContext;selectedModelContext=$selectedContext;generationTestStarted=$false;gatewayStarted=$false;capturedAt=(Get-Date -Format o)}|ConvertTo-Json -Depth 6 -Compress
 '@
-$remote=$remote.Replace('__JOB_ID__',$id)
-
+$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
+$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
+$outFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.out')
+$errFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.err')
 try{
-  $run=Invoke-H3 $remote
-  $marker=@(([string]$run.stdout -split "`r?`n")|Where-Object {$_.StartsWith('AFZ_HERMES_RESULT_JSON=')}|Select-Object -Last 1)
-  if($marker.Count -eq 0){throw "H3 Hermes runner returned no result marker. exit=$($run.exit) stderr=$(([string]$run.stderr).Trim())"}
-  $result=$marker[0].Substring('AFZ_HERMES_RESULT_JSON='.Length)|ConvertFrom-Json
-  Save-State $result
-  if([bool]$result.ok){exit 0};if([bool]$result.retryable){exit 75};exit 1
+  $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+  if(-not $p.WaitForExit(90000)){try{$p.Kill()}catch{};throw 'H3 Hermes audit exceeded 90 seconds.'}
+  $stdout=$(if(Test-Path $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
+  $stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
+  if($p.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($stdout)){throw "H3 Hermes audit SSH failed exit=$($p.ExitCode) stderr=$stderr"}
+  $lines=@($stdout -split "`r?`n"|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})
+  $result=$lines[$lines.Count-1]|ConvertFrom-Json
+  $result|Add-Member -NotePropertyName jobId -NotePropertyValue $id -Force
+  $result|Add-Member -NotePropertyName recoveryMode -NotePropertyValue 'post-timeout-audit-only' -Force
+  Save-Audit $result
+  exit 0
 }catch{
-  Save-State ([ordered]@{schema=1;ok=$false;retryable=$true;classification='HERMES_TRANSPORT_FAILED';jobId=$id;host='H3';error=$_.Exception.Message;capturedAt=(Get-Date -Format o)})
+  Save-Audit ([ordered]@{schema=1;ok=$false;classification='HERMES_POSTTIMEOUT_AUDIT_TRANSPORT_FAILED';jobId=$id;recoveryMode='post-timeout-audit-only';error=$_.Exception.Message;generationTestStarted=$false;gatewayStarted=$false;capturedAt=(Get-Date -Format o)})
   exit 75
-}
+}finally{Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue}
