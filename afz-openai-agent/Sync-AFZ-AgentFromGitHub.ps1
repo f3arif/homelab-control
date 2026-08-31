@@ -63,6 +63,37 @@ function Ensure-FallbackUpdaterTask {
   }
 }
 
+function Start-Qwen35BOneShot {
+  param([string]$SyncedSha)
+  $jobId='qwen35b-a3b-website-20260830-r1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-qwen35b-a3b-website-test.json'
+  $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1'
+  $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-a3b-request'
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+
+  if(Test-Path -LiteralPath $marker -PathType Leaf){
+    try{return Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-activated';jobId=$jobId;marker=$marker}}
+  }
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return [ordered]@{ok=$false;status='request-missing';jobId=$jobId;path=$request}}
+  if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap}}
+
+  try{
+    $r=Get-Content -LiteralPath $request -Raw|ConvertFrom-Json
+    if([int]$r.schema -ne 1 -or [string]$r.project -ne 'qwen36-35b-a3b-website-direct-test' -or [string]$r.job_id -ne $jobId -or [string]$r.model -ne 'qwen3.6:35b-a3b' -or [int]$r.context -ne 16384 -or -not [bool]$r.no_think -or [int]$r.max_model_calls -ne 1){
+      return [ordered]@{ok=$false;status='request-contract-invalid';jobId=$jobId}
+    }
+
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
+    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+    $o=[ordered]@{ok=$true;status='bootstrap-started';jobId=$jobId;expectedSha=$SyncedSha;bootstrapPid=$p.Id;marker=$marker;activatedAt=(Get-Date -Format o);maxModelCalls=1}
+    $o|ConvertTo-Json -Depth 8 -Compress|Set-Content -LiteralPath $marker -Encoding UTF8
+    return $o
+  }catch{
+    return [ordered]@{ok=$false;status='activation-exception';jobId=$jobId;error=$_.Exception.Message}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -110,10 +141,16 @@ try{
     $recovery=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message;syncedSha=$resolvedSha}
   }
 
+  # One-shot activation for the already-reviewed 35B A3B comparison request.
+  # The activation marker is written at bootstrap start, so later source syncs
+  # cannot replay this job. H3 also independently guards model_call_attempted.
+  $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha
+
   $out=[ordered]@{}
   foreach($p in $result.PSObject.Properties){$out[$p.Name]=$p.Value}
   $out['fallbackUpdaterRepair']=$fallbackUpdaterRepair
   $out['h3GenericWorkerRecovery']=$recovery
+  $out['qwen35BA3BActivation']=$qwen35BActivation
   $out|ConvertTo-Json -Depth 30 -Compress
   exit 0
 }finally{
