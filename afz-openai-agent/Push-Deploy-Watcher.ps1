@@ -25,6 +25,9 @@ $jellyfinRequestRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Jellyfin-
 $familyPttPhase1ApkRunner=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-ApkPrepare.ps1'
 $familyPttPhase1ApkRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-phase1-apk-prepare.json'
 $familyPttPhase1LastAttempt=[DateTime]::MinValue
+$hpEnvySurfsharkRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Surfshark-ExitNode.ps1'
+$hpEnvySurfsharkRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-surfshark-exitnode.json'
+$hpEnvySurfsharkStateRoot=Join-Path $stateRoot 'jobs\hpenvy-surfshark-exitnode'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -185,6 +188,34 @@ function Handle-JellyfinVisibilityRequest{
     if($LASTEXITCODE -ne 0){Log "JELLYFIN_VISIBILITY_REQUEST_ERROR exit=$LASTEXITCODE source=$(Current-Sha)"}
   }catch{Log "JELLYFIN_VISIBILITY_REQUEST_ERROR $($_.Exception.Message)"}
 }
+function Handle-HPEnvySurfsharkRequest{
+  if(-not(Test-Path -LiteralPath $hpEnvySurfsharkRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $hpEnvySurfsharkRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $hpEnvySurfsharkRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    $mode=([string]$req.mode).Trim().ToLowerInvariant()
+    if([int]$req.schema -ne 1){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    if([string]$req.taskName -ne 'HP Envy Surfshark Exit Node'){return}
+    if([string]$req.target -ne 'coolyo@100.71.26.69'){return}
+    if($mode -notin @('audit','apply')){return}
+    $statePath=Join-Path $hpEnvySurfsharkStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$existing.classification -match '^(AUDIT_|APPLY_)'){return}
+      }catch{}
+    }
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hpEnvySurfsharkRunner -InstallRoot $InstallRoot -RequestPath $hpEnvySurfsharkRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}
+    }
+    Log "HPENVY_SURFSHARK_REQUEST mode=$mode classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "HPENVY_SURFSHARK_REQUEST_ERROR $($_.Exception.Message)"}
+}
 # BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
 function Handle-FamilyPttPhase1ApkRequest{
   if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRunner -PathType Leaf)){return}
@@ -219,7 +250,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot familyPttPhase1ApkRequest=typed-active-only"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only"
   Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
@@ -267,6 +298,7 @@ try{
       }
       Refresh-FamilyPttR17IfSafe
       Handle-JellyfinVisibilityRequest
+      Handle-HPEnvySurfsharkRequest
       Handle-FamilyPttPhase1ApkRequest
       $lastError=''
     }catch{
