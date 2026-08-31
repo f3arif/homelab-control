@@ -2,9 +2,10 @@
   "schema": 1,
   "project": "familyptt",
   "action": "install-oneplus13r",
-  "job_id": "familyptt-oneplus13r-install-r002-20260830T2142",
-  "status": "completed",
-  "apk_sha256": "4bc8ceafe13ea42eb68cf0f682dec5dbbab9980510d642993453e8e788e9117b",
+  "job_id": "familyptt-oneplus13r-pr14-lanfix-install-r001",
+  "status": "active",
+  "apk_file": "FamilyPTT-standalone-arm64-pr14-lanfix.apk",
+  "apk_sha256": "ec9a0db9534abfbf54e90e3ada47c9b298b4c1c608e483d5b465632bd71a8ff1",
   "package_id": "ca.afzeng.familyptt",
-  "purpose": "Superseded by the PR14 LAN-backup-fix APK install request. No further execution for this old APK request."
+  "purpose": "Install the validated PR14 LAN-backup-fix standalone APK only on one authorized OnePlus Android handset visible to windows-main ADB, grant and verify microphone permission, launch FamilyPTT, and report the new PID. Do not restart or modify either Pixel handset or any network/backend service."
 }
