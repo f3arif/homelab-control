@@ -49,22 +49,59 @@ print(json.dumps((cfg.get('mcp_servers') or {}).get('afz-fabric'), separators=('
 PY
 )"
 
+# Real read-only acceptance gate before any file/config mutation. This imports
+# the staged bridge directly, reads AFZ Control health, then invokes the
+# existing typed read-only Windows/WSL audit. The latter proves HP Envy has the
+# required Tailscale deploy authorization without running a model or shell tool.
+PRECHECK=""
+PRECHECK_OK=false
+if PRECHECK="$($HERMES_PY - "$SOURCE_BRIDGE" <<'PY'
+import importlib.util, json, sys
+path=sys.argv[1]
+spec=importlib.util.spec_from_file_location('afz_hermes_mcp_precheck', path)
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+health=json.loads(mod.afz_control_health())
+audit=json.loads(mod.afz_windows_wsl_memory_audit())
+ok=bool(health.get('ok')) and bool(audit.get('ok'))
+obj={
+  'ok':ok,
+  'classification':'AFZ_HERMES_MCP_PRECHECK_PASS' if ok else 'AFZ_HERMES_MCP_PRECHECK_BLOCKED',
+  'controlHealth':health,
+  'authorizationProbe':audit,
+  'readOnly':True,
+  'generationTestStarted':False,
+  'ollamaExposureChanged':False,
+}
+print(json.dumps(obj,separators=(',',':')))
+raise SystemExit(0 if ok else 4)
+PY
+)"; then
+  PRECHECK_OK=true
+fi
+
 if [ "$MODE" = "--audit" ]; then
-  "$HERMES_PY" - "$VERSION" "$TS_IP" "$HERMES_PY" "$TARGET_BRIDGE" "$CURRENT_ENTRY" <<'PY'
+  "$HERMES_PY" - "$VERSION" "$TS_IP" "$HERMES_PY" "$TARGET_BRIDGE" "$CURRENT_ENTRY" "$PRECHECK" "$PRECHECK_OK" <<'PY'
 import json, os, sys
-version, ts_ip, py, target, entry = sys.argv[1:]
+version, ts_ip, py, target, entry, precheck, precheck_ok = sys.argv[1:]
 try: parsed=json.loads(entry)
 except Exception: parsed=None
+try: pre=json.loads(precheck)
+except Exception: pre={'ok':False,'error':'precheck-output-invalid'}
+ok=precheck_ok.lower()=='true' and bool(pre.get('ok'))
 print(json.dumps({
-  'schema':1,'ok':True,'readOnly':True,'classification':'AFZ_HERMES_MCP_AUDIT',
+  'schema':1,'ok':ok,'readOnly':True,
+  'classification':'AFZ_HERMES_MCP_AUDIT_READY' if ok else 'AFZ_HERMES_MCP_AUDIT_BLOCKED',
   'host':'hpenvy','tailscaleIp':ts_ip,'hermesVersion':version,'python':py,
   'targetBridge':target,'targetBridgePresent':os.path.isfile(target),
-  'configured':isinstance(parsed,dict),'entry':parsed,
+  'configured':isinstance(parsed,dict),'entry':parsed,'precheck':pre,
   'gatewayStarted':False,'generationTestStarted':False,'ollamaExposureChanged':False
 }, separators=(',',':')))
 PY
   exit 0
 fi
+
+[ "$PRECHECK_OK" = "true" ] || { echo "$PRECHECK" >&2; fail "typed AFZ precheck failed; refusing MCP activation"; }
 
 mkdir -p "$TARGET_DIR"
 chmod 700 "$TARGET_DIR"
@@ -128,14 +165,14 @@ print(json.dumps((load_config().get('mcp_servers') or {}).get('afz-fabric'), sep
 PY
 )"
 
-"$HERMES_PY" - "$STATE" "$VERSION" "$TS_IP" "$CONFIG_BACKUP" "$BRIDGE_BACKUP" "$SELFTEST" "$FINAL_ENTRY" <<'PY'
+"$HERMES_PY" - "$STATE" "$VERSION" "$TS_IP" "$CONFIG_BACKUP" "$BRIDGE_BACKUP" "$SELFTEST" "$FINAL_ENTRY" "$PRECHECK" <<'PY'
 import json, os, sys, time
-state, version, ts_ip, cfg_bak, bridge_bak, selftest, entry = sys.argv[1:]
+state, version, ts_ip, cfg_bak, bridge_bak, selftest, entry, precheck = sys.argv[1:]
 obj={
   'schema':1,'ok':True,'status':'ready','classification':'AFZ_HERMES_MCP_READY_READONLY_TYPED',
   'host':'hpenvy','tailscaleIp':ts_ip,'hermesVersion':version,
   'configBackup':cfg_bak,'bridgeBackup':bridge_bak or None,
-  'selfTest':json.loads(selftest),'entry':json.loads(entry),
+  'precheck':json.loads(precheck),'selfTest':json.loads(selftest),'entry':json.loads(entry),
   'tools':['afz_control_health','afz_windows_wsl_memory_audit'],
   'supportsParallelToolCalls':False,'arbitraryShell':False,'arbitraryUrl':False,
   'gatewayStarted':False,'generationTestStarted':False,'ollamaExposureChanged':False,

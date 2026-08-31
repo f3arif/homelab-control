@@ -64,6 +64,10 @@ jobs:
           required_installer = [
               "EXPECTED_USER=\"coolyo\"",
               "EXPECTED_TS_IP=\"100.71.26.69\"",
+              'AFZ_HERMES_MCP_PRECHECK_PASS',
+              'afz_control_health',
+              'afz_windows_wsl_memory_audit',
+              'typed AFZ precheck failed; refusing MCP activation',
               "'supports_parallel_tool_calls': False",
               "'tools': {'include': ['afz_control_health','afz_windows_wsl_memory_audit']}",
               'mcp test afz-fabric',
