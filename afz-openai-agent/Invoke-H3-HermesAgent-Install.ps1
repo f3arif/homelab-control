@@ -44,9 +44,9 @@ $ErrorActionPreference='Stop'
 $baseModel='qwen3.6:35b-a3b'
 $aliasModel='qwen3.6:35b-a3b-hermes64k'
 $endpoint='http://127.0.0.1:11434/v1'
-$home=Join-Path $env:LOCALAPPDATA 'hermes'
-$launcher=Join-Path $home 'bin\hermes.exe'
-$config=Join-Path $home 'config.yaml'
+$hermesHome=Join-Path $env:LOCALAPPDATA 'hermes'
+$launcher=Join-Path $hermesHome 'bin\hermes.exe'
+$config=Join-Path $hermesHome 'config.yaml'
 function Value([string]$t,[string]$p){$m=[regex]::Match($t,$p,[Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::Multiline);if($m.Success){return ([string]$m.Groups[1].Value).Trim().Trim('"').Trim("'")};return $null}
 function OllamaPath{$c=Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1;if($c){return [string]$c.Source};foreach($p in @((Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'),'C:\Program Files\Ollama\ollama.exe')){if(Test-Path $p){return $p}};return $null}
 function Ctx([string]$o,[string]$m){if(-not $o){return 0};$t=(& $o show --modelfile $m 2>&1|Out-String);if($LASTEXITCODE -ne 0){return 0};$x=[regex]::Matches($t,'(?im)^\s*PARAMETER\s+num_ctx\s+(\d+)\s*$');if($x.Count){return [int]$x[$x.Count-1].Groups[1].Value};return 0}
