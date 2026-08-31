@@ -17,7 +17,12 @@ p,mode,token,name=sys.argv[1:5]
 con=sqlite3.connect(p,timeout=15)
 try:
  con.execute('PRAGMA busy_timeout=15000')
- if mode=='insert':
+ if mode=='preclean':
+  before=con.execute('select count(*) from ApiKeys where Name=?',(name,)).fetchone()[0]
+  con.execute('delete from ApiKeys where Name=?',(name,));con.commit()
+  after=con.execute('select count(*) from ApiKeys where Name=?',(name,)).fetchone()[0]
+  print('PRECLEAN|before=%d|after=%d'%(before,after))
+ elif mode=='insert':
   cols=[r[1] for r in con.execute('pragma table_info("ApiKeys")')]
   required={'AccessToken','DateCreated','DateLastActivity','Name'}
   if not required.issubset(set(cols)):
@@ -29,9 +34,9 @@ try:
   exists=con.execute('select count(*) from ApiKeys where AccessToken=? and Name=?',(token,name)).fetchone()[0]
   print('INSERT|before=%d|after=%d|exists=%d'%(before,after,exists))
  elif mode=='delete':
-  before=con.execute('select count(*) from ApiKeys where AccessToken=? and Name=?',(token,name)).fetchone()[0]
-  con.execute('delete from ApiKeys where AccessToken=? and Name=?',(token,name));con.commit()
-  after=con.execute('select count(*) from ApiKeys where AccessToken=? and Name=?',(token,name)).fetchone()[0]
+  before=con.execute('select count(*) from ApiKeys where AccessToken=? or Name=?',(token,name)).fetchone()[0]
+  con.execute('delete from ApiKeys where AccessToken=? or Name=?',(token,name));con.commit()
+  after=con.execute('select count(*) from ApiKeys where AccessToken=? or Name=?',(token,name)).fetchone()[0]
   print('DELETE|before=%d|after=%d'%(before,after))
  elif mode=='verify':
   n=con.execute('select count(*) from ApiKeys where AccessToken=? or Name=?',(token,name)).fetchone()[0]
@@ -41,14 +46,15 @@ finally:con.close()
  [IO.File]::WriteAllText($tmp,$py,(New-Object Text.UTF8Encoding($false)))
  try{if([IO.Path]::GetFileName($python)-match '^py(\.exe)?$'){& $python -3 $tmp $db $mode $token $name}else{& $python $tmp $db $mode $token $name};if($LASTEXITCODE -ne 0){throw "SQLite $mode exit=$LASTEXITCODE"}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
 }
-function Get-Jf([string]$path){$sep=if($path.Contains('?')){'&'}else{'?'};Invoke-RestMethod -Uri ($base+$path+$sep+'api_key='+[uri]::EscapeDataString($token)) -TimeoutSec 10}
-Write-Output 'AFZ_JELLYFIN_TEMP_APIKEY_HOMEVIDEOS_PREFLIGHT_V1'
+function Get-Jf([string]$path){$sep=if($path.Contains('?')){'&'}else{'?'};Invoke-RestMethod -Uri ($base+$path+$sep+'ApiKey='+[uri]::EscapeDataString($token)) -TimeoutSec 10}
+Write-Output 'AFZ_JELLYFIN_TEMP_APIKEY_HOMEVIDEOS_PREFLIGHT_V2'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'READ_ONLY_LIBRARY=true'
 Write-Output 'TEMP_CREDENTIAL_EXPOSED=false'
 $inserted=$false
 try{
  if(-not(Test-Path -LiteralPath $db -PathType Leaf)){throw 'Live DB missing'}
+ $pre=@(Run-Py preclean)-join ';';Write-Output ('TEMP_KEY_PRECLEAN='+$pre)
  $ins=@(Run-Py insert)-join ';';if($ins -notmatch 'exists=1'){throw 'Temporary key insert verification failed'};$inserted=$true
  Write-Output 'TEMP_KEY_INSERTED=true'
  $sys=Get-Jf '/System/Info'
