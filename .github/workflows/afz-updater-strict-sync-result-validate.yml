@@ -1,0 +1,61 @@
+name: AFZ Updater Strict Sync Result Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-updater-strict-sync-result-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Windows PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};throw 'PowerShell parse failed'}
+          'POWERSHELL51_PARSE=PASS'
+
+      - name: Strict child sync result contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $text=Get-Content -LiteralPath 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
+          $required=@(
+            '$syncRaw=@(& powershell.exe @syncArgs 2>&1)',
+            '$syncExit=$LASTEXITCODE',
+            'if($syncExit -ne 0)',
+            'ConvertFrom-Json -ErrorAction Stop',
+            "if(`$remoteSha -notmatch '^[0-9a-f]{40}$')",
+            'if($ExpectedSha -and $remoteSha -ne $ExpectedSha)'
+          )
+          foreach($token in $required){if(-not $text.Contains($token)){throw "Missing strict sync token: $token"}}
+          if($text.Contains('$syncResult=& powershell.exe @syncArgs | Select-Object -Last 1')){throw 'Legacy lax child sync capture remains'}
+          'STRICT_CHILD_SYNC_RESULT=PASS'
+
+      - name: Mutation scope unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git fetch --no-tags origin main
+          $base=git show origin/main:afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1
+          $head=Get-Content -LiteralPath 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
+          $baseMutations=@('New-NetFirewallRule','Remove-NetFirewallRule','Register-ScheduledTask','Set-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask')
+          foreach($m in $baseMutations){
+            $baseCount=([regex]::Matches(($base -join "`n"),[regex]::Escape($m))).Count
+            $headCount=([regex]::Matches($head,[regex]::Escape($m))).Count
+            if($headCount -ne $baseCount){throw "Mutation primitive count changed for $m base=$baseCount head=$headCount"}
+          }
+          'MUTATION_SCOPE_UNCHANGED=PASS'

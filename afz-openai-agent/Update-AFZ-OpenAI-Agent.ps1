@@ -115,12 +115,20 @@ try{
   try{
     $syncArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$tmpSync,'-InstallRoot',$InstallRoot)
     if($ExpectedSha){$syncArgs+=@('-ExpectedSha',$ExpectedSha)}
-    $syncResult=& powershell.exe @syncArgs | Select-Object -Last 1
+    $syncRaw=@(& powershell.exe @syncArgs 2>&1)
+    $syncExit=$LASTEXITCODE
   }finally{Remove-Item -LiteralPath $tmpSync -Force -ErrorAction SilentlyContinue}
-  if(-not $syncResult){throw 'Agent source sync returned no result'}
-  if($syncResult -is [string]){try{$syncResult=$syncResult|ConvertFrom-Json}catch{}}
+  if($syncExit -ne 0){
+    $syncText=($syncRaw|ForEach-Object{[string]$_}) -join [Environment]::NewLine
+    throw "Agent source sync failed exit=$syncExit output=$syncText"
+  }
+  $syncLine=($syncRaw|ForEach-Object{[string]$_}|Where-Object{-not [string]::IsNullOrWhiteSpace($_)}|Select-Object -Last 1)
+  if([string]::IsNullOrWhiteSpace($syncLine)){throw 'Agent source sync returned no result'}
+  try{$syncResult=$syncLine|ConvertFrom-Json -ErrorAction Stop}catch{throw "Agent source sync returned invalid JSON: $syncLine"}
+  $remoteSha=([string]$syncResult.remoteSha).Trim().ToLowerInvariant()
+  if($remoteSha -notmatch '^[0-9a-f]{40}$'){throw "Agent source sync returned invalid remoteSha: $remoteSha"}
+  if($ExpectedSha -and $remoteSha -ne $ExpectedSha){throw "Agent source sync returned unexpected remoteSha: actual=$remoteSha expected=$ExpectedSha"}
   $changed=[bool]$syncResult.changed
-  $remoteSha=[string]$syncResult.remoteSha
 
   $allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
   $wrapper=Join-Path $InstallRoot 'afz-openai-agent\Start-AFZ-OpenAI-Agent.ps1'
