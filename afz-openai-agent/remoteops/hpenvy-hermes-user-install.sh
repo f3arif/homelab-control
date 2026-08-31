@@ -4,6 +4,7 @@ PIN='f50b5bb0fa5b48caef753c790bf0b09a3570918a'
 HERMES_HOME='/home/coolyo/.hermes'
 INSTALL_DIR="$HERMES_HOME/hermes-agent"
 INSTALLER="/tmp/hermes-install-${PIN}.sh"
+LAUNCHER="$HOME/.local/bin/hermes"
 
 echo '===== HP ENVY HERMES USER INSTALL ====='
 echo "TIME=$(date -Is)"
@@ -18,7 +19,7 @@ if [[ -e "$HERMES_HOME/config.yaml" ]]; then
   echo 'FINAL_CLASSIFICATION=HP_HERMES_INSTALL_PREEXISTING_CONFIG_SAFE_STOP'
   exit 42
 fi
-if [[ -e "$HERMES_HOME/bin/hermes" || -e "$INSTALL_DIR" ]]; then
+if [[ -e "$LAUNCHER" || -e "$INSTALL_DIR" ]]; then
   echo 'FINAL_CLASSIFICATION=HP_HERMES_INSTALL_PREEXISTING_ARTIFACT_SAFE_STOP'
   exit 43
 fi
@@ -39,8 +40,8 @@ HERMES_HOME="$HERMES_HOME" HERMES_INSTALL_DIR="$INSTALL_DIR" \
     --skip-computer-use \
     --non-interactive
 
-LAUNCHER="$HERMES_HOME/bin/hermes"
 if [[ ! -x "$LAUNCHER" ]]; then
+  echo "EXPECTED_LAUNCHER=$LAUNCHER"
   echo 'FINAL_CLASSIFICATION=HP_HERMES_INSTALL_LAUNCHER_MISSING'
   exit 44
 fi
@@ -54,6 +55,7 @@ fi
 
 printf 'HERMES_HOME=%s\n' "$HERMES_HOME"
 printf 'INSTALL_DIR=%s\n' "$INSTALL_DIR"
+printf 'LAUNCHER=%s\n' "$LAUNCHER"
 printf 'HERMES_VERSION=%s\n' "$VERSION"
 printf 'GIT_HEAD=%s\n' "$HEAD"
 printf 'CONFIG_EXISTS=%s\n' "$( [[ -e "$HERMES_HOME/config.yaml" ]] && echo true || echo false )"
