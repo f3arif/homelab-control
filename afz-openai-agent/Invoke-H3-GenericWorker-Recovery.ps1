@@ -30,7 +30,6 @@ function Save-Result($o){
 }
 
 function Invoke-H3([string]$RemoteScript){
-  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($RemoteScript))
   $args=@(
     '-i',$key,
     '-o','IdentitiesOnly=yes',
@@ -39,12 +38,14 @@ function Invoke-H3([string]$RemoteScript){
     '-o','StrictHostKeyChecking=yes',
     '-o',('UserKnownHostsFile='+$known),
     $target,
-    'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded
+    'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command','-'
   )
+  $inFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-in-'+[guid]::NewGuid().ToString('n')+'.ps1')
   $outFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-out-'+[guid]::NewGuid().ToString('n')+'.txt')
   $errFile=Join-Path $env:TEMP ('afz-h3-generic-recovery-err-'+[guid]::NewGuid().ToString('n')+'.txt')
   try{
-    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+    [IO.File]::WriteAllText($inFile,$RemoteScript,$utf8)
+    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
     if(-not $p.WaitForExit(60000)){
       try{$p.Kill()}catch{}
       throw 'H3 SSH recovery command timed out after 60 seconds.'
@@ -53,7 +54,7 @@ function Invoke-H3([string]$RemoteScript){
     $stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile)}else{''})
     return [ordered]@{exit=[int]$p.ExitCode;stdout=$stdout;stderr=$stderr}
   }finally{
-    Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
   }
 }
 
