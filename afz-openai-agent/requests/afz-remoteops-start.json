@@ -1,5 +1,5 @@
 {
-  "id": "afz-remoteops-start-20260830T1832Z",
+  "id": "afz-remoteops-start-20260830T2309Z",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued FamilyPTT Phase 1 APK preparation job can be claimed. No task definition, command surface, phone network state, or backend configuration is changed."
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued read-only FamilyPTT OnePlus LAN-backup diagnostic can be claimed. No task definition, phone/app state, permissions, network state, router/WAN, or backend configuration is changed."
 }
