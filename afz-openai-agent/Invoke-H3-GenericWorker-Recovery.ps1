@@ -93,6 +93,11 @@ function Get-WorkerProcesses {
     Where-Object { [string]$_.CommandLine -like ('*'+$workerScript+'*') } |
     Select-Object ProcessId,ParentProcessId,Name,CommandLine)
 }
+function Get-LauncherProcesses {
+  @(Get-CimInstance Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { [string]$_.CommandLine -like ('*'+$expectedLauncher+'*') } |
+    Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+}
 
 $before=@(Get-WorkerProcesses)
 $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
@@ -133,6 +138,42 @@ do{
   if($after.Count -gt 0){break}
 }while((Get-Date) -lt $deadline)
 
+$postTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$postTaskInfo=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+$launcherProcesses=@(Get-LauncherProcesses)
+$launcherExists=Test-Path -LiteralPath $expectedLauncher -PathType Leaf
+$workerScriptExists=Test-Path -LiteralPath $workerScript -PathType Leaf
+$launcherMeta=$null
+if($launcherExists){
+  try{
+    $li=Get-Item -LiteralPath $expectedLauncher -ErrorAction Stop
+    $launcherMeta=[ordered]@{
+      length=[int64]$li.Length
+      lastWrite=$li.LastWriteTime.ToString('o')
+      sha256=(Get-FileHash -LiteralPath $expectedLauncher -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+      content=[IO.File]::ReadAllText($expectedLauncher)
+    }
+  }catch{$launcherMeta=[ordered]@{error=$_.Exception.Message}}
+}
+$workerMeta=$null
+if($workerScriptExists){
+  try{
+    $wi=Get-Item -LiteralPath $workerScript -ErrorAction Stop
+    $workerMeta=[ordered]@{
+      length=[int64]$wi.Length
+      lastWrite=$wi.LastWriteTime.ToString('o')
+      sha256=(Get-FileHash -LiteralPath $workerScript -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    }
+  }catch{$workerMeta=[ordered]@{error=$_.Exception.Message}}
+}
+$taskEvents=@()
+try{
+  $since=(Get-Date).AddMinutes(-5)
+  $taskEvents=@(Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-TaskScheduler/Operational';StartTime=$since} -ErrorAction Stop |
+    Where-Object { [string]$_.Message -like ('*'+$taskName+'*') } |
+    Select-Object -First 20 @{n='time';e={$_.TimeCreated.ToString('o')}},Id,LevelDisplayName,Message)
+}catch{}
+
 $heartbeatWrite=$null;$heartbeatAgeSec=$null
 if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
   $item=Get-Item -LiteralPath $heartbeat -ErrorAction Stop
@@ -143,11 +184,16 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
 $result=[ordered]@{
   schema=1;host=$env:COMPUTERNAME;taskName=$taskName;taskState=[string]$task.State;
   lastTaskResult=[int64]$taskInfo.LastTaskResult;lastRunTime=$taskInfo.LastRunTime.ToString('o');
+  postTaskState=$(if($postTask){[string]$postTask.State}else{$null});
+  postLastTaskResult=$(if($postTaskInfo){[int64]$postTaskInfo.LastTaskResult}else{$null});
+  postLastRunTime=$(if($postTaskInfo){$postTaskInfo.LastRunTime.ToString('o')}else{$null});
   expectedLauncher=$expectedLauncher;actions=$actions;principal=$principal;
   hiddenActionVerified=$hiddenActionOk;principalVerified=$principalOk;
+  launcherExists=$launcherExists;launcher=$launcherMeta;launcherProcessCount=$launcherProcesses.Count;launcherProcesses=$launcherProcesses;
+  workerScriptExists=$workerScriptExists;workerScript=$workerMeta;
   beforeProcessCount=$before.Count;beforeProcesses=$before;taskStartIssued=$started;
   afterProcessCount=$after.Count;afterProcesses=$after;heartbeatPath=$heartbeat;
-  heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;
+  heartbeatLastWrite=$heartbeatWrite;heartbeatAgeSeconds=$heartbeatAgeSec;taskEvents=$taskEvents;
   classification=$classification;mutation=$(if($started){'START_EXISTING_TASK_ONLY'}else{'NONE'});
   capturedAt=(Get-Date).ToString('o')
 }
@@ -157,12 +203,27 @@ exit 0
 '@
 
   $remoteResult=Invoke-H3 $remote
-  if([int]$remoteResult.exit -ne 0){throw "H3 recovery failed exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   $jsonLine=@(([string]$remoteResult.stdout -split "`r?`n")|Where-Object{$_ -match '^\{.*\}$'}|Select-Object -Last 1)
-  if(-not $jsonLine){throw "H3 recovery returned no JSON. exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
-  $payload=$jsonLine|ConvertFrom-Json -ErrorAction Stop
+  $payload=$null
+  if($jsonLine){$payload=$jsonLine|ConvertFrom-Json -ErrorAction Stop}
+  if([int]$remoteResult.exit -ne 0 -and -not $payload){throw "H3 recovery failed exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
+  if(-not $payload){throw "H3 recovery returned no JSON. exit=$($remoteResult.exit) stdout=$($remoteResult.stdout) stderr=$($remoteResult.stderr)"}
   if([string]$payload.host -ne $expectedHost){throw "Unexpected H3 host: $($payload.host)"}
-  if([int]$payload.afterProcessCount -lt 1){throw 'H3 Generic Worker remains absent after recovery.'}
+  if([int]$payload.afterProcessCount -lt 1){
+    Save-Result ([ordered]@{
+      schema=1;status='failed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
+      error='H3 Generic Worker remains absent after recovery.';
+      systemIdentity=[string]$identity.Name;systemKeyPath=$key;systemKeyFingerprint=$fingerprint;
+      remoteHost=[string]$payload.host;taskStartIssued=[bool]$payload.taskStartIssued;
+      hiddenActionVerified=[bool]$payload.hiddenActionVerified;principalVerified=[bool]$payload.principalVerified;
+      expectedLauncher=$payload.expectedLauncher;beforeProcessCount=[int]$payload.beforeProcessCount;
+      afterProcessCount=[int]$payload.afterProcessCount;heartbeatLastWrite=$payload.heartbeatLastWrite;
+      heartbeatAgeSeconds=$payload.heartbeatAgeSeconds;remoteMutation=[string]$payload.mutation;
+      sshExit=[int]$remoteResult.exit;sshStderr=[string]$remoteResult.stderr;
+      remote=$payload;capturedAt=(Get-Date -Format o)
+    })
+    exit 20
+  }
 
   Save-Result ([ordered]@{
     schema=1;status='completed';classification=[string]$payload.classification;syncedSha=$SyncedSha;
