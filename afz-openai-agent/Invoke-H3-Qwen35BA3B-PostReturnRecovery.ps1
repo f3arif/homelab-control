@@ -150,20 +150,26 @@ if(`$text -match '127\.0\.0\.1:11434/api/generate' -or `$text -match '(?i)\bcurl
 
 `$taskName='AFZ H3 Qwen35B A3B PostReturn Recovery'
 `$arg="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ```"`$scriptPath```""
+`$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg
+`$principal=New-ScheduledTaskPrincipal -UserId 'Faiz' -LogonType Interactive -RunLevel Highest
+`$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
 `$existing=Get-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue
 `$taskAction='NONE'
 if(-not `$existing){
-  `$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg
-  `$principal=New-ScheduledTaskPrincipal -UserId 'Faiz' -LogonType Interactive -RunLevel Highest
-  `$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
   Register-ScheduledTask -TaskName `$taskName -Action `$action -Principal `$principal -Settings `$settings -Force|Out-Null
   `$taskAction='REGISTERED'
+  `$existing=Get-ScheduledTask -TaskName `$taskName -ErrorAction Stop
+}else{
+  Set-ScheduledTask -TaskName `$taskName -Action `$action -Principal `$principal -Settings `$settings|Out-Null
+  `$taskAction='REFRESHED_EXISTING'
   `$existing=Get-ScheduledTask -TaskName `$taskName -ErrorAction Stop
 }
 if([string]`$existing.State -ne 'Running'){
   Start-ScheduledTask -TaskName `$taskName
   if(`$taskAction -eq 'REGISTERED'){
     `$taskAction='REGISTERED_AND_STARTED'
+  }elseif(`$taskAction -eq 'REFRESHED_EXISTING'){
+    `$taskAction='REFRESHED_AND_STARTED'
   }else{
     `$taskAction='STARTED_EXISTING'
   }
