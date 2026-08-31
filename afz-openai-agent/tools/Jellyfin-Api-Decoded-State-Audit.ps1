@@ -6,11 +6,11 @@ $base='http://127.0.0.1:8096'
 $known=[ordered]@{coolyo='2D994DBA-B8C7-44C8-8D34-7D85716B2EBC';movies='64F6DF5C-78B5-4DFE-B0FF-7295CBFB3A5A'}
 $serverId='5ae656ad8fc948f38e1ac1d5a6769aa5'
 function Find-Cmd([string[]]$names){foreach($n in $names){$c=Get-Command $n -ErrorAction SilentlyContinue|Select-Object -First 1;if($c){if($c.Path){return $c.Path};if($c.Source){return $c.Source}}};return $null}
-function J($o){$o|ConvertTo-Json -Depth 20 -Compress}
+function J($o){$o|ConvertTo-Json -Depth 30 -Compress}
 function AuthHeader([string]$t){return @{Authorization=('MediaBrowser Client="AFZ-ReadOnly-Audit", Device="Windows-main", DeviceId="afz-jellyfin-audit", Version="1.0", Token="'+$t+'"')}}
 function Add-Candidate([System.Collections.Generic.HashSet[string]]$Set,[string]$Value){if([string]::IsNullOrWhiteSpace($Value)){return};$v=$Value.Trim().Trim('"').Trim("'");if($v.Length -ge 20 -and $v.Length -le 256 -and $v -match '^[A-Za-z0-9._-]+$'){[void]$Set.Add($v)}}
 function Scan-Buffer([System.Collections.Generic.HashSet[string]]$Set,[byte[]]$buf){foreach($enc in @([Text.Encoding]::UTF8,[Text.Encoding]::Unicode)){try{$text=$enc.GetString($buf)}catch{continue};$interesting=($text -match '(?i)jellyfin|AccessToken|192\.168\.50\.94|'+$serverId);foreach($rx in @('(?i)AccessToken[^A-Za-z0-9._-]{0,96}([A-Za-z0-9._-]{20,256})','(?i)accessToken[^A-Za-z0-9._-]{0,96}([A-Za-z0-9._-]{20,256})','(?i)X-Emby-Token[^A-Za-z0-9._-]{0,96}([A-Za-z0-9._-]{20,256})')){foreach($m in [regex]::Matches($text,$rx)){Add-Candidate $Set $m.Groups[1].Value}};if($interesting){foreach($m in [regex]::Matches($text,'(?i)(?<![A-Fa-f0-9])[A-Fa-f0-9]{32}(?![A-Fa-f0-9])')){Add-Candidate $Set $m.Value}}}}
-Write-Output 'AFZ_JELLYFIN_API_DECODED_STATE_AUDIT_V4'
+Write-Output 'AFZ_JELLYFIN_API_DECODED_STATE_AUDIT_V5'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'READ_ONLY=true'
 Write-Output 'SECRET_EXPOSED=false'
@@ -64,6 +64,19 @@ if(-not $token){Write-Output 'STATUS=SAFE_STOP|reason=NO_ACTIVE_API_OR_BROWSER_T
 Write-Output ('AUTH_MODE='+$authMode)
 if($authDb){Write-Output ('AUTH_DB='+$authDb)}
 $h=AuthHeader $token
+$currentVfRoot='C:\Users\Faiz\AppData\Local\Jellyfin\root\default'
+$homeVfPath=Join-Path $currentVfRoot 'Home Videos and Photos'
+Write-Output ('CURRENT_VF_ROOT_EXISTS='+(Test-Path -LiteralPath $currentVfRoot -PathType Container))
+Write-Output ('CURRENT_HOME_VF_DIR_EXISTS='+(Test-Path -LiteralPath $homeVfPath -PathType Container))
+try{
+  $vf=@(Invoke-RestMethod -Uri ($base+'/Library/VirtualFolders') -Headers $h -TimeoutSec 8)
+  $items=@()
+  foreach($x in $vf){
+    $pathInfos=@();if($x.LibraryOptions -and $x.LibraryOptions.PathInfos){$pathInfos=@($x.LibraryOptions.PathInfos|ForEach-Object{[string]$_.Path})}
+    $items += [ordered]@{name=[string]$x.Name;itemId=[string]$x.ItemId;collectionType=[string]$x.CollectionType;locations=@($x.Locations|ForEach-Object{[string]$_});pathInfos=$pathInfos}
+  }
+  Write-Output ('VIRTUAL_FOLDERS|'+(J ([ordered]@{count=$items.Count;items=$items})))
+}catch{Write-Output ('VIRTUAL_FOLDERS_ERROR|error='+$_.Exception.Message)}
 foreach($u in $users){
  $cfg=$u.Configuration;$pol=$u.Policy
  $state=[ordered]@{name=[string]$u.Name;id=[string]$u.Id;enableAllFolders=$(if($pol){[bool]$pol.EnableAllFolders}else{$null});myMediaExcludes=$(if($cfg){@($cfg.MyMediaExcludes)}else{@()});latestItemExcludes=$(if($cfg){@($cfg.LatestItemsExcludes)}else{@()});groupedFolders=$(if($cfg){@($cfg.GroupedFolders)}else{@()});orderedViews=$(if($cfg){@($cfg.OrderedViews)}else{@()})}
