@@ -197,6 +197,26 @@ try{
   # The activation marker is written at bootstrap start, so later source syncs
   # cannot replay this job. H3 also independently guards model_call_attempted.
   $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha
+
+  # Recovery is deliberately separate from v1 activation. It runs only as SYSTEM
+  # and the helper itself permits transport re-entry solely for the proven pre-H3
+  # private-key Permission denied failure. The H3 launcher remains authoritative
+  # for model_call_attempted/ollama_post_started and refuses duplicate model calls.
+  $qwen35BTransportRecovery=[ordered]@{ok=$false;status='not-run'}
+  try{
+    $qwen35BRecoveryHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
+    if(Test-Path -LiteralPath $qwen35BRecoveryHelper -PathType Leaf){
+      $qwen35BRaw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $qwen35BRecoveryHelper -InstallRoot $InstallRoot | Select-Object -Last 1
+      $qwen35BCode=$LASTEXITCODE
+      if($qwen35BRaw -is [string]){try{$qwen35BParsed=$qwen35BRaw|ConvertFrom-Json}catch{$qwen35BParsed=[ordered]@{status='invalid-json';raw=[string]$qwen35BRaw}}}else{$qwen35BParsed=$qwen35BRaw}
+      $qwen35BTransportRecovery=[ordered]@{ok=($qwen35BCode -eq 0);status=$(if($qwen35BCode -eq 0){'completed'}else{'helper-failed'});exit=$qwen35BCode;result=$qwen35BParsed}
+    }else{
+      $qwen35BTransportRecovery=[ordered]@{ok=$false;status='helper-missing';path=$qwen35BRecoveryHelper}
+    }
+  }catch{
+    $qwen35BTransportRecovery=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message}
+  }
+
   $qwen35BDiagnostic=Publish-Qwen35BDiagnostic -SyncedSha $resolvedSha -Activation $qwen35BActivation
 
   $out=[ordered]@{}
@@ -204,6 +224,7 @@ try{
   $out['fallbackUpdaterRepair']=$fallbackUpdaterRepair
   $out['h3GenericWorkerRecovery']=$recovery
   $out['qwen35BA3BActivation']=$qwen35BActivation
+  $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
   $out|ConvertTo-Json -Depth 30 -Compress
   exit 0
