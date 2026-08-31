@@ -28,6 +28,10 @@ $familyPttPhase1LastAttempt=[DateTime]::MinValue
 $hpEnvySurfsharkRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Surfshark-ExitNode.ps1'
 $hpEnvySurfsharkRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-surfshark-exitnode.json'
 $hpEnvySurfsharkStateRoot=Join-Path $stateRoot 'jobs\hpenvy-surfshark-exitnode'
+$h3HermesRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1'
+$h3HermesRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'
+$h3HermesStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-agent'
+$h3HermesLastAttempt=[DateTime]::MinValue
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -163,6 +167,7 @@ function Save-RuntimeProof{
       taskState=$(if($task){[string]$task.State}else{'missing'})
       familyPttPhase1Binding='typed-active-only'
       familyPttPhase1RequestStatus=$phase1RequestStatus
+      h3HermesBinding='typed-fixed-target-no-generation'
       time=(Get-Date -Format o)
     }
     $json=$proof|ConvertTo-Json -Depth 5
@@ -216,6 +221,35 @@ function Handle-HPEnvySurfsharkRequest{
     Log "HPENVY_SURFSHARK_REQUEST mode=$mode classification=$classification exit=$code source=$(Current-Sha)"
   }catch{Log "HPENVY_SURFSHARK_REQUEST_ERROR $($_.Exception.Message)"}
 }
+function Handle-H3HermesRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'install-and-configure' -or [string]$req.target -ne 'h3'){return}
+    if([string]$req.host -ne 'DESKTOP-H3R6CQN' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $statePath=Join-Path $h3HermesStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K'){return}
+        if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED'){return}
+      }catch{}
+    }
+    $now=Get-Date
+    if(($now-$script:h3HermesLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesRunner -InstallRoot $InstallRoot -RequestPath $h3HermesRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}
+    }
+    Log "H3_HERMES_REQUEST classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_REQUEST_ERROR $($_.Exception.Message)"}
+}
 # BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
 function Handle-FamilyPttPhase1ApkRequest{
   if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRunner -PathType Leaf)){return}
@@ -250,7 +284,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only h3HermesRequest=typed-fixed-target-no-generation"
   Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
@@ -299,6 +333,7 @@ try{
       Refresh-FamilyPttR17IfSafe
       Handle-JellyfinVisibilityRequest
       Handle-HPEnvySurfsharkRequest
+      Handle-H3HermesRequest
       Handle-FamilyPttPhase1ApkRequest
       $lastError=''
     }catch{

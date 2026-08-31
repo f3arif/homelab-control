@@ -1,0 +1,67 @@
+name: H3 Hermes Agent Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+      - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - '.github/workflows/h3-hermes-agent-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+      - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $files=@(
+            'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1',
+            'afz-openai-agent\Push-Deploy-Watcher.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
+          }
+
+      - name: Validate typed request and positive safety invariants
+        shell: powershell
+        run: |
+          $r=Get-Content 'afz-openai-agent\requests\h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
+          if([int]$r.schema -ne 1){throw 'schema'}
+          if([string]$r.action -ne 'install-and-configure'){throw 'action'}
+          if([string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){throw 'target'}
+          if([string]$r.provider -ne 'custom'){throw 'provider'}
+          if([string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'base_url must be loopback only'}
+          if([string]$r.base_model -ne 'qwen3.6:35b-a3b'){throw 'base model'}
+          if([string]$r.hermes_model -ne 'qwen3.6:35b-a3b-hermes64k'){throw 'Hermes alias'}
+          if([int]$r.context_length -ne 65536){throw 'context'}
+          if([string]$r.hermes_commit -notmatch '^[0-9a-f]{40}$'){throw 'Hermes commit must be pinned'}
+          if(-not [bool]$r.skip_interactive_setup){throw 'setup must be noninteractive'}
+          if([bool]$r.start_gateway){throw 'gateway must remain off during base setup'}
+          if([bool]$r.run_generation_test){throw 'generation test must remain off'}
+
+          $s=Get-Content 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1' -Raw
+          foreach($required in @(
+            '-SkipSetup -Commit $hermesCommit',
+            'http://127.0.0.1:11434/v1',
+            'PARAMETER num_ctx $contextLength',
+            'generationTestStarted=$false',
+            'HERMES_INSTALLED_CONFIG_DEFERRED_PROTECTED_H3_BUSY',
+            'StrictHostKeyChecking=yes'
+          )){
+            if(-not $s.Contains($required)){throw "Missing Hermes safety invariant: $required"}
+          }
