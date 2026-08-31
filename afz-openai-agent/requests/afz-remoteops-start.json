@@ -1,5 +1,5 @@
 {
-  "id": "afz-remoteops-start-20260831T0022-pixel6-pr14",
+  "id": "afz-remoteops-start-20260831T1016-hpenvy-surfshark-audit",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued Pixel 6 Pro PR14 LAN-fix installer can be claimed. Do not modify OnePlus, Pixel 8, task definitions, network state, router/WAN, or backend configuration."
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the fixed-target HP Envy Surfshark exit-node read-only audit can run from the GitHub-controlled request. Do not apply routing changes, alter Tailscale netfilter mode, change router/WAN state, or treat OneDrive as a command source. OneDrive is backup-only."
 }
