@@ -2,149 +2,89 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
-$liveDb='C:\Users\Faiz\AppData\Local\Jellyfin\data\jellyfin.db'
-$liveRoot='C:\Users\Faiz\AppData\Local\Jellyfin\root\default'
-$targetId='ee75511ae395034b1e7e657707b15125'
-$backupRoot='C:\AFZ\MediaCatalog\Backups'
-Write-Output 'AFZ_JELLYFIN_HOMEVIDEOS_WEDDING_FORENSICS_V1'
+$source='C:\Users\Faiz\Downloads\Cloud drive\OneDrive'
+$sourceParent='C:\Users\Faiz\Downloads\Cloud drive'
+$link='C:\ProgramData\Jellyfin\Server\root\default\Home Videos and Photos\OneDrive.mblink'
+Write-Output 'AFZ_JELLYFIN_HOMEVIDEOS_WEDDING_FORENSICS_V2'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'READ_ONLY=true'
 Write-Output 'SECRET_EXPOSED=false'
-Write-Output ('TARGET_ID='+$targetId)
 
-$py=(Get-Command python.exe,python,py.exe,py -ErrorAction SilentlyContinue|Select-Object -First 1)
-if(-not $py){Write-Output 'FORENSICS_STATUS=FAIL|reason=NO_PYTHON';exit 1}
-$dbs=New-Object System.Collections.Generic.List[string]
-if(Test-Path -LiteralPath $liveDb -PathType Leaf){$dbs.Add($liveDb)}
-if(Test-Path -LiteralPath $backupRoot -PathType Container){
-  Get-ChildItem -LiteralPath $backupRoot -Recurse -Filter 'jellyfin.db' -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 80 | ForEach-Object {$dbs.Add($_.FullName)}
+$linkExists=Test-Path -LiteralPath $link -PathType Leaf
+Write-Output ('LINK_EXISTS='+$linkExists)
+if($linkExists){
+  $linkValue=''
+  try{$linkValue=([IO.File]::ReadAllText($link)).Trim()}catch{$linkValue='READ_FAILED'}
+  Write-Output ('LINK_VALUE='+$linkValue)
+  if($linkValue -and $linkValue -ne 'READ_FAILED'){Write-Output ('LINK_TARGET_EXISTS='+(Test-Path -LiteralPath $linkValue))}
 }
-$dbs=@($dbs|Select-Object -Unique)
-Write-Output ('DB_CANDIDATE_COUNT='+$dbs.Count)
 
-$tmpPy=Join-Path $env:TEMP ('jf-home-wedding-'+[guid]::NewGuid().ToString('n')+'.py')
-$code=@'
-import sqlite3,sys,json,os,re
-T=sys.argv[1].lower().replace('-','')
-paths=sys.argv[2:]
-out=[]
-def norm(v): return ('' if v is None else str(v)).lower().replace('-','')
-def qid(x): return '"'+x.replace('"','""')+'"'
-for p in paths:
- d={'db':p,'target':[],'matches':[],'children':[],'error':None}
- try:
-  uri='file:'+p.replace('\\','/')+'?mode=ro'
-  c=sqlite3.connect(uri,uri=True,timeout=5);c.row_factory=sqlite3.Row
-  tabs={r[0] for r in c.execute("select name from sqlite_master where type='table'")}
-  if 'BaseItems' not in tabs:
-   d['error']='BaseItems_missing';out.append(d);c.close();continue
-  cols=[r[1] for r in c.execute('pragma table_info(BaseItems)')];lc={x.lower():x for x in cols}
-  wanted=[x for x in ('id','name','type','path','parentid','topparentid','presentationuniqueid','datecreated') if x in lc]
-  if not wanted: d['error']='columns_missing';out.append(d);c.close();continue
-  select=','.join(qid(lc[x]) for x in wanted)
-  rows=[dict(r) for r in c.execute('select '+select+' from BaseItems')]
-  for r in rows:
-   rid=norm(r.get(lc.get('id','')))
-   name=str(r.get(lc.get('name','')) or '')
-   path=str(r.get(lc.get('path','')) or '')
-   if rid==T: d['target'].append(r)
-   text=(name+' '+path).lower()
-   if 'wedding' in text or 'home videos' in text: d['matches'].append(r)
-  if d['target'] and 'id' in lc:
-   ids={norm(r.get(lc['id'])) for r in d['target']}
-   for r in rows:
-    par=norm(r.get(lc.get('parentid',''))) if 'parentid' in lc else ''
-    top=norm(r.get(lc.get('topparentid',''))) if 'topparentid' in lc else ''
-    if par in ids or top in ids: d['children'].append(r)
-  c.close()
- except Exception as e: d['error']=type(e).__name__+':'+str(e)
- out.append(d)
-print(json.dumps(out,separators=(',',':'),default=str))
-'@
-[IO.File]::WriteAllText($tmpPy,$code,(New-Object Text.UTF8Encoding($false)))
-try {
-  $exe=$py.Path
-  if([IO.Path]::GetFileName($exe)-match '^py(\.exe)?$'){$raw=(& $exe -3 $tmpPy $targetId @dbs 2>&1|Out-String)}else{$raw=(& $exe $tmpPy $targetId @dbs 2>&1|Out-String)}
-  if($LASTEXITCODE -ne 0){throw ('Python DB audit failed: '+$raw)}
-  $data=$raw|ConvertFrom-Json
-  $liveTarget=$null;$historicWedding=0;$historicHome=0
-  foreach($d in @($data)){
-    $isLive=([string]$d.db -ieq $liveDb)
-    foreach($r in @($d.target)){
-      $p=[string]$r.Path;$exists=$false;if($p){$exists=Test-Path -LiteralPath $p}
-      Write-Output ('TARGET_ROW|scope='+(if($isLive){'live'}else{'backup'})+'|db='+[string]$d.db+'|name='+[string]$r.Name+'|type='+[string]$r.Type+'|path='+$p+'|path_exists='+$exists+'|parent='+[string]$r.ParentId)
-      if($isLive){$liveTarget=$r}
+$sourceExists=Test-Path -LiteralPath $source -PathType Container
+Write-Output ('LEGACY_SOURCE='+$source)
+Write-Output ('LEGACY_SOURCE_EXISTS='+$sourceExists)
+Write-Output ('LEGACY_SOURCE_PARENT_EXISTS='+(Test-Path -LiteralPath $sourceParent -PathType Container))
+
+function Get-MediaCountCapped([string]$p,[int]$cap=10001){
+  if(-not(Test-Path -LiteralPath $p -PathType Container)){return 0}
+  $n=0
+  try{
+    foreach($f in Get-ChildItem -LiteralPath $p -File -Recurse -ErrorAction SilentlyContinue){
+      if($f.Extension -match '(?i)^\.(mp4|mkv|mov|avi|m4v|mts|m2ts|jpg|jpeg|png|heic|webp)$'){$n++;if($n -ge $cap){break}}
     }
-    if($isLive){Write-Output ('LIVE_TARGET_DESCENDANT_COUNT='+@($d.children).Count)}
-    foreach($r in @($d.matches)){
-      $nm=[string]$r.Name;$pp=[string]$r.Path;$low=($nm+' '+$pp).ToLowerInvariant()
-      if($low -match 'wedding'){$historicWedding++}
-      if($low -match 'home videos'){$historicHome++}
-      if((-not $isLive) -or $low -match 'wedding'){
-        $exists=$false;if($pp){$exists=Test-Path -LiteralPath $pp}
-        Write-Output ('MATCH_ROW|scope='+(if($isLive){'live'}else{'backup'})+'|db='+[string]$d.db+'|name='+$nm+'|type='+[string]$r.Type+'|path='+$pp+'|path_exists='+$exists)
-      }
-    }
-    if($d.error){Write-Output ('DB_AUDIT_NOTE|db='+[string]$d.db+'|'+[string]$d.error)}
+  }catch{}
+  return $n
+}
+
+if($sourceExists){
+  $direct=@(Get-ChildItem -LiteralPath $source -Directory -Force -ErrorAction SilentlyContinue)
+  Write-Output ('LEGACY_DIRECT_DIR_COUNT='+$direct.Count)
+  foreach($d in $direct|Select-Object -First 100){Write-Output ('LEGACY_DIRECT_DIR='+$d.Name)}
+  $w=@($direct|Where-Object {$_.Name -ieq 'Wedding'})
+  Write-Output ('LEGACY_WEDDING_DIRECT_COUNT='+$w.Count)
+  foreach($d in $w){Write-Output ('LEGACY_WEDDING_PATH='+$d.FullName);Write-Output ('LEGACY_WEDDING_MEDIA_COUNT_CAPPED='+(Get-MediaCountCapped $d.FullName))}
+  Write-Output ('LEGACY_SOURCE_MEDIA_COUNT_CAPPED='+(Get-MediaCountCapped $source))
+}
+
+# Candidate personal/cloud roots, without traversing AppData or system trees.
+$candidates=New-Object System.Collections.Generic.List[string]
+foreach($p in @($source,$sourceParent,$env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial,'C:\Users\Faiz\OneDrive','C:\Users\Faiz\OneDrive - AFZ Engineering Inc','C:\Media')){
+  if($p -and (Test-Path -LiteralPath $p -PathType Container) -and -not $candidates.Contains($p)){$candidates.Add($p)}
+}
+try{
+  foreach($d in @(Get-ChildItem -LiteralPath 'C:\Users\Faiz' -Directory -Force -ErrorAction SilentlyContinue|Where-Object {$_.Name -match '(?i)OneDrive|Cloud'})){
+    if(-not $candidates.Contains($d.FullName)){$candidates.Add($d.FullName)}
   }
-  Write-Output ('HOME_MATCH_TOTAL='+$historicHome)
-  Write-Output ('WEDDING_MATCH_TOTAL='+$historicWedding)
+}catch{}
+Write-Output ('CANDIDATE_ROOT_COUNT='+$candidates.Count)
+foreach($p in $candidates){Write-Output ('CANDIDATE_ROOT|path='+$p+'|media_count_capped='+(Get-MediaCountCapped $p 5001))}
 
-  # Current virtual-folder configs and their absolute path references.
-  if(Test-Path -LiteralPath $liveRoot -PathType Container){
-    $dirs=@(Get-ChildItem -LiteralPath $liveRoot -Directory -Force -ErrorAction SilentlyContinue)
-    Write-Output ('LIVE_ROOT_FOLDER_COUNT='+$dirs.Count)
-    foreach($dir in $dirs){
-      $refs=New-Object System.Collections.Generic.List[string]
-      foreach($f in @(Get-ChildItem -LiteralPath $dir.FullName -File -Filter '*.xml' -ErrorAction SilentlyContinue)){
-        try{$txt=[IO.File]::ReadAllText($f.FullName)}catch{continue}
-        foreach($m in [regex]::Matches($txt,'[A-Za-z]:\\[^<\r\n"]+')){$v=$m.Value.Trim();if(-not $refs.Contains($v)){$refs.Add($v)}}
-      }
-      if($refs.Count -eq 0){Write-Output ('ROOT_CONFIG|library='+$dir.Name+'|path_ref=NONE')}
-      foreach($r in $refs){Write-Output ('ROOT_CONFIG|library='+$dir.Name+'|path_ref='+$r+'|exists='+(Test-Path -LiteralPath $r))}
-    }
-  } else {Write-Output 'LIVE_ROOT=missing'}
-
-  # Search backed-up root/config files for Home Videos/Wedding and source paths.
-  $cfgHits=0
-  if(Test-Path -LiteralPath $backupRoot -PathType Container){
-    foreach($f in @(Get-ChildItem -LiteralPath $backupRoot -Recurse -File -Include '*.xml','*.txt' -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 1500)){
-      try{$txt=[IO.File]::ReadAllText($f.FullName)}catch{continue}
-      if($txt -match '(?i)Wedding|Home Videos and Photos'){
-        $cfgHits++
-        $refs=@([regex]::Matches($txt,'[A-Za-z]:\\[^<\r\n"]+')|ForEach-Object{$_.Value.Trim()}|Select-Object -Unique)
-        if($refs.Count -eq 0){Write-Output ('BACKUP_CONFIG_HIT|file='+$f.FullName+'|path_ref=NONE')}
-        foreach($r in $refs){Write-Output ('BACKUP_CONFIG_HIT|file='+$f.FullName+'|path_ref='+$r+'|exists='+(Test-Path -LiteralPath $r))}
-      }
-    }
-  }
-  Write-Output ('BACKUP_CONFIG_HIT_COUNT='+$cfgHits)
-
-  # Fast bounded directory discovery across fixed drives (depth <= 4) for likely source folders.
-  $found=New-Object System.Collections.Generic.List[string]
-  function Scan-Dirs([string]$root,[int]$depth){
-    if($depth -lt 0){return}
-    $kids=@();try{$kids=@([IO.Directory]::EnumerateDirectories($root))}catch{return}
+$hits=New-Object System.Collections.Generic.List[string]
+function Scan-NamedDirs([string]$root,[int]$maxDepth,[int]$maxDirs){
+  if(-not(Test-Path -LiteralPath $root -PathType Container)){return}
+  $q=New-Object System.Collections.Queue
+  $q.Enqueue([pscustomobject]@{Path=$root;Depth=0})
+  $seen=0
+  while($q.Count -gt 0 -and $seen -lt $maxDirs -and $hits.Count -lt 50){
+    $node=$q.Dequeue();$seen++
+    $kids=@();try{$kids=@([IO.Directory]::EnumerateDirectories([string]$node.Path))}catch{continue}
     foreach($k in $kids){
       $leaf=[IO.Path]::GetFileName($k)
-      if($leaf -match '(?i)^Wedding$|Home Videos|HomeVideos'){$found.Add($k)}
-      if($depth -gt 0 -and $leaf -notmatch '^(?i)(Windows|Program Files|Program Files \(x86\)|ProgramData|\$Recycle.Bin|System Volume Information|node_modules|\.git)$'){Scan-Dirs $k ($depth-1)}
-      if($found.Count -ge 50){return}
+      if($leaf -match '(?i)^Wedding$|^Home Videos( and Photos)?$'){
+        if(-not $hits.Contains($k)){$hits.Add($k)}
+      }
+      if([int]$node.Depth -lt $maxDepth -and $leaf -notmatch '(?i)^(AppData|Windows|Program Files|Program Files \(x86\)|ProgramData|\$Recycle.Bin|System Volume Information|node_modules|\.git)$'){
+        $q.Enqueue([pscustomobject]@{Path=$k;Depth=([int]$node.Depth+1)})
+      }
     }
   }
-  foreach($drv in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)){
-    if($found.Count -ge 50){break}
-    Scan-Dirs ([string]$drv.DeviceID+'\') 3
-  }
-  $found=@($found|Select-Object -Unique)
-  Write-Output ('FILESYSTEM_NAME_HIT_COUNT='+$found.Count)
-  foreach($p in $found){
-    $mediaCount=0
-    try{$mediaCount=@(Get-ChildItem -LiteralPath $p -Recurse -File -ErrorAction SilentlyContinue|Where-Object{$_.Extension -match '(?i)^\.(mp4|mkv|mov|avi|m4v|mts|m2ts|jpg|jpeg|png|heic)$'}|Select-Object -First 5001).Count}catch{}
-    Write-Output ('FILESYSTEM_HIT|path='+$p+'|media_count_capped='+$mediaCount)
-  }
-  Write-Output 'FORENSICS_STATUS=PASS'
-} finally {
-  Remove-Item -LiteralPath $tmpPy -Force -ErrorAction SilentlyContinue
 }
+Scan-NamedDirs 'C:\Users\Faiz' 5 25000
+Scan-NamedDirs 'C:\Media' 5 15000
+foreach($drv in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)){
+  $root=([string]$drv.DeviceID)+'\'
+  if($root -ne 'C:\'){Scan-NamedDirs $root 4 15000}
+}
+$hits=@($hits|Select-Object -Unique)
+Write-Output ('NAMED_HIT_COUNT='+$hits.Count)
+foreach($p in $hits){Write-Output ('NAMED_HIT|path='+$p+'|media_count_capped='+(Get-MediaCountCapped $p 10001))}
+Write-Output 'FORENSICS_STATUS=PASS'
