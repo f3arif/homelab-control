@@ -26,8 +26,6 @@ if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "ASUS Hermes wrong host: $env:
 
 $hermesHome=Join-Path $env:LOCALAPPDATA 'hermes'
 $installDir=Join-Path $hermesHome 'hermes-agent'
-$launcher=Join-Path $hermesHome 'bin\hermes.exe'
-$config=Join-Path $hermesHome 'config.yaml'
 $stateRoot=Join-Path $env:LOCALAPPDATA 'AFZ\Hermes\asus-fallback'
 $statePath=Join-Path $stateRoot 'latest.json'
 $workerPath=Join-Path $stateRoot 'install-worker.ps1'
@@ -43,6 +41,21 @@ function Write-State($o){
 }
 function Read-State{if(Test-Path -LiteralPath $statePath -PathType Leaf){try{return Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json}catch{}};return $null}
 function Emit($o){$o|ConvertTo-Json -Depth 20 -Compress|Write-Output}
+function Get-OllamaModelInfo([string]$Model){
+  $body=@{model=$Model}|ConvertTo-Json -Compress
+  return Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:11434/api/show' -ContentType 'application/json' -Body $body -TimeoutSec 15
+}
+function Get-ModelContext($Info){
+  $best=[int64]0
+  if($Info -and $Info.model_info){
+    foreach($p in $Info.model_info.PSObject.Properties){
+      if($p.Name -match '(?i)context_length$'){
+        try{$v=[int64]$p.Value;if($v -gt $best){$best=$v}}catch{}
+      }
+    }
+  }
+  return $best
+}
 
 if($Action -eq 'status'){
   $s=Read-State
@@ -57,15 +70,11 @@ if($prior){
   if([string]$prior.status -eq 'running' -and $pidValue -gt 0 -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)){Emit $prior;exit 0}
 }
 
-# Confirm the selected existing model really supports the requested operating context.
-$ollama=(Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1)
-if(-not $ollama){throw 'Ollama executable not found on windows-main.'}
-$ollamaPath=$(if($ollama.Path){[string]$ollama.Path}else{[string]$ollama.Source})
-$show=(& $ollamaPath show 'qwen3.5:4b' --json 2>&1|Out-String).Trim()
-if($LASTEXITCODE -ne 0 -or -not $show.StartsWith('{')){throw 'Unable to inspect qwen3.5:4b metadata.'}
-$info=$show|ConvertFrom-Json
-$modelContext=0
-if($info.model_info){foreach($p in $info.model_info.PSObject.Properties){if($p.Name -match '(?i)context_length$'){try{$v=[int64]$p.Value;if($v -gt $modelContext){$modelContext=$v}}catch{}}}}
+# Confirm the selected existing model supports the requested operating context.
+# Use Ollama's HTTP API rather than `ollama show --json`, which is absent on some
+# deployed Ollama builds even though /api/show is available and returns model_info.
+$info=Get-OllamaModelInfo 'qwen3.5:4b'
+$modelContext=Get-ModelContext $info
 if($modelContext -lt [int64]$req.required_model_context){throw "qwen3.5:4b context is below Hermes requirement: $modelContext"}
 
 $pin=[string]$req.hermes_commit
@@ -78,18 +87,33 @@ param(
   [string]$Pin,
   [string]$Model,
   [int]$ContextLength,
-  [string]$StatePath,
-  [string]$MirrorPath
+  [string]$StatePath
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $ProgressPreference='SilentlyContinue'
 $utf8=New-Object Text.UTF8Encoding($false)
-$mirrorRoot=Split-Path $MirrorPath -Parent
+$mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$mirrorPath=Join-Path $mirrorRoot 'HERMES-ASUS-FALLBACK-LATEST.json'
 function Save($o){
   $json=$o|ConvertTo-Json -Depth 20
   [IO.File]::WriteAllText($StatePath,$json,$utf8)
-  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($MirrorPath,$json,$utf8)}}catch{}
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
+}
+function Get-OllamaModelInfo([string]$ModelName){
+  $body=@{model=$ModelName}|ConvertTo-Json -Compress
+  return Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:11434/api/show' -ContentType 'application/json' -Body $body -TimeoutSec 15
+}
+function Get-ModelContext($Info){
+  $best=[int64]0
+  if($Info -and $Info.model_info){
+    foreach($p in $Info.model_info.PSObject.Properties){
+      if($p.Name -match '(?i)context_length$'){
+        try{$v=[int64]$p.Value;if($v -gt $best){$best=$v}}catch{}
+      }
+    }
+  }
+  return $best
 }
 $started=Get-Date
 try{
@@ -132,12 +156,8 @@ model:
     if(-not $ok){throw 'Pre-existing Hermes config conflicts with guarded ASUS fallback configuration.'}
   }else{[IO.File]::WriteAllText($config,$expected,$utf8)}
 
-  $ollama=(Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1)
-  if(-not $ollama){throw 'Ollama executable disappeared during verification.'}
-  $op=$(if($ollama.Path){[string]$ollama.Path}else{[string]$ollama.Source})
-  $show=(& $op show $Model --json 2>&1|Out-String).Trim();if($LASTEXITCODE -ne 0){throw 'Ollama model verification failed.'}
-  $mi=$show|ConvertFrom-Json;$modelContext=0
-  if($mi.model_info){foreach($p in $mi.model_info.PSObject.Properties){if($p.Name -match '(?i)context_length$'){try{$v=[int64]$p.Value;if($v -gt $modelContext){$modelContext=$v}}catch{}}}}
+  $mi=Get-OllamaModelInfo $Model
+  $modelContext=Get-ModelContext $mi
   if($modelContext -lt 64000){throw "Ollama model context below 64K after install: $modelContext"}
   $models=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -TimeoutSec 10
   $names=@($models.data|ForEach-Object{[string]$_.id})
@@ -150,7 +170,7 @@ model:
 }
 '@
 [IO.File]::WriteAllText($workerPath,$worker,$utf8)
-$args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$workerPath,'-JobId',$id,'-HermesHome',$hermesHome,'-InstallDir',$installDir,'-Pin',$pin,'-Model',[string]$req.model,'-ContextLength',[string][int]$req.context_length,'-StatePath',$statePath,'-MirrorPath',$mirrorPath)
+$args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$workerPath,'-JobId',$id,'-HermesHome',$hermesHome,'-InstallDir',$installDir,'-Pin',$pin,'-Model',[string]$req.model,'-ContextLength',[string][int]$req.context_length,'-StatePath',$statePath)
 $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden -PassThru
 $running=[ordered]@{schema=1;ok=$false;status='running';classification='HERMES_ASUS_INSTALL_STARTED';jobId=$id;host=$env:COMPUTERNAME;user=$env:USERNAME;workerPid=$p.Id;hermesHome=$hermesHome;installDir=$installDir;model=[string]$req.model;modelNativeContext=$modelContext;configuredContextLength=[int]$req.context_length;commit=$pin;gatewayStarted=$false;generationTestStarted=$false;ollamaExposureChanged=$false;startedAt=(Get-Date -Format o)}
 Write-State $running
