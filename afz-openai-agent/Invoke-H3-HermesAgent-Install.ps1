@@ -65,7 +65,7 @@ $classification=$(if($ready){'HERMES_READY_LOCAL_OLLAMA_64K'}elseif($launcherPre
 $inFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.ps1')
 $outFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.out')
 $errFile=Join-Path $env:TEMP ('afz-h3-hermes-audit-'+[guid]::NewGuid().ToString('n')+'.err')
-$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command','-')
+$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','-')
 try{
   [IO.File]::WriteAllText($inFile,$remote,$utf8)
   $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
