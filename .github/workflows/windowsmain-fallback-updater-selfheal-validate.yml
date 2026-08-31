@@ -1,0 +1,60 @@
+name: Windows-main Fallback Updater Self-Heal Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/windowsmain-fallback-updater-selfheal-validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/windowsmain-fallback-updater-selfheal-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse wrapper with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1'
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ($errors.Message -join '; ')}
+
+      - name: Verify missing-only canonical updater repair contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $text=Get-Content 'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1' -Raw
+          foreach($needle in @(
+            "function Ensure-FallbackUpdaterTask",
+            "`$taskName='AFZ OpenAI Agent Updater'",
+            "S-1-5-18",
+            "New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
+            "Update-AFZ-OpenAI-Agent.ps1",
+            "New-ScheduledTaskTrigger -Once",
+            "RepetitionInterval (New-TimeSpan -Minutes 1)",
+            "ExecutionTimeLimit (New-TimeSpan -Minutes 5)",
+            "status='present'",
+            "status='registered-missing-canonical-task'",
+            "mutation='REGISTER_EXISTING_CANONICAL_TASK'",
+            "fallbackUpdaterRepair"
+          )){if(-not $text.Contains($needle)){throw "Missing fallback-updater contract: $needle"}}
+
+          $m=[regex]::Match($text,'(?s)function Ensure-FallbackUpdaterTask\s*\{(.*?)\r?\n\}\r?\n\r?\nif\(-not \[string\]::IsNullOrWhiteSpace')
+          if(-not $m.Success){throw 'Could not isolate Ensure-FallbackUpdaterTask.'}
+          $body=$m.Groups[1].Value
+          foreach($forbidden in @('Start-ScheduledTask','Stop-ScheduledTask','Set-ScheduledTask','Unregister-ScheduledTask','Disable-ScheduledTask','Enable-ScheduledTask','Stop-Process','taskkill','.Kill(')){
+            if($body.Contains($forbidden)){throw "Forbidden mutation in fallback updater repair: $forbidden"}
+          }
+          if($body.IndexOf('if($existing)') -gt $body.IndexOf('Register-ScheduledTask')){throw 'Existing-task no-op gate must precede registration.'}
+          if($body -notmatch '(?s)if\(\$existing\).*?status=''present''.*?return'){throw 'Existing updater task is not a no-op return path.'}

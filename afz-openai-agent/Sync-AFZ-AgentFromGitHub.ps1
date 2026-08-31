@@ -29,6 +29,40 @@ $headers=@{
   'Accept'='application/vnd.github+json'
 }
 
+function Ensure-FallbackUpdaterTask {
+  $taskName='AFZ OpenAI Agent Updater'
+  $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+  if([string]$identity.User.Value -ne 'S-1-5-18'){
+    return [ordered]@{ok=$true;status='skipped-non-system';taskName=$taskName;mutation='NONE';identity=[string]$identity.Name}
+  }
+
+  $existing=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if($existing){
+    return [ordered]@{ok=$true;status='present';taskName=$taskName;mutation='NONE';state=[string]$existing.State;identity=[string]$identity.Name}
+  }
+
+  $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
+  if(-not(Test-Path -LiteralPath $updater -PathType Leaf)){
+    return [ordered]@{ok=$false;status='updater-source-missing';taskName=$taskName;mutation='NONE';path=$updater;identity=[string]$identity.Name}
+  }
+
+  try{
+    $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updater`" -InstallRoot `"$InstallRoot`""
+    $trigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
+    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    $verified=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $a=@($verified.Actions | Select-Object -First 1)
+    $actionOk=($a.Count -eq 1 -and ([IO.Path]::GetFileName([string]$a[0].Execute)) -ieq 'powershell.exe' -and [string]$a[0].Arguments -like ('*'+$updater+'*'))
+    $principalOk=([string]$verified.Principal.UserId -ieq 'SYSTEM' -and [string]$verified.Principal.LogonType -eq 'ServiceAccount')
+    if(-not($actionOk -and $principalOk)){throw 'Canonical fallback updater verification failed after registration.'}
+    return [ordered]@{ok=$true;status='registered-missing-canonical-task';taskName=$taskName;mutation='REGISTER_EXISTING_CANONICAL_TASK';state=[string]$verified.State;identity=[string]$identity.Name}
+  }catch{
+    return [ordered]@{ok=$false;status='registration-failed';taskName=$taskName;mutation='REGISTER_EXISTING_CANONICAL_TASK_ATTEMPTED';error=$_.Exception.Message;identity=[string]$identity.Name}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -57,6 +91,10 @@ try{
   if(-not $raw){throw 'Core source sync returned no result'}
   if($raw -is [string]){try{$result=$raw|ConvertFrom-Json}catch{throw "Core source sync returned invalid JSON: $raw"}}else{$result=$raw}
 
+  # Missing-only repair of the canonical one-minute SYSTEM fallback updater.
+  # This never starts/stops a task and never rewrites an existing task.
+  $fallbackUpdaterRepair=Ensure-FallbackUpdaterTask
+
   $recovery=[ordered]@{ok=$false;status='not-run';syncedSha=$resolvedSha}
   try{
     $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-GenericWorker-Recovery.ps1'
@@ -74,6 +112,7 @@ try{
 
   $out=[ordered]@{}
   foreach($p in $result.PSObject.Properties){$out[$p.Name]=$p.Value}
+  $out['fallbackUpdaterRepair']=$fallbackUpdaterRepair
   $out['h3GenericWorkerRecovery']=$recovery
   $out|ConvertTo-Json -Depth 30 -Compress
   exit 0
