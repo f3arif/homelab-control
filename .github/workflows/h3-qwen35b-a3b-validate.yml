@@ -7,6 +7,7 @@ on:
       - 'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1'
       - 'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1'
       - 'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1'
+      - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
       - 'afz-openai-agent/requests/h3-qwen35b-a3b-website-test.json'
       - '.github/workflows/h3-qwen35b-a3b-validate.yml'
@@ -30,6 +31,7 @@ jobs:
             'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1',
             'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1',
             'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1',
+            'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1',
             'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
           )
           foreach($path in $files){
@@ -47,6 +49,7 @@ jobs:
           $launcher=Get-Content 'afz-openai-agent/tools/Launch-H3-Qwen35BA3B-WebsiteTest.ps1' -Raw
           $carrier=Get-Content 'afz-openai-agent/tools/Run-WindowsMain-H3-Qwen35BA3B-Carrier.ps1' -Raw
           $bootstrap=Get-Content 'afz-openai-agent/Bootstrap-H3-Qwen35BA3B-WebsiteTest.ps1' -Raw
+          $transportRecovery=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1' -Raw
           $sync=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
 
           if([string]$request.job_id -ne 'qwen35b-a3b-website-20260830-r1'){throw 'unexpected job id'}
@@ -112,11 +115,29 @@ jobs:
           )){if(-not $bootstrap.Contains($needle)){throw "bootstrap boundary missing: $needle"}}
 
           foreach($needle in @(
+            'C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system',
+            'IdentitiesOnly=yes',
+            'StrictHostKeyChecking=yes',
+            'EncodedCommand',
+            'activation-v1.json',
+            'h3-qwen35b-a3b-bootstrap',
+            'permission denied',
+            'existing-H3-launcher-guard',
+            'modelCallIssuedByRecovery=$false',
+            'Launch-H3-Qwen35BA3B-WebsiteTest.ps1'
+          )){if(-not $transportRecovery.Contains($needle)){throw "transport recovery invariant missing: $needle"}}
+          if($transportRecovery -match 'C:\\Users\\Faiz\\\.ssh\\afz_h3_worker'){throw 'transport recovery must not use the interactive private key'}
+          if($transportRecovery -match '127\.0\.0\.1:11434/api/generate'){throw 'transport recovery must not call Ollama directly'}
+          if($transportRecovery -match '(?i)&\s*ollama\b|\bollama\.exe\b'){throw 'transport recovery must not execute Ollama directly'}
+
+          foreach($needle in @(
             'Start-Qwen35BOneShot',
             'qwen35b-a3b-website-20260830-r1',
             'activation-v1.json',
             "max_model_calls -ne 1",
-            "status='bootstrap-started'"
-          )){if(-not $sync.Contains($needle)){throw "one-shot sync activation missing: $needle"}}
+            "status='bootstrap-started'",
+            'Invoke-H3-Qwen35BA3B-TransportRecovery.ps1',
+            'qwen35BA3BTransportRecovery'
+          )){if(-not $sync.Contains($needle)){throw "one-shot sync/recovery contract missing: $needle"}}
 
           Write-Host 'QWEN35B_A3B_ONE_CALL_DIRECT_TRANSPORT_CONTRACT=PASS'
