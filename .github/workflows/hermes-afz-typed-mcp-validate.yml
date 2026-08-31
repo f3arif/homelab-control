@@ -66,7 +66,7 @@ jobs:
               "EXPECTED_TS_IP=\"100.71.26.69\"",
               "'supports_parallel_tool_calls': False",
               "'tools': {'include': ['afz_control_health','afz_windows_wsl_memory_audit']}",
-              'hermes mcp test afz-fabric',
+              'mcp test afz-fabric',
               'AFZ_HERMES_MCP_READY_READONLY_TYPED',
               "'arbitraryShell':False",
               "'generationTestStarted':False",
