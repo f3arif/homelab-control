@@ -20,13 +20,14 @@ $remoteOpsOneShot=Join-Path $sourceRoot 'AFZ-RemoteOps-OneShot.ps1'
 $remoteOpsRequest=Join-Path $sourceRoot 'requests\afz-remoteops-start.json'
 $familyPttTwoHandsetPrepare=Join-Path $sourceRoot 'FamilyPTT-TwoHandset-Prepare.ps1'
 $familyPttTwoHandsetRequest=Join-Path $sourceRoot 'requests\familyptt-two-handset-prepare.json'
+$qwen35RecoveryWatcher=Join-Path $sourceRoot 'Watch-H3-Qwen35BA3B-Recovery.ps1'
 
 # Typed, idempotent recovery for the pre-existing AFZ Remote Ops scheduled task.
 # This deliberately starts only that exact task; it does not add a generic command API.
 # Failure is isolated from the AFZ agent startup and is mirrored as diagnostic state.
 if((Test-Path -LiteralPath $remoteOpsOneShot -PathType Leaf) -and (Test-Path -LiteralPath $remoteOpsRequest -PathType Leaf)){
   try{
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $remoteOpsOneShot -InstallRoot $InstallRoot -RequestPath $remoteOpsRequest *> $null
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $remoteOpsOneShot -InstallRoot $InstallRoot *> $null
   }catch{}
 }
 
@@ -36,6 +37,22 @@ if((Test-Path -LiteralPath $remoteOpsOneShot -PathType Leaf) -and (Test-Path -Li
 if((Test-Path -LiteralPath $familyPttTwoHandsetPrepare -PathType Leaf) -and (Test-Path -LiteralPath $familyPttTwoHandsetRequest -PathType Leaf)){
   try{
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $familyPttTwoHandsetPrepare -InstallRoot $InstallRoot -RequestPath $familyPttTwoHandsetRequest *> $null
+  }catch{}
+}
+
+# The guarded 35B recovery watch is a SYSTEM child of this existing AFZ service.
+# It cannot call Ollama itself; it only invokes the already-validated transport
+# recovery, whose H3-side durable state guard enforces maxModelCalls=1. A global
+# mutex in the watch prevents duplicate instances across updater/service restarts.
+if(Test-Path -LiteralPath $qwen35RecoveryWatcher -PathType Leaf){
+  try{
+    $existing=@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {
+      $_.CommandLine -and $_.CommandLine -match [regex]::Escape('Watch-H3-Qwen35BA3B-Recovery.ps1')
+    })
+    if($existing.Count -eq 0){
+      $q35Args="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$qwen35RecoveryWatcher`" -InstallRoot `"$InstallRoot`" -RetryDelaySeconds 60"
+      Start-Process -FilePath 'powershell.exe' -ArgumentList $q35Args -WindowStyle Hidden | Out-Null
+    }
   }catch{}
 }
 
