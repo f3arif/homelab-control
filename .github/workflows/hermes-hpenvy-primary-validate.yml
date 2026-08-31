@@ -26,6 +26,7 @@ jobs:
           bash -n afz-openai-agent/remoteops/hpenvy-hermes-user-preflight.sh
           bash -n afz-openai-agent/remoteops/hpenvy-hermes-user-install.sh
           bash -n afz-openai-agent/remoteops/hpenvy-hermes-credential-plumbing-audit.sh
+          bash -n afz-openai-agent/remoteops/hpenvy-hermes-configure-primary.sh
       - name: Validate HP primary safety contract
         shell: pwsh
         run: |
@@ -36,10 +37,14 @@ jobs:
           if([string]$r.install_scope -ne 'coolyo-user-standard-native-linux'){throw 'scope'}
           if([string]$r.hermes_commit -ne 'f50b5bb0fa5b48caef753c790bf0b09a3570918a'){throw 'pin'}
           if([string]$r.hermes_home -ne '/home/coolyo/.hermes' -or [string]$r.install_dir -ne '/home/coolyo/.hermes/hermes-agent'){throw 'paths'}
+          if([string]$r.launcher -ne '/home/coolyo/.local/bin/hermes' -or [string]$r.controller_wrapper -ne '/home/coolyo/.local/bin/hermes-afz'){throw 'launchers'}
           if(-not [bool]$r.skip_interactive_setup -or -not [bool]$r.skip_browser -or -not [bool]$r.skip_computer_use){throw 'unattended flags'}
-          if([string]$r.provider_target -ne 'openai-api' -or [string]$r.provider_secret_source -ne 'reuse-existing-afz-openai-environment-reference' -or [bool]$r.write_provider_secret_to_config){throw 'provider secret policy'}
+          if([string]$r.provider_target -ne 'openai-api' -or [string]$r.model_target -ne 'gpt-5.6-luna' -or [string]$r.provider_base_url -ne 'https://api.openai.com/v1' -or [int]$r.context_length -ne 65536){throw 'provider model policy'}
+          if([string]$r.provider_secret_source -ne 'runtime-inherit-from-existing-afz-ai-service-process' -or [bool]$r.write_provider_secret_to_config -or [bool]$r.write_provider_secret_to_hermes_env){throw 'provider secret policy'}
           if([bool]$r.start_gateway -or [bool]$r.run_generation_test -or [bool]$r.modify_tailscale_ssh -or [bool]$r.modify_firewall -or [bool]$r.use_sudo){throw 'unsafe request flags'}
           if([string]$r.control_plane -ne 'github'){throw 'control plane'}
-          $all=(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-user-preflight.sh' -Raw)+(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-user-install.sh' -Raw)+(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-credential-plumbing-audit.sh' -Raw)
-          foreach($required in @('f50b5bb0fa5b48caef753c790bf0b09a3570918a','/home/coolyo/.hermes','--skip-setup','--skip-browser','--skip-computer-use','--non-interactive','GATEWAY_STARTED=false','GENERATION_TEST_STARTED=false','SECRET_VALUES_EMITTED=false')){if(-not $all.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('sudo ','systemctl enable','systemctl start','tailscale set','tailscale up','ufw allow','iptables ','nft add','/chat/completions','hermes gateway start','hermes gateway install')){if($all.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden behavior: $forbidden"}}
+          $all=(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-user-preflight.sh' -Raw)+(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-user-install.sh' -Raw)+(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-credential-plumbing-audit.sh' -Raw)+(Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-configure-primary.sh' -Raw)
+          foreach($required in @('f50b5bb0fa5b48caef753c790bf0b09a3570918a','/home/coolyo/.hermes','/home/coolyo/.local/bin/hermes','hermes-afz','--skip-setup','--skip-browser','--skip-computer-use','--non-interactive','gpt-5.6-luna','openai-api','https://api.openai.com/v1','65536','afz-ai.service','GATEWAY_STARTED=false','GENERATION_TEST_STARTED=false','SECRET_VALUES_EMITTED=false')){if(-not $all.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('sudo ','systemctl enable','systemctl start','tailscale set','tailscale up','ufw allow','iptables ','nft add','/chat/completions','hermes gateway start','hermes gateway install','cat /etc/afz-ai-openai.env','source /etc/afz-ai-openai.env')){if($all.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden behavior: $forbidden"}}
+          $cfg=Get-Content 'afz-openai-agent/remoteops/hpenvy-hermes-configure-primary.sh' -Raw
+          if($cfg -match '(?i)OPENAI_API_KEY=.*>>|OPENAI_API_KEY=.*config\.yaml|OPENAI_API_KEY=.*\.hermes/\.env'){throw 'secret persistence pattern'}
