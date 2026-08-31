@@ -12,7 +12,7 @@ $expectedOldHash='B337625BE8B8955EE500C04E9E24DD96498C3C8CF65E5B6AFE3E13AFEFBC71
 $marker='AFZ_JELLYFIN_WATCHDOG_DATADIR_V1'
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupDir=Join-Path 'C:\AFZ\MediaCatalog\Backups' ('JellyfinWatchdogDatadirCutover-'+$stamp)
-Write-Output 'AFZ_JELLYFIN_WATCHDOG_DATADIR_CUTOVER_V1'
+Write-Output 'AFZ_JELLYFIN_WATCHDOG_DATADIR_CUTOVER_V2'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'SECRET_EXPOSED=false'
 Write-Output 'MUTATION_SCOPE=watchdog-startup-contract-and-controlled-jellyfin-cutover'
@@ -55,7 +55,7 @@ $patched=$false
 try{
   if(-not $wasDisabled){Disable-ScheduledTask -InputObject $watchTask -ErrorAction Stop|Out-Null;$watchdogDisabledByUs=$true;Write-Output 'WATCHDOG_TASK_TEMP_DISABLED=true'}
   if($raw -notmatch [regex]::Escape($marker)){
-    $replacement="# $marker`r`n    Start-Process \"C:\Program Files\Jellyfin\Server\jellyfin.exe\" -ArgumentList @('--datadir','C:\Users\Faiz\AppData\Local\Jellyfin')"
+    $replacement="# $marker`r`n    Start-Process `"C:\Program Files\Jellyfin\Server\jellyfin.exe`" -ArgumentList @('--datadir','C:\Users\Faiz\AppData\Local\Jellyfin')"
     $newRaw=$raw.Replace($needle,$replacement)
     [IO.File]::WriteAllText($watchdog,$newRaw,(New-Object Text.UTF8Encoding($false)))
     $tokens=$null;$errors=$null
