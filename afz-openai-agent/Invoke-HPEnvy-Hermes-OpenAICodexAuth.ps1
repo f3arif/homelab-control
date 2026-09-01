@@ -13,7 +13,7 @@ $ExpectedAction='start-device-auth'
 $TaskName='HP Envy Hermes OpenAI Codex Auth'
 $StateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-hermes-openai-codex-auth'
 $MirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-$MirrorPath=Join-Path $MirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-AUTH-LATEST.json'
+$MirrorPath=Join-Path $MirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-AUTH-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
 
 function Write-State([object]$Object,[string]$Path){
