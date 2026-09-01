@@ -18,20 +18,82 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Change watcher canary only
+      - name: Use stdin bootstrap for r5 preflight
         shell: python
         run: |
           from pathlib import Path
           import re
-          path = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
-          text = path.read_text(encoding='utf-8')
-          replacement = '# HOTRELOAD_CANARY=20260901T0332Z hermes-r5-bounded-preflight-refresh'
-          updated, count = re.subn(r'(?m)^# HOTRELOAD_CANARY=.*$', replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('Expected exactly one HOTRELOAD_CANARY line')
-          if updated == text:
-              raise SystemExit('Watcher canary already has requested value')
-          path.write_text(updated, encoding='utf-8', newline='\n')
+
+          wrapper = Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
+          text = wrapper.read_text(encoding='utf-8')
+
+          old = "  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))"
+          new = "  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Docker preflight stdin was empty.''};Invoke-Expression $script'\n  $bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))"
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one encoded-probe line, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = "  $outFile=Join-Path $env:TEMP ('afz-h3-docker-probe-'+[guid]::NewGuid().ToString('n')+'.out')"
+          new = "  $inFile=Join-Path $env:TEMP ('afz-h3-docker-probe-'+[guid]::NewGuid().ToString('n')+'.ps1')\n" + old
+          if text.count(old) != 1:
+              raise SystemExit('Expected one Docker probe outFile line')
+          text = text.replace(old, new, 1)
+
+          old = ",$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)"
+          new = ",$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded)"
+          if text.count(old) != 1:
+              raise SystemExit('Expected one Docker probe SSH argument tail')
+          text = text.replace(old, new, 1)
+
+          old = "  try{\n    $sp=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden"
+          new = "  try{\n    [IO.File]::WriteAllText($inFile,$probe,(New-Object Text.UTF8Encoding($false)))\n    $sp=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden"
+          if text.count(old) != 1:
+              raise SystemExit('Expected one Docker probe Start-Process block')
+          text = text.replace(old, new, 1)
+
+          old = "  finally{Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue}"
+          new = "  finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}"
+          if text.count(old) != 1:
+              raise SystemExit('Expected one Docker probe cleanup line')
+          text = text.replace(old, new, 1)
+
+          required = [
+              "[Console]::In.ReadToEnd()",
+              "RedirectStandardInput $inFile",
+              "WaitForExit(30000)",
+              "WaitForExit(12000)",
+              "dockerProbeTimedOut",
+              "generationTestStarted=$false",
+              "ollamaMutationStarted=$false",
+          ]
+          for item in required:
+              if item not in text:
+                  raise SystemExit(f'Missing wrapper invariant: {item}')
+          if "GetBytes($probe)" in text:
+              raise SystemExit('Large probe still encoded onto SSH command line')
+          wrapper.write_text(text, encoding='utf-8', newline='\n')
+
+          watcher = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          wtext = watcher.read_text(encoding='utf-8')
+          replacement = '# HOTRELOAD_CANARY=20260901T0337Z hermes-r5-stdin-preflight-refresh'
+          updated, count = re.subn(r'(?m)^# HOTRELOAD_CANARY=.*$', replacement, wtext, count=1)
+          if count != 1 or updated == wtext:
+              raise SystemExit('Watcher HOTRELOAD_CANARY was not advanced')
+          watcher.write_text(updated, encoding='utf-8', newline='\n')
+
+      - name: Parse and enforce safety invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1','afz-openai-agent/Push-Deploy-Watcher.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "Parse failed: $p"}
+          }
+          $c=Get-Content 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' -Raw
+          foreach($required in @('[Console]::In.ReadToEnd()','RedirectStandardInput $inFile','WaitForExit(30000)','WaitForExit(12000)','dockerProbeTimedOut')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock','GetBytes($probe)')){if($c.Contains($forbidden)){throw "Unsafe/unbounded invariant present: $forbidden"}}
+          'H3_HERMES_R5_STDIN_PREFLIGHT=PASS'
 
       - name: Commit safely on current main
         shell: bash
@@ -39,8 +101,8 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add afz-openai-agent/Push-Deploy-Watcher.ps1
-          git commit -m 'Refresh H3 Hermes r5 push watcher runtime'
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1 afz-openai-agent/Push-Deploy-Watcher.ps1
+          git commit -m 'Use stdin bootstrap for H3 Docker preflight'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
