@@ -31,14 +31,14 @@ jobs:
           $needle='  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1'
           $idx=$text.IndexOf($needle,[StringComparison]::Ordinal)
           if($idx -lt 0){throw 'Docker discovery anchor not found'}
-          $insert=@'
-  if(-not $dockerCmd){
-    $dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'
-    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}
-  }
-'@
+          $insert=@(
+            '  if(-not $dockerCmd){',
+            "    `$dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'",
+            '    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}',
+            '  }'
+          ) -join "`n"
           $pos=$idx+$needle.Length
-          $text=$text.Insert($pos,"`n"+$insert.TrimEnd("`r","`n"))
+          $text=$text.Insert($pos,"`n"+$insert)
           [IO.File]::WriteAllText((Resolve-Path $p),$text,(New-Object Text.UTF8Encoding($false)))
 
       - name: Parse and enforce invariants
