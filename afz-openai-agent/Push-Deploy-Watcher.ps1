@@ -32,6 +32,9 @@ $h3HermesRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesAgent-I
 $h3HermesRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'
 $h3HermesStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-agent'
 $h3HermesLastAttempt=[DateTime]::MinValue
+$h3DockerPreflightRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-DockerDesktop-Preflight.ps1'
+$h3DockerPreflightRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-docker-desktop-preflight.json'
+$h3DockerPreflightStateRoot=Join-Path $stateRoot 'jobs\h3-docker-desktop-preflight'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -221,6 +224,31 @@ function Handle-HPEnvySurfsharkRequest{
     Log "HPENVY_SURFSHARK_REQUEST mode=$mode classification=$classification exit=$code source=$(Current-Sha)"
   }catch{Log "HPENVY_SURFSHARK_REQUEST_ERROR $($_.Exception.Message)"}
 }
+function Handle-H3DockerDesktopPreflight{
+  if(-not(Test-Path -LiteralPath $h3DockerPreflightRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3DockerPreflightRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3DockerPreflightRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'preflight-docker-desktop' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if(-not [bool]$req.read_only -or [bool]$req.allow_install -or [bool]$req.allow_reboot -or [bool]$req.mutate_ollama){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $statePath=Join-Path $h3DockerPreflightStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$existing.classification -in @('H3_DOCKER_DESKTOP_INSTALL_READY','H3_DOCKER_DESKTOP_ALREADY_INSTALLED','H3_DOCKER_DESKTOP_INSTALL_BLOCKED')){return}
+      }catch{}
+    }
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3DockerPreflightRunner -InstallRoot $InstallRoot -RequestPath $h3DockerPreflightRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_DOCKER_PREFLIGHT classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_DOCKER_PREFLIGHT_ERROR $($_.Exception.Message)"}
+}
+
 function Handle-H3HermesRequest{
   if(-not(Test-Path -LiteralPath $h3HermesRunner -PathType Leaf)){return}
   if(-not(Test-Path -LiteralPath $h3HermesRequest -PathType Leaf)){return}
@@ -333,6 +361,7 @@ try{
       Refresh-FamilyPttR17IfSafe
       Handle-JellyfinVisibilityRequest
       Handle-HPEnvySurfsharkRequest
+      Handle-H3DockerDesktopPreflight
       Handle-H3HermesRequest
       Handle-FamilyPttPhase1ApkRequest
       $lastError=''
