@@ -1,21 +1,21 @@
-name: HP Envy Hermes OAuth Direct
+name: HP Envy Hermes Codex Finalize
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/hpenvy-hermes-oauth-direct-signal.txt'
+      - '.github/workflows/hpenvy-hermes-oauth-direct.yml'
 
 permissions:
   contents: write
   id-token: write
 
 concurrency:
-  group: hpenvy-hermes-oauth-direct
-  cancel-in-progress: true
+  group: hpenvy-hermes-codex-finalize
+  cancel-in-progress: false
 
 jobs:
-  regenerate:
+  finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,63 +26,117 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Generate fresh Hermes OpenAI device code
-        id: oauth
+      - name: Verify OAuth and configure Codex primary
         shell: bash
         run: |
           set -euo pipefail
           remote_script=$(cat <<'REMOTE'
-          set -eu
-          root="$HOME/.hermes/afz-openai-oauth"
-          mkdir -p "$root"
-          pkill -f '/home/coolyo/.local/bin/hermes auth add openai-codex' >/dev/null 2>&1 || true
-          ts=$(date -u +%Y%m%dT%H%M%SZ)
-          log="$root/login-$ts.log"
-          nohup script -qefc '/home/coolyo/.local/bin/hermes auth add openai-codex' "$log" >/dev/null 2>&1 </dev/null &
-          pid=$!
-          printf 'AFZ_OAUTH_PID=%s\n' "$pid"
-          printf 'AFZ_OAUTH_LOG=%s\n' "$log"
-          for i in $(seq 1 24); do
-            sleep 0.5
-            if grep -q 'auth.openai.com/codex/device' "$log" 2>/dev/null; then break; fi
-          done
-          cat "$log" 2>/dev/null || true
+          set -u
+          LAUNCHER="$HOME/.local/bin/hermes"
+          HERMES_HOME="$HOME/.hermes"
+          CONFIG="$HERMES_HOME/config.yaml"
+          AUTH="$HERMES_HOME/auth.json"
+          WRAPPER="$HOME/.local/bin/hermes-afz"
+          MODEL='gpt-5.6-luna'
+          PROVIDER='openai-codex'
+          CONTEXT='65536'
+
+          if [ "$(hostname 2>/dev/null || true)" != 'hpenvy' ] || [ "$(id -un 2>/dev/null || true)" != 'coolyo' ]; then
+            echo 'FINAL_CLASSIFICATION=WRONG_TARGET'; exit 41
+          fi
+          if [ ! -x "$LAUNCHER" ] || [ ! -r "$CONFIG" ]; then
+            echo 'FINAL_CLASSIFICATION=INSTALL_INCOMPLETE'; exit 42
+          fi
+          auth_verified="$(python3 - "$AUTH" <<'PY'
+          import json,sys
+          ok=False
+          try:
+              with open(sys.argv[1],'r',encoding='utf-8') as f: d=json.load(f)
+              p=(d.get('providers') or {}).get('openai-codex')
+              t=p.get('tokens') if isinstance(p,dict) else None
+              ok=isinstance(t,dict) and bool(t.get('access_token')) and bool(t.get('refresh_token'))
+          except Exception:
+              pass
+          print('true' if ok else 'false')
+          PY
+          )"
+          printf 'AUTH_VERIFIED=%s\n' "$auth_verified"
+          if [ "$auth_verified" != true ]; then
+            echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=AUTH_NOT_VERIFIED'; exit 44
+          fi
+          if pgrep -af '[h]ermes.*gateway' >/dev/null 2>&1; then
+            echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=GATEWAY_RUNNING_SAFE_STOP'; exit 43
+          fi
+
+          backup="$CONFIG.afz-pre-codex-$(date +%Y%m%dT%H%M%S).bak"
+          cp -p "$CONFIG" "$backup"
+          if ! "$LAUNCHER" config set model.default "$MODEL" >/dev/null 2>&1 || \
+             ! "$LAUNCHER" config set model.provider "$PROVIDER" >/dev/null 2>&1 || \
+             ! "$LAUNCHER" config set model.context_length "$CONTEXT" >/dev/null 2>&1; then
+            cp -p "$backup" "$CONFIG"
+            echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=CONFIG_SET_FAILED_ROLLED_BACK'; exit 45
+          fi
+          if ! "$LAUNCHER" config unset model.base_url >/dev/null 2>&1; then
+            python3 - "$CONFIG" <<'PY'
+          import sys,re
+          p=sys.argv[1]
+          with open(p,'r',encoding='utf-8') as f: lines=f.readlines()
+          out=[]; inside=False
+          for line in lines:
+              if re.match(r'^model:\s*(?:#.*)?$',line): inside=True; out.append(line); continue
+              if inside and re.match(r'^[^\s#][^:]*:',line): inside=False
+              if inside and re.match(r'^\s+base_url\s*:',line): continue
+              out.append(line)
+          with open(p,'w',encoding='utf-8') as f: f.writelines(out)
+          PY
+          fi
+          mkdir -p "$HOME/.local/bin"
+          cat > "$WRAPPER" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec "$HOME/.local/bin/hermes" "$@"
+          EOF
+          chmod 700 "$WRAPPER"
+
+          provider="$(awk '/^model:/{m=1;next} m && /^[^[:space:]#]/{m=0} m && /^[[:space:]]+provider:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
+          model="$(awk '/^model:/{m=1;next} m && /^[^[:space:]#]/{m=0} m && /^[[:space:]]+default:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
+          ctx="$(awk '/^model:/{m=1;next} m && /^[^[:space:]#]/{m=0} m && /^[[:space:]]+context_length:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
+          base_present=false
+          awk '/^model:/{m=1;next} m && /^[^[:space:]#]/{m=0} m && /^[[:space:]]+base_url:/{found=1} END{exit !found}' "$CONFIG" && base_present=true || true
+          printf 'PROVIDER=%s\nMODEL=%s\nCONTEXT_LENGTH=%s\nBASE_URL_PRESENT=%s\n' "$provider" "$model" "$ctx" "$base_present"
+          printf 'GENERATION_STARTED=false\nGATEWAY_STARTED=false\nSECRET_VALUES_EMITTED=false\n'
+          if [ "$provider" = "$PROVIDER" ] && [ "$model" = "$MODEL" ] && [ "$ctx" = "$CONTEXT" ] && [ "$base_present" = false ]; then
+            echo 'PROVIDER_SWITCHED=true'; echo 'FINAL_CLASSIFICATION=CODEX_PRIMARY_CONFIGURED'; exit 0
+          fi
+          cp -p "$backup" "$CONFIG"
+          echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=CONFIG_VERIFY_FAILED_ROLLED_BACK'; exit 46
           REMOTE
           )
           set +e
           raw=$(printf '%s\n' "$remote_script" | tailscale ssh coolyo@100.71.26.69 'bash -s' 2>&1)
           ssh_code=$?
           set -e
-          RAW="$raw" SSH_CODE="$ssh_code" python - <<'PY' > /tmp/oauth-result.json
-          import json, os, re, time
+          RAW="$raw" SSH_CODE="$ssh_code" python - <<'PY' > /tmp/codex-finalize.json
+          import json,os,re,time
           raw=os.environ.get('RAW','')
-          clean=re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', raw)
-          urlm=re.search(r'https://auth\.openai\.com/codex/device(?:\?[^\s]+)?', clean, re.I)
-          codem=re.search(r'\b[A-Z0-9]{4}-[A-Z0-9]{5}\b', clean, re.I)
-          pidm=re.search(r'^AFZ_OAUTH_PID=(\d+)$', clean, re.M)
-          logm=re.search(r'^AFZ_OAUTH_LOG=([^\r\n]+)$', clean, re.M)
+          def m(k):
+              x=re.search(r'^'+re.escape(k)+r'=([^\r\n]*)$',raw,re.M)
+              return x.group(1).strip() if x else None
           result={
-            'schema':1,
-            'target':'coolyo@100.71.26.69',
-            'provider':'openai-codex',
-            'classification':'AUTH_DEVICE_CODE_READY' if urlm and codem else 'AUTH_DEVICE_CODE_NOT_EMITTED',
-            'deviceUrl':urlm.group(0).rstrip('.,)]') if urlm else None,
-            'deviceCode':codem.group(0).upper() if codem else None,
-            'remoteOauthPid':int(pidm.group(1)) if pidm else None,
-            'remoteOauthLog':logm.group(1).strip() if logm else None,
-            'tailscaleSshExitCode':int(os.environ.get('SSH_CODE','-1')),
-            'providerSwitched':False,
-            'generationStarted':False,
-            'gatewayStarted':False,
-            'secretValuesEmitted':False,
-            'rawOutputPersisted':False,
+            'schema':1,'target':'coolyo@100.71.26.69','provider':'openai-codex','model':'gpt-5.6-luna',
+            'classification':m('FINAL_CLASSIFICATION') or ('SSH_EXIT_'+os.environ.get('SSH_CODE','-1')),
+            'authVerified':m('AUTH_VERIFIED')=='true','providerSwitched':m('PROVIDER_SWITCHED')=='true',
+            'configuredProvider':m('PROVIDER'),'configuredModel':m('MODEL'),'contextLength':m('CONTEXT_LENGTH'),
+            'baseUrlPresent':m('BASE_URL_PRESENT')=='true','generationStarted':False,'gatewayStarted':False,
+            'secretValuesEmitted':False,'rawOutputPersisted':False,'tailscaleSshExitCode':int(os.environ.get('SSH_CODE','-1')),
             'generatedAtEpoch':int(time.time())
           }
-          print(json.dumps(result, separators=(',',':')))
+          print(json.dumps(result,separators=(',',':')))
           PY
-          cat /tmp/oauth-result.json
+          cat /tmp/codex-finalize.json
+          test "$(python -c "import json; print(json.load(open('/tmp/codex-finalize.json'))['classification'])")" = CODEX_PRIMARY_CONFIGURED
 
-      - name: Publish sanitized OAuth result
+      - name: Publish sanitized finalize result
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -90,20 +144,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          result=$(cat /tmp/oauth-result.json)
-          content=$(printf '%s\n' "$result" | base64 -w0)
-          path="afz-openai-agent/oauth-results/hpenvy-openai-codex-${RUN_ID}.json"
-          payload=$(python - "$content" "$path" <<'PY'
+          content=$(base64 -w0 /tmp/codex-finalize.json)
+          path="afz-openai-agent/oauth-results/hpenvy-openai-codex-finalize-${RUN_ID}.json"
+          payload=$(python - "$content" <<'PY'
           import json,sys
-          content,path=sys.argv[1:]
-          print(json.dumps({'message':'Publish sanitized HP Envy Hermes OAuth result','content':content}))
+          print(json.dumps({'message':'Publish sanitized HP Envy Hermes Codex finalize result','content':sys.argv[1]}))
           PY
           )
-          curl --silent --show-error --fail-with-body \
-            -X PUT \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H 'Content-Type: application/json' \
-            --data "$payload" \
-            "https://api.github.com/repos/${REPO}/contents/${path}"
+          curl --silent --show-error --fail-with-body -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' -H 'Content-Type: application/json' \
+            --data "$payload" "https://api.github.com/repos/${REPO}/contents/${path}" >/dev/null
