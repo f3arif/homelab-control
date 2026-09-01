@@ -1,4 +1,4 @@
-name: HP Envy Surfshark Exit Node Apply
+name: HP Envy Exact Source Sync
 
 on:
   workflow_dispatch:
@@ -12,11 +12,11 @@ permissions:
   id-token: write
 
 concurrency:
-  group: hpenvy-surfshark-exitnode-apply
+  group: hpenvy-exact-source-sync
   cancel-in-progress: false
 
 jobs:
-  apply:
+  sync:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -40,71 +40,27 @@ jobs:
             -X POST --data "$payload" \
             http://100.70.25.8:8797/api/push-deploy
 
-      - name: Confirm exact source and typed HP Envy endpoint
+      - name: Confirm exact source loaded
         env:
           AFZ_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 24); do
+          for attempt in $(seq 1 36); do
             if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
               if HEALTH="$health" python - "$AFZ_SHA" <<'PY'
           import json,os,sys
           expected=sys.argv[1].lower()
           j=json.loads(os.environ['HEALTH'])
           commit=(j.get('commit') or '').strip().lower()
-          ep=j.get('hpEnvySurfsharkExitNode') or {}
           assert commit == expected, (commit, expected)
-          assert ep.get('typed') is True
-          assert ep.get('route') == '/api/hpenvy-surfshark-exitnode'
-          assert ep.get('fixedTarget') == 'coolyo@100.71.26.69'
-          assert ep.get('localAuthorizationSentinelRequired') is True
-          assert ep.get('arbitraryShell') is False
           PY
               then
-                echo "Windows-main exact source and HP Envy endpoint confirmed"
+                echo "EXACT_SOURCE_SYNC=PASS"
                 exit 0
               fi
             fi
-            echo "Attempt $attempt: waiting for exact source/control endpoint"
             sleep 5
           done
-          echo "Windows-main did not expose the exact HP Envy typed endpoint within the bounded window" >&2
+          echo "EXACT_SOURCE_SYNC=FAIL" >&2
           exit 1
-
-      - name: Run guarded HP Envy Surfshark apply and verify post-state
-        env:
-          AFZ_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          payload=$(printf '{"action":"apply","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
-          response=$(curl --silent --show-error \
-            --connect-timeout 4 --max-time 90 \
-            -H 'Content-Type: application/json' \
-            -X POST --data "$payload" \
-            http://100.70.25.8:8797/api/hpenvy-surfshark-exitnode)
-          printf '%s\n' "$response"
-          RESPONSE="$response" python - <<'PY'
-          import json,os
-          j=json.loads(os.environ['RESPONSE'])
-          classification=str(j.get('classification') or '')
-          exit_code=int(j.get('exitCode') or 0)
-          out=str(j.get('output') or '')
-          print('classification='+classification)
-          print('exitCode='+str(exit_code))
-          if classification != 'APPLY_APPLY_COMPLETED' or exit_code != 0:
-              raise SystemExit('guarded apply did not complete: '+classification)
-          required=[
-           'CHECK_TAILSCALE0_UP=1',
-           'CHECK_SURFSHARK_UP=1',
-           'CHECK_AFZ_POLICY_RULE=1',
-           'CHECK_AFZ_POLICY_DEFAULT=1',
-           'CHECK_AFZ_SURFSHARK_NAT=1',
-           'RESULT=AUDIT_POLICY_PRESENT',
-          ]
-          missing=[x for x in required if x not in out]
-          if missing:
-              raise SystemExit('post-apply verification missing: '+', '.join(missing))
-          print('HP_ENVY_SURFSHARK_EXITNODE=PASS')
-          PY
