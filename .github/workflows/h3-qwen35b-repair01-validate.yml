@@ -1,0 +1,62 @@
+name: Validate H3 Qwen35B Repair01
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteRepair01.ps1'
+      - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-Repair01.ps1'
+      - '.github/workflows/h3-qwen35b-repair01-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell with Windows PowerShell AST
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteRepair01.ps1',
+            'afz-openai-agent/Invoke-H3-Qwen35BA3B-Repair01.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){$errors|ForEach-Object {Write-Host $_.Message -ForegroundColor Red};throw "PowerShell parse failure: $file"}
+          }
+      - name: Assert one-call Qwen-only repair contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=Get-Content 'afz-openai-agent/tools/Start-H3-Qwen35BA3B-WebsiteRepair01.ps1' -Raw
+          $launcher=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-Repair01.ps1' -Raw
+          $all=$runner+"`n"+$launcher
+          foreach($needle in @(
+            "`$JobId='qwen35b-a3b-website-20260830-r1-repair01'",
+            "`$OriginalJobId='qwen35b-a3b-website-20260830-r1'",
+            "`$Model='qwen3.6:35b-a3b'",
+            "`$Context=16384",
+            'max_repair_model_calls=1',
+            'repair_model_call_attempted',
+            'repair_ollama_post_started',
+            'num_predict=4096',
+            'think=$false',
+            '/no_think',
+            '<<<FILE:',
+            'human_written_website_code=0',
+            'Qwen36-35B-A3B-Website-Test-20260830-r1-repair01',
+            'C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system',
+            'IdentitiesOnly=yes',
+            'StrictHostKeyChecking=yes'
+          )){if(-not $all.Contains($needle)){throw "Required repair boundary missing: $needle"}}
+          if(($runner -split '127\.0\.0\.1:11434/api/generate').Count -ne 2){throw 'Repair runner must contain exactly one Ollama generate endpoint.'}
+          if($launcher -match '127\.0\.0\.1:11434/api/generate'){throw 'Launcher must not contain a model endpoint.'}
+          if($runner -notmatch 'Copy-Item.+OriginalRoot' -and $runner -notmatch 'Copy-Item -LiteralPath \$src -Destination \$dst'){throw 'Repair must clone Qwen source into separate repair root.'}
+          if($runner -match 'Set-Content.+OriginalRoot' -or $runner -match 'Write-Utf8.+OriginalRoot'){throw 'Repair controller must not write into original benchmark root.'}
+          foreach($forbidden in @('Invoke-Expression','cmd.exe /c')){if($runner -match [regex]::Escape($forbidden)){throw "Forbidden runner primitive: $forbidden"}}
+          if($launcher -notmatch 'S-1-5-18'){throw 'SYSTEM identity gate missing.'}
+          if($launcher -notmatch 'QWEN35B_REPAIR_ALREADY_STARTED'){throw 'Duplicate repair-call guard missing.'}
