@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "hpenvy-hermes-openai-codex-auth-20260831-r2",
+  "taskName": "HP Envy Hermes OpenAI Codex Auth",
+  "target": "coolyo@100.71.26.69",
+  "action": "start-device-auth",
+  "provider": "openai-codex",
+  "model_after_auth": "gpt-5.6-luna",
+  "allow_provider_switch": false,
+  "allow_generation": false,
+  "allow_gateway_start": false,
+  "allow_firewall_change": false,
+  "allow_tailscale_change": false,
+  "control_plane": "github",
+  "result_mirror_role": "observability-only",
+  "status": "active"
+}
