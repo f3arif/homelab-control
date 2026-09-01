@@ -3,11 +3,18 @@ $ErrorActionPreference='Stop'
 $StateRoot=Join-Path ([IO.Path]::GetTempPath()) ('afz-prospect-test-'+[guid]::NewGuid().ToString('n'))
 $AgentRoot=Split-Path -Parent $PSScriptRoot
 $ModelSol='test-sol'
+$ModelLuna='test-luna'
 
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw "ASSERTION FAILED: $Message"}}
 
 try{
   . (Join-Path $PSScriptRoot 'ProspectEngine.ps1')
+  $sol=Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})
+  Assert-True ($sol.model -eq 'test-sol' -and $sol.searchContextSize -eq 'high') 'Sol selection should use the configured Sol model'
+  $luna=Resolve-ProspectResearchModel ([pscustomobject]@{model='luna'})
+  Assert-True ($luna.model -eq 'test-luna' -and $luna.searchContextSize -eq 'medium') 'Luna selection should use the configured Luna model'
+  $invalidRejected=$false;try{Resolve-ProspectResearchModel ([pscustomobject]@{model='arbitrary-model'})|Out-Null}catch{$invalidRejected=$true}
+  Assert-True $invalidRejected 'arbitrary client-supplied model ids must be rejected'
   $candidate=[pscustomobject]@{
     id='lead-1';company='Example Design';category='BCIN designers';city='Toronto'
     website='https://example.com';publicEmail='projects@example.com'

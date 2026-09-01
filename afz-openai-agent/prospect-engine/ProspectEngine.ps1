@@ -84,6 +84,16 @@ function ConvertTo-StringArray {
   return $result
 }
 
+function Resolve-ProspectResearchModel {
+  param($Request)
+  $choice = ([string](Get-ProspectProperty $Request 'model' 'sol')).Trim().ToLowerInvariant()
+  switch ($choice) {
+    'luna' { return [pscustomobject][ordered]@{key='luna';model=$ModelLuna;searchContextSize='medium'} }
+    'sol' { return [pscustomobject][ordered]@{key='sol';model=$ModelSol;searchContextSize='high'} }
+    default { throw 'Select an approved research model: Luna or Sol.' }
+  }
+}
+
 function New-ProspectSchema {
   $stringArray = [ordered]@{type='array';items=[ordered]@{type='string'}}
   $leadProperties = [ordered]@{
@@ -193,6 +203,7 @@ function Invoke-ProspectResearch {
   if ($focus.Length -gt 500) { $focus = $focus.Substring(0,500) }
   $limit = [math]::Max(1,[math]::Min(20,[int](Get-ProspectProperty $Request 'limit' 10)))
   $minimum = [math]::Max(50,[math]::Min(95,[int](Get-ProspectProperty $Request 'minimumScore' 65)))
+  $modelConfig = Resolve-ProspectResearchModel $Request
   $store = Read-ProspectStore
   $existingHosts = @($store.leads | ForEach-Object { Get-ProspectHost ([string]$_.website) } | Where-Object { $_ } | Select-Object -Unique)
   $exclude = $existingHosts -join ', '
@@ -212,10 +223,10 @@ Score each lead from 0 to 100: service relevance 30, current project evidence 25
 Each retained lead must have an official website and at least two distinct source URLs on that same official domain. The email must cite one specific verified website detail, propose only matching AFZ services, be concise, and end with placeholders for AFZ sender name, phone, website, physical mailing address, plus: "If you prefer not to receive further messages from AFZ Engineering, please reply unsubscribe."
 "@
   $response = Invoke-OpenAIResponse ([ordered]@{
-    model=$ModelSol
+    model=$modelConfig.model
     instructions='You are the AFZ Engineering Prospect Researcher. Perform read-only public-business web research. Return only schema-valid results with verified official-site evidence. Do not send or submit anything.'
     input=$prompt
-    tools=@([ordered]@{type='web_search';search_context_size='high'})
+    tools=@([ordered]@{type='web_search';search_context_size=$modelConfig.searchContextSize})
     text=[ordered]@{format=[ordered]@{type='json_schema';name='afz_prospect_batch';strict=$true;schema=(New-ProspectSchema)}}
   })
   $raw = Get-ProspectResponseText $response
@@ -236,12 +247,13 @@ Each retained lead must have an official website and at least two distinct sourc
   if ($accepted.Count -eq 0) { throw 'No prospects passed the official-site evidence, duplicate, and fit-score gates.' }
   $batch = [ordered]@{
     id=$batchId;query=([string]$parsed.batch.query);region=$region;targets=$targets
-    searchedAt=(Get-Date -Format o);minimumScore=$minimum;accepted=$accepted.Count;model=$ModelSol
+    searchedAt=(Get-Date -Format o);minimumScore=$minimum;accepted=$accepted.Count
+    modelChoice=$modelConfig.key;model=$modelConfig.model
   }
   $store.batches = @($batch) + @($store.batches | Select-Object -First 49)
   $store.leads = @($accepted) + @($store.leads | Select-Object -First 499)
   Write-ProspectStore $store
-  Write-ProspectAudit 'research' '' $true "batch=$batchId accepted=$($accepted.Count)"
+  Write-ProspectAudit 'research' '' $true "batch=$batchId accepted=$($accepted.Count) model=$($modelConfig.key)"
   return [ordered]@{ok=$true;batch=$batch;leads=$accepted;total=@($store.leads).Count}
 }
 
