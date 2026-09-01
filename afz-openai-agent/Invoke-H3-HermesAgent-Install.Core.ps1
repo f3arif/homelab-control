@@ -203,6 +203,10 @@ function Emit([bool]$ok,[string]$classification,[hashtable]$extra,[bool]$publish
 try{
   if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit $false 'HERMES_DOCKER_WRONG_HOST' @{retryable=$false;repaired=$false} $false;exit 30}
   $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if(-not $dockerCmd){
+    $dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}
+  }
   if(-not $dockerCmd){Emit $false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=$false;dockerReady=$false;repaired=$false} $false;exit 31}
   $script:docker=[string]$dockerCmd.Source
   $serverVersion=(& $script:docker version --format '{{.Server.Version}}' 2>&1|Out-String).Trim()
