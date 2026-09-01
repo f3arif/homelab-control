@@ -1,4 +1,4 @@
 target=h3
 action=wake-once
-reason=qwen35b-a3b-postreturn-saved-response-recovery
-requested_at=2026-09-01T00:21:00-04:00
+reason=qwen35b-repair01-reconcile
+requested_at=2026-09-01T10:55:00-04:00
