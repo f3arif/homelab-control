@@ -90,6 +90,61 @@ try{
   # The carrier must never alter the existing Surfshark request path on failure.
 }
 
+# TEMPORARY NATIVE H3 HERMES QWEN 35B CARRIER.
+# This launches the isolated native-Hermes job in the background so the persistent
+# Windows-main watcher is never held by the remote install. The native job reuses the
+# existing Ollama model and refuses to pull/mutate/expose it or run generation.
+try{
+  $h3NativeRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesNative-Install.ps1'
+  $h3NativeRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-native-qwen35b.json'
+  if((Test-Path -LiteralPath $h3NativeRunner -PathType Leaf) -and (Test-Path -LiteralPath $h3NativeRequest -PathType Leaf)){
+    $hr=Get-Content -LiteralPath $h3NativeRequest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $hid=([string]$hr.id).Trim()
+    $hContract=(
+      [int]$hr.schema -eq 1 -and
+      $hid -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$' -and
+      ([string]$hr.action).Trim() -eq 'install-and-configure-native' -and
+      ([string]$hr.status).Trim() -eq 'ACTIVE' -and
+      ([string]$hr.target).Trim() -eq 'h3' -and
+      ([string]$hr.host).Trim() -eq 'DESKTOP-H3R6CQN' -and
+      ([string]$hr.provider).Trim() -eq 'custom' -and
+      ([string]$hr.base_url).Trim() -eq 'http://127.0.0.1:11434/v1' -and
+      ([string]$hr.model).Trim() -eq 'qwen3.6:35b-a3b' -and
+      [int]$hr.context_length -eq 65536 -and
+      -not [bool]$hr.run_generation_test -and
+      -not [bool]$hr.expose_ollama -and
+      -not [bool]$hr.mutate_ollama -and
+      -not [bool]$hr.start_gateway
+    )
+    if($hContract){
+      $hStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-native-qwen35b'
+      New-Item -ItemType Directory -Force -Path $hStateRoot | Out-Null
+      $hState=Join-Path $hStateRoot ($hid+'.json')
+      $hMarker=Join-Path $hStateRoot ($hid+'.carrier-started')
+      $hDone=$false;$hRunning=$false
+      if(Test-Path -LiteralPath $hState -PathType Leaf){
+        try{
+          $hs=Get-Content -LiteralPath $hState -Raw -Encoding UTF8 | ConvertFrom-Json
+          $hDone=([string]$hs.classification -eq 'H3_HERMES_NATIVE_QWEN35B_READY')
+          if($hs.PSObject.Properties.Name -contains 'workerPid'){
+            $wp=0;try{$wp=[int]$hs.workerPid}catch{}
+            if($wp -gt 0 -and (Get-Process -Id $wp -ErrorAction SilentlyContinue)){$hRunning=$true}
+          }
+        }catch{}
+      }
+      if(-not $hDone -and -not $hRunning -and -not(Test-Path -LiteralPath $hMarker -PathType Leaf)){
+        Set-Content -LiteralPath $hMarker -Value (Get-Date -Format o) -Encoding ASCII
+        $args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$h3NativeRunner,'-InstallRoot',$InstallRoot,'-RequestPath',$h3NativeRequest)
+        $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden -PassThru
+        $launch=[ordered]@{schema=1;ok=$false;classification='H3_HERMES_NATIVE_LAUNCHED';jobId=$hid;workerPid=$proc.Id;generationTestStarted=$false;gatewayStarted=$false;ollamaMutationStarted=$false;time=(Get-Date -Format o)}
+        $launch | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $hState -Encoding UTF8
+      }
+    }
+  }
+}catch{
+  # The H3 carrier must never alter the existing Surfshark request path on failure.
+}
+
 $statePath=Join-Path $StateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
   try{
