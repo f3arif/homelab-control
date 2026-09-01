@@ -18,7 +18,6 @@ New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 function Write-Result($obj,[string]$path){
   $json=$obj | ConvertTo-Json -Depth 12
   $json | Set-Content -LiteralPath $path -Encoding UTF8
-  # OneDrive is backup-only. A backup write must never affect GitHub/Direct Fabric execution.
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){$json | Set-Content -LiteralPath $mirrorPath -Encoding UTF8}}catch{}
 }
 function Write-H3HookResult($obj){
@@ -34,22 +33,17 @@ function Invoke-Phase1FamilyPttPrep {
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
 function Invoke-FamilyPttOnePlusInstall {
-  # Typed/idempotent install request for one authorized OnePlus Android handset only.
-  # The helper verifies the fixed APK hash and never touches either Pixel or network/backend state.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-OnePlus13R-Install.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\familyptt-oneplus13r-install.json'
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
 function Invoke-H3SshKeyAclRepair {
-  # Reuses the previously verified fixed-key/fixed-fingerprint ACL repair before any H3 SSH mutation.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Repair-H3-SshKeyAcl.ps1'
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot *> $null}catch{}
 }
 function Invoke-H3TailscaleUnattended {
-  # Typed, fixed-target one-shot. GitHub is the control input; OneDrive is backup-only.
-  # The helper can only enforce H3's Tailscale UnattendedMode=always and verify it.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Enable-H3-Tailscale-Unattended.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-tailscale-unattended.json'
   $helperExists=Test-Path -LiteralPath $helper -PathType Leaf
@@ -69,17 +63,12 @@ function Invoke-H3TailscaleUnattended {
   }
 }
 function Invoke-HPEnvySurfsharkExitNode {
-  # GitHub-controlled fixed-target helper. The committed request is read-only by default.
-  # Apply mode is additionally blocked by a machine-local authorization sentinel so a
-  # GitHub edit alone cannot alter HP Envy networking.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Surfshark-ExitNode.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-surfshark-exitnode.json'
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
 function Invoke-HPEnvyHermesOpenAICodexAuth {
-  # User-authorized, fixed-target OAuth device flow only. The helper is unable to
-  # switch provider/model, start a gateway, run generation, or execute arbitrary shell.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexAuth.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-hermes-openai-codex-auth.json'
   $helperExists=Test-Path -LiteralPath $helper -PathType Leaf
@@ -107,19 +96,14 @@ $requestedTask=([string]$req.taskName).Trim()
 if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id'}
 if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 
-# First-stage typed auxiliary requests are idempotent and isolated from RemoteOps.
-# Repair only the pinned H3 key ACL, prove its fingerprint/host, then enforce unattended mode.
-Invoke-H3SshKeyAclRepair
-Invoke-H3TailscaleUnattended
-
-# HP Envy networking audit remains independently guarded.
-Invoke-HPEnvySurfsharkExitNode
-
-# Start only the fixed Hermes OpenAI Codex OAuth device flow. It cannot alter provider
-# selection or invoke a model; those remain separately gated until authorization is verified.
+# User-requested OAuth regeneration gets first priority. This hook is fixed-target and
+# cannot switch providers, start generation/gateway, or alter network configuration.
 Invoke-HPEnvyHermesOpenAICodexAuth
 
-# FamilyPTT requests are independently typed and idempotent.
+# Remaining independent startup hooks run only after the OAuth device flow has been launched.
+Invoke-H3SshKeyAclRepair
+Invoke-H3TailscaleUnattended
+Invoke-HPEnvySurfsharkExitNode
 Invoke-Phase1FamilyPttPrep
 Invoke-FamilyPttOnePlusInstall
 
