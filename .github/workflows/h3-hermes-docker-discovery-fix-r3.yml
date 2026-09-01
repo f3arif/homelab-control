@@ -1,0 +1,77 @@
+name: H3 Hermes Docker Desktop Discovery Fix R3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-docker-discovery-fix-r3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Insert Docker Desktop CLI fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          $text=Get-Content -LiteralPath $p -Raw
+          $fallback="C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+          if($text.Contains($fallback)){
+            Write-Host 'Docker Desktop fallback already present.'
+            exit 0
+          }
+          $needle='  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1'
+          $idx=$text.IndexOf($needle,[StringComparison]::Ordinal)
+          if($idx -lt 0){throw 'Docker discovery anchor not found'}
+          $insert=@'
+  if(-not $dockerCmd){
+    $dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}
+  }
+'@
+          $pos=$idx+$needle.Length
+          $text=$text.Insert($pos,"`n"+$insert.TrimEnd("`r","`n"))
+          [IO.File]::WriteAllText((Resolve-Path $p),$text,(New-Object Text.UTF8Encoding($false)))
+
+      - name: Parse and enforce invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          $text=Get-Content -LiteralPath $p -Raw
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ($errors|ForEach-Object Message|Out-String)}
+          foreach($required in @(
+            'C:\Program Files\Docker\Docker\resources\bin\docker.exe',
+            '[Console]::In.ReadToEnd()',
+            '--memory=4g',
+            '--cpus=2',
+            '--shm-size=1g',
+            'host.docker.internal:11434/v1',
+            'HERMES_READY_LOCAL_OLLAMA_64K'
+          )){if(-not $text.Contains($required)){throw "Required invariant missing: $required"}}
+          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock','winget install')){
+            if($text.Contains($forbidden)){throw "Forbidden operation detected: $forbidden"}
+          }
+
+      - name: Commit safely
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          git add -- $p
+          if(git diff --cached --quiet){Write-Host 'No core change needed.'; exit 0}
+          git commit -m 'Detect Docker Desktop CLI outside H3 SSH PATH'
+          git pull --rebase origin main
+          git push origin HEAD:main
