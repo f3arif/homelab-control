@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-docker-desktop-20260831-r5",
+  "id": "h3-hermes-docker-desktop-20260831-r6",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "deployment": "docker-desktop",
