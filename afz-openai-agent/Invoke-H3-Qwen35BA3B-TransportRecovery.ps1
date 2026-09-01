@@ -70,7 +70,7 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
 
 # Post-return recovery status remains separate from source-sync success. An
 # inspection failure must not permit any transport/model replay.
-[ordered]@{
+$final=[ordered]@{
   ok=($code -eq 0)
   status=$(if($code -eq 0){'completed'}else{'failed'})
   classification='QWEN35B_R1_TRANSPORT_FROZEN_POSTRETURN_ONLY'
@@ -80,5 +80,18 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
   postReturn=$parsed
   postReturnInspection=$inspection
   time=(Get-Date -Format o)
-}|ConvertTo-Json -Depth 50 -Compress
+}
+$json=$final|ConvertTo-Json -Depth 50 -Compress
+
+# Emergency observability only. This mirror is never read as execution
+# authority and failure to publish must never affect the frozen post-return path.
+try{
+  $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+  if(Test-Path -LiteralPath $diagRoot -PathType Container){
+    $diagPath=Join-Path $diagRoot 'AFZ-QWEN35B-TRANSPORT-RECOVERY-LATEST.txt'
+    [IO.File]::WriteAllText($diagPath,$json,(New-Object Text.UTF8Encoding($false)))
+  }
+}catch{}
+
+Write-Output $json
 exit $code
