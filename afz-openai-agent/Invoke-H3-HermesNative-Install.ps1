@@ -19,12 +19,8 @@ if([string]$req.model -ne 'qwen3.6:35b-a3b' -or [int]$req.context_length -ne 655
 if([string]$req.hermes_commit -ne 'f50b5bb0fa5b48caef753c790bf0b09a3570918a'){throw 'H3 native Hermes commit pin mismatch.'}
 if([bool]$req.run_generation_test -or [bool]$req.expose_ollama -or [bool]$req.mutate_ollama -or [bool]$req.start_gateway){throw 'H3 native Hermes safety flags mismatch.'}
 
-$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
-$known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
-$ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
-$target='Faiz@100.106.186.118'
-foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required H3 SSH path missing: $p"}}
-
+# Initialize local + mirrored state before transport prerequisite checks so every
+# terminal preflight result is observable without exposing key material.
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-native-qwen35b'
 $statePath=Join-Path $stateRoot ($id+'.json')
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
@@ -36,6 +32,22 @@ function Save-State($o){
   [IO.File]::WriteAllText($statePath,$json,$utf8)
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
   Write-Output ($o|ConvertTo-Json -Depth 16 -Compress)
+}
+
+$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
+$known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
+$ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+$target='Faiz@100.106.186.118'
+$preflight=@(
+  [pscustomobject]@{role='system_key';path=$key},
+  [pscustomobject]@{role='known_hosts';path=$known},
+  [pscustomobject]@{role='ssh_client';path=$ssh}
+)
+foreach($item in $preflight){
+  if(-not(Test-Path -LiteralPath $item.path -PathType Leaf)){
+    $r=[ordered]@{schema=1;ok=$false;classification='H3_HERMES_NATIVE_WINDOWS_PREREQ_MISSING';jobId=$id;target='h3';missingRole=[string]$item.role;retryable=$false;generationTestStarted=$false;gatewayStarted=$false;ollamaMutationStarted=$false;ollamaExposed=$false;time=(Get-Date -Format o)}
+    Save-State $r;exit 43
+  }
 }
 
 $remote=@'
