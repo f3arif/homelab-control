@@ -37,14 +37,14 @@ function Write-State([object]$Object,[string]$Path){
 
 function Parse-Device([string]$Text){
   $clean=[regex]::Replace([string]$Text,"`e\[[0-?]*[ -/]*[@-~]",'')
-  $url=$null;$code=$null;$pid=$null;$log=$null
+  $url=$null;$code=$null;$remotePidValue=$null;$log=$null
   $m=[regex]::Match($clean,'https://auth\.openai\.com/codex/device(?:\?[^\s]+)?',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if($m.Success){$url=$m.Value.TrimEnd('.',',',')',']')}
   $m=[regex]::Match($clean,'\b[A-Z0-9]{4}-[A-Z0-9]{5}\b',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if($m.Success){$code=$m.Value.ToUpperInvariant()}
-  $m=[regex]::Match($clean,'(?m)^AFZ_OAUTH_PID=(\d+)$');if($m.Success){$pid=[int]$m.Groups[1].Value}
+  $m=[regex]::Match($clean,'(?m)^AFZ_OAUTH_PID=(\d+)$');if($m.Success){$remotePidValue=[int]$m.Groups[1].Value}
   $m=[regex]::Match($clean,'(?m)^AFZ_OAUTH_LOG=([^\r\n]+)$');if($m.Success){$log=$m.Groups[1].Value.Trim()}
-  return [ordered]@{url=$url;code=$code;remotePid=$pid;remoteLog=$log}
+  return [ordered]@{url=$url;code=$code;remotePid=$remotePidValue;remoteLog=$log}
 }
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
