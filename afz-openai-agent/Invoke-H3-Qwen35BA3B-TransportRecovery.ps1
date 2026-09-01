@@ -68,8 +68,26 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
   $inspection=[ordered]@{ok=$false;status='inspector-missing';path=$inspector}
 }
 
+# Independent one-shot R5 file-hash parity canary. This helper is SYSTEM-only,
+# idempotent, read-only apart from one bounded legacy h3-file-hash request and
+# transient candidate files. Its status never changes Qwen post-return exit state.
+$r5Parity=[ordered]@{ok=$false;status='not-run'}
+try{
+  $r5Helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-PythonR5-FileHashParity.ps1'
+  if(Test-Path -LiteralPath $r5Helper -PathType Leaf){
+    $r5Raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r5Helper -InstallRoot $InstallRoot | Select-Object -Last 1
+    $r5Code=$LASTEXITCODE
+    if($r5Raw -is [string]){try{$r5Parsed=$r5Raw|ConvertFrom-Json}catch{$r5Parsed=[ordered]@{raw=[string]$r5Raw}}}else{$r5Parsed=$r5Raw}
+    $r5Parity=[ordered]@{ok=($r5Code -eq 0);status=$(if($r5Code -eq 0){'completed'}else{'failed'});exit=$r5Code;result=$r5Parsed}
+  }else{
+    $r5Parity=[ordered]@{ok=$false;status='helper-missing';path=$r5Helper}
+  }
+}catch{
+  $r5Parity=[ordered]@{ok=$false;status='exception';error=$_.Exception.Message}
+}
+
 # Post-return recovery status remains separate from source-sync success. An
-# inspection failure must not permit any transport/model replay.
+# inspection or R5 parity failure must not permit any transport/model replay.
 $final=[ordered]@{
   ok=($code -eq 0)
   status=$(if($code -eq 0){'completed'}else{'failed'})
@@ -79,6 +97,7 @@ $final=[ordered]@{
   postReturnExit=$code
   postReturn=$parsed
   postReturnInspection=$inspection
+  r5PythonFileHashParity=$r5Parity
   time=(Get-Date -Format o)
 }
 $json=$final|ConvertTo-Json -Depth 50 -Compress
