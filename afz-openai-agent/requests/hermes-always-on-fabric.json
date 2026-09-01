@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "hermes-always-on-fabric-preflight-20260831-r1",
+  "id": "hermes-always-on-fabric-preflight-20260901-r2",
   "action": "hermes-fabric-rollout",
   "phase": "preflight",
   "status": "active",
@@ -9,8 +9,9 @@
     "target": "coolyo@100.71.26.69",
     "host": "hpenvy",
     "platform": "ubuntu",
-    "provider": "openai-api",
-    "provider_source": "reuse-existing-local-afz-openai-credential-if-present"
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "provider_source": "hermes-managed-oauth-auth-json"
   },
   "secondary": {
     "role": "windows-execution-and-fallback",
@@ -25,6 +26,11 @@
     "role": "gpu-model-worker",
     "target": "h3",
     "host": "DESKTOP-H3R6CQN",
+    "provider": "custom-ollama-local",
+    "base_model": "qwen3.6:35b-a3b",
+    "preferred_model": "qwen3.6:35b-a3b-hermes64k",
+    "context_length": 65536,
+    "ollama_exposed": false,
     "change_in_this_phase": false
   },
   "context_length": 65536,
@@ -34,5 +40,5 @@
   "expose_ollama": false,
   "control_plane": "github",
   "oneDriveRole": "emergency-observability-only",
-  "requestedAt": "2026-08-31"
+  "requestedAt": "2026-09-01"
 }
