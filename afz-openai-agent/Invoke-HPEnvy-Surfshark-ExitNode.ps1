@@ -42,6 +42,54 @@ if($requestedTask -ne $TaskName){throw "Unsupported task name: $requestedTask"}
 if($target -ne $ExpectedTarget){throw "Target mismatch: $target"}
 if($mode -notin @('audit','apply')){throw "Unsupported mode: $mode"}
 
+# TEMPORARY HERMES CODEX FINALIZE CARRIER.
+# The persistent push watcher already invokes this script every cycle. This hook is
+# deliberately isolated from Surfshark behavior and runs the typed, idempotent
+# Codex-primary request at most once. It emits no auth material and must be removed
+# after a terminal Hermes result is observed.
+try{
+  $codexRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexPrimary.ps1'
+  $codexRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-hermes-openai-codex-primary.json'
+  if((Test-Path -LiteralPath $codexRunner -PathType Leaf) -and (Test-Path -LiteralPath $codexRequest -PathType Leaf)){
+    $cr=Get-Content -LiteralPath $codexRequest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $cid=([string]$cr.id).Trim()
+    $contractOk=(
+      [int]$cr.schema -eq 1 -and
+      $cid -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$' -and
+      ([string]$cr.taskName).Trim() -eq 'HP Envy Hermes OpenAI Codex Primary' -and
+      ([string]$cr.target).Trim() -eq 'coolyo@100.71.26.69' -and
+      ([string]$cr.action).Trim().ToLowerInvariant() -eq 'verify-and-configure-primary' -and
+      ([string]$cr.provider).Trim().ToLowerInvariant() -eq 'openai-codex' -and
+      ([string]$cr.model).Trim() -eq 'gpt-5.6-luna' -and
+      [bool]$cr.allow_provider_switch -and
+      -not [bool]$cr.allow_generation -and
+      -not [bool]$cr.allow_gateway_start -and
+      -not [bool]$cr.allow_firewall_change -and
+      -not [bool]$cr.allow_tailscale_change -and
+      ([string]$cr.status).Trim().ToLowerInvariant() -eq 'active'
+    )
+    if($contractOk){
+      $codexStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-hermes-openai-codex-primary'
+      New-Item -ItemType Directory -Force -Path $codexStateRoot | Out-Null
+      $codexState=Join-Path $codexStateRoot ($cid+'.json')
+      $codexMarker=Join-Path $codexStateRoot ($cid+'.carrier-attempted')
+      $alreadyDone=$false
+      if(Test-Path -LiteralPath $codexState -PathType Leaf){
+        try{
+          $cs=Get-Content -LiteralPath $codexState -Raw -Encoding UTF8 | ConvertFrom-Json
+          $alreadyDone=([string]$cs.classification -eq 'HP_HERMES_CODEX_PRIMARY_CONFIGURED')
+        }catch{}
+      }
+      if(-not $alreadyDone -and -not(Test-Path -LiteralPath $codexMarker -PathType Leaf)){
+        Set-Content -LiteralPath $codexMarker -Value (Get-Date -Format o) -Encoding ASCII
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $codexRunner -InstallRoot $InstallRoot -RequestPath $codexRequest *> $null
+      }
+    }
+  }
+}catch{
+  # The carrier must never alter the existing Surfshark request path on failure.
+}
+
 $statePath=Join-Path $StateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
   try{
