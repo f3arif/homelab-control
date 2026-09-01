@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "hpenvy-hermes-primary-20260831-r1",
+  "id": "hpenvy-hermes-primary-20260901-r2",
   "project": "hermes-always-on-fabric",
   "action": "install-and-configure-primary",
   "status": "active",
@@ -18,11 +18,10 @@
   "skip_interactive_setup": true,
   "skip_browser": true,
   "skip_computer_use": true,
-  "provider_target": "openai-api",
+  "provider_target": "openai-codex",
   "model_target": "gpt-5.6-luna",
-  "provider_base_url": "https://api.openai.com/v1",
   "context_length": 65536,
-  "provider_secret_source": "runtime-inherit-from-existing-afz-ai-service-process",
+  "provider_secret_source": "hermes-managed-oauth-auth-json",
   "write_provider_secret_to_config": false,
   "write_provider_secret_to_hermes_env": false,
   "start_gateway": false,
@@ -33,5 +32,8 @@
   "control_plane": "github",
   "onedrive_role": "emergency-execution-and-observability-only",
   "fallback_node": "windows-main",
-  "accelerator_node": "H3"
+  "accelerator_node": "H3",
+  "accelerator_model": "qwen3.6:35b-a3b-hermes64k",
+  "accelerator_base_model": "qwen3.6:35b-a3b",
+  "accelerator_ollama_exposed": false
 }
