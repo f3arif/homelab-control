@@ -13,6 +13,7 @@ $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-REMOTEOPS-START-LATEST.json'
 $h3HookMirror=Join-Path $mirrorRoot 'H3-TAILSCALE-UNATTENDED-HOOK-LATEST.txt'
 $hermesHookMirror=Join-Path $mirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-AUTH-HOOK-LATEST.txt'
+$hermesPrimaryHookMirror=Join-Path $mirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-PRIMARY-HOOK-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Write-Result($obj,[string]$path){
@@ -25,6 +26,9 @@ function Write-H3HookResult($obj){
 }
 function Write-HermesHookResult($obj){
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $hermesHookMirror -Encoding UTF8}}catch{}
+}
+function Write-HermesPrimaryHookResult($obj){
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $hermesPrimaryHookMirror -Encoding UTF8}}catch{}
 }
 function Invoke-Phase1FamilyPttPrep {
   $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-Apk-Prepare.ps1'
@@ -87,27 +91,93 @@ function Invoke-HPEnvyHermesOpenAICodexAuth {
     Write-HermesHookResult ([ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;error=$_.Exception.Message;detail=($_ | Out-String).Trim();time=(Get-Date -Format o)})
   }
 }
+function Invoke-HPEnvyHermesOpenAICodexPrimary {
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexPrimary.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-hermes-openai-codex-primary.json'
+  $helperExists=Test-Path -LiteralPath $helper -PathType Leaf
+  $requestExists=Test-Path -LiteralPath $request -PathType Leaf
+  if(-not $helperExists -or -not $requestExists){
+    $hook=[ordered]@{schema=1;status='not-invoked';exitCode=$null;helperExists=$helperExists;requestExists=$requestExists;classification='HP_HERMES_CODEX_PRIMARY_INPUT_MISSING';time=(Get-Date -Format o)}
+    Write-HermesPrimaryHookResult $hook
+    return $hook
+  }
+  try{
+    $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request 2>&1 | Out-String).Trim()
+    $code=$LASTEXITCODE
+    $ErrorActionPreference=$oldEap
+    $parsed=$null
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$parsed=$raw|ConvertFrom-Json}catch{}}
+    $hook=[ordered]@{
+      schema=1
+      status=$(if($code -eq 0){'completed'}else{'failed'})
+      exitCode=$code
+      helperExists=$true
+      requestExists=$true
+      classification=$(if($parsed){[string]$parsed.classification}else{'HP_HERMES_CODEX_PRIMARY_INVALID_RESULT'})
+      authVerified=$(if($parsed){[bool]$parsed.authVerified}else{$false})
+      providerSwitched=$(if($parsed){[bool]$parsed.providerSwitched}else{$false})
+      configuredProvider=$(if($parsed){[string]$parsed.configuredProvider}else{$null})
+      configuredModel=$(if($parsed){[string]$parsed.configuredModel}else{$null})
+      contextLength=$(if($parsed){[string]$parsed.contextLength}else{$null})
+      baseUrlPresent=$(if($parsed){[bool]$parsed.baseUrlPresent}else{$false})
+      generationStarted=$false
+      gatewayStarted=$false
+      secretValuesEmitted=$false
+      time=(Get-Date -Format o)
+    }
+    Write-HermesPrimaryHookResult $hook
+    return $hook
+  }catch{
+    $hook=[ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;classification='HP_HERMES_CODEX_PRIMARY_HOOK_EXCEPTION';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;error=$_.Exception.Message;time=(Get-Date -Format o)}
+    Write-HermesPrimaryHookResult $hook
+    return $hook
+  }
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
 $req=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $id=([string]$req.id).Trim()
 $requestedTask=([string]$req.taskName).Trim()
+$phase=''
+try{$phase=([string]$req.phase).Trim().ToLowerInvariant()}catch{}
 if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid request id'}
 if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 
-# User-requested OAuth regeneration gets first priority. This hook is fixed-target and
-# cannot switch providers, start generation/gateway, or alter network configuration.
-Invoke-HPEnvyHermesOpenAICodexAuth
+$statePath=Join-Path $stateRoot ($id+'.json')
 
-# Remaining independent startup hooks run only after the OAuth device flow has been launched.
+# Isolated post-login phase: verify the existing OAuth credential and configure only
+# HP Envy Hermes primary routing. Do not regenerate a device code, start AFZ Remote
+# Ops, or invoke any unrelated H3/Tailscale/Surfshark/FamilyPTT startup hook.
+if($phase -eq 'hpenvy-hermes-codex-primary-only'){
+  $hook=Invoke-HPEnvyHermesOpenAICodexPrimary
+  $ok=([string]$hook.classification -eq 'HP_HERMES_CODEX_PRIMARY_CONFIGURED' -and [bool]$hook.authVerified -and [bool]$hook.providerSwitched -and [string]$hook.configuredProvider -eq 'openai-codex' -and [string]$hook.configuredModel -eq 'gpt-5.6-luna' -and -not [bool]$hook.baseUrlPresent)
+  $r=[ordered]@{
+    schema=1
+    requestId=$id
+    taskName=$taskName
+    phase=$phase
+    classification=$(if($ok){'REMOTEOPS_CODEX_PRIMARY_COMPLETED'}else{'REMOTEOPS_CODEX_PRIMARY_FAILED'})
+    codex=$hook
+    unrelatedHooksInvoked=$false
+    remoteOpsTaskStarted=$false
+    time=(Get-Date -Format o)
+  }
+  Write-Result $r $statePath
+  Write-Output ($r | ConvertTo-Json -Depth 12 -Compress)
+  if($ok){exit 0}else{exit 22}
+}
+
+# Legacy/default startup phase. The OAuth hook remains available for explicit future
+# device-code regeneration requests; unrelated hooks retain their previous behavior.
+Invoke-HPEnvyHermesOpenAICodexAuth
 Invoke-H3SshKeyAclRepair
 Invoke-H3TailscaleUnattended
 Invoke-HPEnvySurfsharkExitNode
 Invoke-Phase1FamilyPttPrep
 Invoke-FamilyPttOnePlusInstall
 
-$statePath=Join-Path $stateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
   try{
     $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
