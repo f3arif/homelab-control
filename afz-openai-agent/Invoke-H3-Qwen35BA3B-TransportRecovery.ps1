@@ -35,7 +35,15 @@ $repairLauncher=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen35BA3B-Re
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $repairMarkerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-repair01-trigger'
 $repairMarker=Join-Path $repairMarkerRoot ($repairJobId+'-activation-v1.json')
+$repairLauncherState='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-repair01\latest.json'
+$repairMirroredH3State='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\h3\'+$repairJobId+'-state.json'
+$repairMirroredH3Result='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\h3\'+$repairJobId+'-result.json'
 $utf8=New-Object Text.UTF8Encoding($false)
+
+function Read-ObsJson([string]$Path){
+  if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+  try{return Get-Content -LiteralPath $Path -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message;path=$Path}}
+}
 
 if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){
   [ordered]@{ok=$false;status='failed';classification='QWEN35B_R1_POSTRETURN_ONLY_WRONG_HOST';jobId=$jobId;modelCallIssued=$false;host=$env:COMPUTERNAME}|ConvertTo-Json -Depth 10 -Compress
@@ -70,12 +78,8 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
     $inspectCode=$LASTEXITCODE
     if($inspectRaw -is [string]){try{$inspectParsed=$inspectRaw|ConvertFrom-Json}catch{$inspectParsed=[ordered]@{raw=[string]$inspectRaw}}}else{$inspectParsed=$inspectRaw}
     $inspection=[ordered]@{ok=($inspectCode -eq 0);status=$(if($inspectCode -eq 0){'completed'}else{'failed'});exit=$inspectCode;result=$inspectParsed}
-  }catch{
-    $inspection=[ordered]@{ok=$false;status='exception';error=$_.Exception.Message}
-  }
-}else{
-  $inspection=[ordered]@{ok=$false;status='inspector-missing';path=$inspector}
-}
+  }catch{$inspection=[ordered]@{ok=$false;status='exception';error=$_.Exception.Message}}
+}else{$inspection=[ordered]@{ok=$false;status='inspector-missing';path=$inspector}}
 
 # Repair01 is a separate bounded model iteration. It may activate only when:
 # 1) the original post-return proof succeeded,
@@ -85,62 +89,41 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
 # second repair model call after repair_model_call_attempted becomes true.
 $repairActivation=[ordered]@{ok=$true;status='not-requested';jobId=$repairJobId;repairModelCallIssuedHere=$false}
 if(Test-Path -LiteralPath $repairTrigger -PathType Leaf){
-  if($code -ne 0){
-    $repairActivation=[ordered]@{ok=$false;status='blocked-original-postreturn-not-proven';jobId=$repairJobId;repairModelCallIssuedHere=$false;postReturnExit=$code}
-  }else{
+  if($code -ne 0){$repairActivation=[ordered]@{ok=$false;status='blocked-original-postreturn-not-proven';jobId=$repairJobId;repairModelCallIssuedHere=$false;postReturnExit=$code}}
+  else{
     try{
       $trigger=Get-Content -LiteralPath $repairTrigger -Raw -Encoding UTF8|ConvertFrom-Json -ErrorAction Stop
       if([int]$trigger.schema -ne 1 -or [string]$trigger.action -ne 'start-qwen35b-repair01' -or [string]$trigger.job_id -ne $repairJobId -or [string]$trigger.original_job_id -ne $jobId -or [string]$trigger.model -ne 'qwen3.6:35b-a3b' -or [int]$trigger.context -ne 16384 -or -not [bool]$trigger.no_think -or [int]$trigger.max_repair_model_calls -ne 1){throw 'Repair01 trigger contract invalid.'}
       if(-not(Test-Path -LiteralPath $repairLauncher -PathType Leaf)){throw "Repair01 launcher missing: $repairLauncher"}
       if(-not(Test-Path -LiteralPath $sourceState -PathType Leaf)){throw "Source state missing: $sourceState"}
-      $ss=Get-Content -LiteralPath $sourceState -Raw -Encoding UTF8|ConvertFrom-Json -ErrorAction Stop
-      $syncedSha=([string]$ss.remoteSha).Trim().ToLowerInvariant()
-      if($syncedSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid synced SHA for Repair01: $syncedSha"}
-      $launcherText=[IO.File]::ReadAllText($repairLauncher)
-      foreach($needle in @($repairJobId,'afz_h3_worker_system','S-1-5-18','QWEN35B_REPAIR_ALREADY_STARTED')){if(-not $launcherText.Contains($needle)){throw "Repair01 launcher contract missing: $needle"}}
-      if($launcherText -match '127\.0\.0\.1:11434/api/generate'){throw 'Repair01 Windows launcher must not contain a model endpoint.'}
-
+      $ss=Get-Content -LiteralPath $sourceState -Raw -Encoding UTF8|ConvertFrom-Json -ErrorAction Stop;$syncedSha=([string]$ss.remoteSha).Trim().ToLowerInvariant();if($syncedSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid synced SHA for Repair01: $syncedSha"}
+      $launcherText=[IO.File]::ReadAllText($repairLauncher);foreach($needle in @($repairJobId,'afz_h3_worker_system','S-1-5-18','QWEN35B_REPAIR_ALREADY_STARTED')){if(-not $launcherText.Contains($needle)){throw "Repair01 launcher contract missing: $needle"}};if($launcherText -match '127\.0\.0\.1:11434/api/generate'){throw 'Repair01 Windows launcher must not contain a model endpoint.'}
       New-Item -ItemType Directory -Force -Path $repairMarkerRoot|Out-Null
-      if(Test-Path -LiteralPath $repairMarker -PathType Leaf){
-        try{$repairActivation=Get-Content -LiteralPath $repairMarker -Raw -Encoding UTF8|ConvertFrom-Json}catch{$repairActivation=[ordered]@{ok=$true;status='already-activated';jobId=$repairJobId;marker=$repairMarker;repairModelCallIssuedHere=$false}}
-      }else{
-        $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$repairLauncher`" -ExpectedSha `"$syncedSha`""
-        $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+      if(Test-Path -LiteralPath $repairMarker -PathType Leaf){try{$repairActivation=Get-Content -LiteralPath $repairMarker -Raw -Encoding UTF8|ConvertFrom-Json}catch{$repairActivation=[ordered]@{ok=$true;status='already-activated';jobId=$repairJobId;marker=$repairMarker;repairModelCallIssuedHere=$false}}}
+      else{
+        $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$repairLauncher`" -ExpectedSha `"$syncedSha`"";$p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
         $repairActivation=[ordered]@{ok=$true;status='repair-bootstrap-started';jobId=$repairJobId;originalJobId=$jobId;model='qwen3.6:35b-a3b';context=16384;noThink=$true;maxRepairModelCalls=1;expectedSha=$syncedSha;bootstrapPid=$p.Id;marker=$repairMarker;repairModelCallIssuedHere=$false;activatedAt=(Get-Date -Format o)}
         [IO.File]::WriteAllText($repairMarker,($repairActivation|ConvertTo-Json -Depth 15 -Compress),$utf8)
       }
-    }catch{
-      $repairActivation=[ordered]@{ok=$false;status='repair-activation-exception';jobId=$repairJobId;repairModelCallIssuedHere=$false;error=$_.Exception.Message}
-    }
+    }catch{$repairActivation=[ordered]@{ok=$false;status='repair-activation-exception';jobId=$repairJobId;repairModelCallIssuedHere=$false;error=$_.Exception.Message}}
   }
 }
 
-# Post-return recovery status remains separate from source-sync success. An
-# inspection failure must not permit any original transport/model replay.
+# Read-only Repair01 telemetry. These files are observations only and are never
+# used to start/retry the repair model call.
+$repairObservability=[ordered]@{
+  launcherState=Read-ObsJson $repairLauncherState
+  mirroredH3State=Read-ObsJson $repairMirroredH3State
+  mirroredH3Result=Read-ObsJson $repairMirroredH3Result
+  observedAt=(Get-Date -Format o)
+}
+
 $final=[ordered]@{
-  ok=($code -eq 0 -and [bool]$repairActivation.ok)
-  status=$(if($code -eq 0 -and [bool]$repairActivation.ok){'completed'}else{'failed'})
-  classification='QWEN35B_R1_TRANSPORT_FROZEN_POSTRETURN_ONLY'
-  jobId=$jobId
-  modelCallIssued=$false
-  postReturnExit=$code
-  postReturn=$parsed
-  postReturnInspection=$inspection
-  repair01=$repairActivation
-  time=(Get-Date -Format o)
+  ok=($code -eq 0 -and [bool]$repairActivation.ok);status=$(if($code -eq 0 -and [bool]$repairActivation.ok){'completed'}else{'failed'});classification='QWEN35B_R1_TRANSPORT_FROZEN_POSTRETURN_ONLY';jobId=$jobId;modelCallIssued=$false
+  postReturnExit=$code;postReturn=$parsed;postReturnInspection=$inspection;repair01=$repairActivation;repair01Observability=$repairObservability;time=(Get-Date -Format o)
 }
 $json=$final|ConvertTo-Json -Depth 50 -Compress
-
-# Emergency observability only. This mirror is never read as execution
-# authority and failure to publish must never affect the frozen post-return path.
-try{
-  $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
-  if(Test-Path -LiteralPath $diagRoot -PathType Container){
-    $diagPath=Join-Path $diagRoot 'AFZ-QWEN35B-TRANSPORT-RECOVERY-LATEST.txt'
-    [IO.File]::WriteAllText($diagPath,$json,$utf8)
-  }
-}catch{}
-
+try{$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius';if(Test-Path -LiteralPath $diagRoot -PathType Container){$diagPath=Join-Path $diagRoot 'AFZ-QWEN35B-TRANSPORT-RECOVERY-LATEST.txt';[IO.File]::WriteAllText($diagPath,$json,$utf8)}}catch{}
 Write-Output $json
 if($code -ne 0 -or -not [bool]$repairActivation.ok){exit 20}
 exit 0
