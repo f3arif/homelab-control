@@ -1,7 +1,8 @@
 AFZ direct agent source recovery
-reason=qwen35b-r1-postreturn-saved-response-only
-request_commit=7b7be97e91407aa4de7bd2f7a376e7d323ccc722
+reason=hpenvy-hermes-openai-codex-device-auth-r2
 target=windows-main
 authority=github-exact-sha
-model_call_policy=postreturn-only-no-new-ollama-call
-requested_at=2026-08-31T16:18:25-04:00
+operation=source-sync-only
+provider_switch=false
+model_generation=false
+requested_at=2026-08-31T22:06:30-04:00
