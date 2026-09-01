@@ -12,6 +12,7 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\remoteops-start'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-REMOTEOPS-START-LATEST.json'
 $h3HookMirror=Join-Path $mirrorRoot 'H3-TAILSCALE-UNATTENDED-HOOK-LATEST.txt'
+$hermesHookMirror=Join-Path $mirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-AUTH-HOOK-LATEST.txt'
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 function Write-Result($obj,[string]$path){
@@ -22,6 +23,9 @@ function Write-Result($obj,[string]$path){
 }
 function Write-H3HookResult($obj){
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $h3HookMirror -Encoding UTF8}}catch{}
+}
+function Write-HermesHookResult($obj){
+  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){($obj | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $hermesHookMirror -Encoding UTF8}}catch{}
 }
 function Invoke-Phase1FamilyPttPrep {
   $helper=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Phase1-Apk-Prepare.ps1'
@@ -78,8 +82,21 @@ function Invoke-HPEnvyHermesOpenAICodexAuth {
   # switch provider/model, start a gateway, run generation, or execute arbitrary shell.
   $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexAuth.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-hermes-openai-codex-auth.json'
-  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
-  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+  $helperExists=Test-Path -LiteralPath $helper -PathType Leaf
+  $requestExists=Test-Path -LiteralPath $request -PathType Leaf
+  if(-not $helperExists -or -not $requestExists){
+    Write-HermesHookResult ([ordered]@{schema=1;status='not-invoked';helperExists=$helperExists;requestExists=$requestExists;helper=$helper;request=$request;time=(Get-Date -Format o)})
+    return
+  }
+  try{
+    $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request 2>&1 | Out-String).Trim()
+    $code=$LASTEXITCODE
+    $ErrorActionPreference=$oldEap
+    Write-HermesHookResult ([ordered]@{schema=1;status=$(if($code -eq 0){'completed'}else{'failed'});exitCode=$code;helperExists=$true;requestExists=$true;output=$raw;time=(Get-Date -Format o)})
+  }catch{
+    Write-HermesHookResult ([ordered]@{schema=1;status='exception';exitCode=$LASTEXITCODE;helperExists=$true;requestExists=$true;error=$_.Exception.Message;detail=($_ | Out-String).Trim();time=(Get-Date -Format o)})
+  }
 }
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
