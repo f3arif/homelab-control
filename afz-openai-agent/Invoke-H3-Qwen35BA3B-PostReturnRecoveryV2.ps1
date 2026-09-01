@@ -5,12 +5,19 @@ param([string]$InstallRoot='C:\AFZ\homelab-control')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
+# This is a post-return-only recovery for qwen35b-a3b-website-20260830-r1.
+# The single Ollama call has already completed. This script must never invoke
+# Ollama, curl, or the generate endpoint; it may only consume the saved response.
 $jobId='qwen35b-a3b-website-20260830-r1'
 $expectedHost='DESKTOP-H3R6CQN'
 $recoverySha='5817bd2d55275526f3d90b72f93e3c76ea713e40'
-$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
+$sourceKey='C:\Users\Faiz\.ssh\afz_h3_worker'
+$keyRoot='C:\ProgramData\AFZ\OpenAIAgent\keys'
+$key=Join-Path $keyRoot 'afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+$keygen=Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe'
+$expectedFingerprint='SHA256:xUZpwFvzX4H4qhRFHYNrHsITVC6XZXJ8vYe6yoN7R7I'
 $target='Faiz@100.106.186.118'
 $h3Ip='100.106.186.118'
 $h3Mac='4C-ED-FB-3F-B0-9E'
@@ -20,8 +27,96 @@ $statePath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-QWEN35B-POSTRETURN-V2-LATEST.json'
 $utf8=New-Object Text.UTF8Encoding($false)
-New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
+$systemSidText='S-1-5-18'
+$systemSid=New-Object System.Security.Principal.SecurityIdentifier($systemSidText)
 
+function Set-SystemOnlyFileAcl([string]$Path){
+  $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  $takeOut=(& takeown.exe /F $Path /A 2>&1|Out-String).Trim();$takeExit=$LASTEXITCODE
+  $ErrorActionPreference=$oldEap
+  if($takeExit -ne 0){throw "SYSTEM key takeown failed exit=$takeExit output=$takeOut"}
+  $security=New-Object System.Security.AccessControl.FileSecurity
+  $security.SetOwner($systemSid)
+  $security.SetAccessRuleProtection($true,$false)
+  $rule=New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $systemSid,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.InheritanceFlags]::None,
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow
+  )
+  [void]$security.AddAccessRule($rule)
+  Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+  $acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
+  $ownerSid=$null
+  try{$ownerSid=([System.Security.Principal.NTAccount]$acl.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$ownerSid=[string]$acl.Owner}
+  if($ownerSid -ne $systemSidText){throw "Unexpected SYSTEM key owner after repair: $ownerSid"}
+  if(-not $acl.AreAccessRulesProtected){throw 'SYSTEM key ACL inheritance remains enabled.'}
+  $rules=@($acl.Access)
+  if($rules.Count -ne 1){throw "SYSTEM key ACL has unexpected rule count: $($rules.Count)"}
+  foreach($r in $rules){
+    try{$sid=$r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$sid=[string]$r.IdentityReference}
+    if($sid -ne $systemSidText -or $r.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow){throw "Unexpected SYSTEM key ACL principal/type: $sid $($r.AccessControlType)"}
+  }
+}
+function Set-SystemOnlyDirectoryAcl([string]$Path){
+  if(-not(Test-Path -LiteralPath $Path -PathType Container)){New-Item -ItemType Directory -Force -Path $Path|Out-Null}
+  $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  $takeOut=(& takeown.exe /F $Path /A /R /D Y 2>&1|Out-String).Trim();$takeExit=$LASTEXITCODE
+  $ErrorActionPreference=$oldEap
+  if($takeExit -ne 0){throw "SYSTEM state-root takeown failed exit=$takeExit output=$takeOut"}
+  $security=New-Object System.Security.AccessControl.DirectorySecurity
+  $security.SetOwner($systemSid)
+  $security.SetAccessRuleProtection($true,$false)
+  $rule=New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $systemSid,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit),
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow
+  )
+  [void]$security.AddAccessRule($rule)
+  Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+  foreach($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)){
+    try{
+      if($child.PSIsContainer){Set-Acl -LiteralPath $child.FullName -AclObject $security -ErrorAction Stop}
+      else{
+        $fileAcl=New-Object System.Security.AccessControl.FileSecurity
+        $fileAcl.SetOwner($systemSid);$fileAcl.SetAccessRuleProtection($true,$false)
+        $fileRule=New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.InheritanceFlags]::None,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow)
+        [void]$fileAcl.AddAccessRule($fileRule)
+        Set-Acl -LiteralPath $child.FullName -AclObject $fileAcl -ErrorAction Stop
+      }
+    }catch{throw "Could not normalize SYSTEM state child ACL: $($child.FullName): $($_.Exception.Message)"}
+  }
+}
+function Ensure-SystemControlPaths {
+  if(-not(Test-Path -LiteralPath $sourceKey -PathType Leaf)){throw "H3 source SSH key missing: $sourceKey"}
+  if(-not(Test-Path -LiteralPath $known -PathType Leaf)){throw "H3 known-hosts file missing: $known"}
+  if(-not(Test-Path -LiteralPath $ssh -PathType Leaf)){throw "ssh.exe missing: $ssh"}
+  if(-not(Test-Path -LiteralPath $keygen -PathType Leaf)){throw "ssh-keygen.exe missing: $keygen"}
+
+  New-Item -ItemType Directory -Force -Path $keyRoot|Out-Null
+  # Re-create only the dedicated local SYSTEM copy. The user's source key is never modified.
+  Copy-Item -LiteralPath $sourceKey -Destination $key -Force
+  Set-SystemOnlyFileAcl $key
+
+  # Verify the copied key is still the pinned H3 automation identity. No private-key bytes are logged.
+  $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  $derived=(& $keygen -y -f $key 2>&1|Select-Object -First 1);$deriveExit=$LASTEXITCODE
+  $ErrorActionPreference=$oldEap
+  if($deriveExit -ne 0 -or [string]::IsNullOrWhiteSpace([string]$derived)){throw 'Could not derive public key from SYSTEM H3 key copy.'}
+  $tmpPub=Join-Path $env:TEMP ('afz-qwen35b-system-key-'+[guid]::NewGuid().ToString('n')+'.pub')
+  try{
+    ([string]$derived).Trim()|Set-Content -LiteralPath $tmpPub -Encoding ascii
+    $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+    $fingerprint=((& $keygen -lf $tmpPub 2>&1)-join ' ').Trim();$fpExit=$LASTEXITCODE
+    $ErrorActionPreference=$oldEap
+  }finally{Remove-Item -LiteralPath $tmpPub -Force -ErrorAction SilentlyContinue}
+  if($fpExit -ne 0 -or $fingerprint -notmatch [regex]::Escape($expectedFingerprint)){throw "Pinned H3 key fingerprint mismatch: $fingerprint"}
+
+  Set-SystemOnlyDirectoryAcl $stateRoot
+}
 function Save-State($o){
   $json=$o|ConvertTo-Json -Depth 40 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
@@ -56,8 +151,9 @@ function Invoke-H3([string]$RemoteScript){
 try{
   if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "windows-main-only recovery; host=$env:COMPUTERNAME"}
   $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-  if([string]$identity.User.Value -ne 'S-1-5-18'){throw "Qwen35B post-return V2 must run as SYSTEM; identity=$([string]$identity.Name)"}
-  foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required path missing: $p"}}
+  if([string]$identity.User.Value -ne $systemSidText){throw "Qwen35B post-return V2 must run as SYSTEM; identity=$([string]$identity.Name)"}
+
+  Ensure-SystemControlPaths
 
   if(-not(Test-Tcp $h3Ip 22 1200)){Send-H3Wake}
   $online=$false
@@ -119,9 +215,10 @@ if([string]`$current.State -ne 'Running'){Start-ScheduledTask -TaskName `$taskNa
   $proof=([string]$jsonLine).Trim()|ConvertFrom-Json -ErrorAction Stop
   if(-not [bool]$proof.ok){throw ('H3 post-return V2 returned ok=false: '+[string]$proof.classification)}
   $status=$(if([string]$proof.classification -eq 'QWEN35B_ALREADY_COMPLETED'){'completed'}else{'started'})
-  Save-State ([ordered]@{schema=1;ok=$true;status=$status;classification=[string]$proof.classification;jobId=$jobId;modelCallIssuedByRecovery=$false;recoverySha=$recoverySha;h3Proof=$proof;time=(Get-Date -Format o)})
+  Save-State ([ordered]@{schema=1;ok=$true;status=$status;classification=[string]$proof.classification;jobId=$jobId;modelCallIssuedByRecovery=$false;recoverySha=$recoverySha;systemControlSelfHeal=$true;h3Proof=$proof;time=(Get-Date -Format o)})
   exit 0
 }catch{
-  Save-State ([ordered]@{schema=1;ok=$false;status='failed';classification='QWEN35B_POSTRETURN_V2_FAILED';jobId=$jobId;modelCallIssuedByRecovery=$false;recoverySha=$recoverySha;error=$_.Exception.Message;time=(Get-Date -Format o)})
+  $fallback=[ordered]@{schema=1;ok=$false;status='failed';classification='QWEN35B_POSTRETURN_V2_FAILED';jobId=$jobId;modelCallIssuedByRecovery=$false;recoverySha=$recoverySha;systemControlSelfHeal=$true;error=$_.Exception.Message;time=(Get-Date -Format o)}
+  try{Save-State $fallback}catch{Write-Output ($fallback|ConvertTo-Json -Depth 40 -Compress)}
   exit 20
 }
