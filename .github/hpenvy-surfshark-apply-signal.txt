@@ -1,1 +1,1 @@
-hermes-oauth-r5-fixed-parser force-source-sync requested=2026-08-31T23:42:00-04:00 provider_switch=false generation=false
+hermes-oauth-r6-ssh-classifier force-source-sync requested=2026-09-01T09:59:00-04:00 provider_switch=false generation=false
