@@ -1,4 +1,4 @@
 schema=1
-purpose=h3-generic-worker-recovery-readonly-health
+purpose=radiohilal-edge-promo-resume-readonly-health
 mutation=none
-requested_at=2026-08-31T10:58:00-04:00
+requested_at=2026-08-31T23:26:00-04:00
