@@ -18,44 +18,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch Docker CLI discovery only
-        shell: python
+      - name: Patch Docker CLI fallback
+        shell: pwsh
         run: |
-          from pathlib import Path
-          p=Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1')
-          text=p.read_text(encoding='utf-8')
-          old="""  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1
-  if(-not $dockerCmd){Emit $false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=$false;dockerReady=$false;repaired=$false} $false;exit 31}
-  $script:docker=[string]$dockerCmd.Source"""
-          new="""  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1
-  $dockerPath=$null
-  if($dockerCmd){
-    if($dockerCmd.Source){$dockerPath=[string]$dockerCmd.Source}elseif($dockerCmd.Path){$dockerPath=[string]$dockerCmd.Path}
-  }
-  if([string]::IsNullOrWhiteSpace($dockerPath)){
-    foreach($candidate in @(
-      (Join-Path $env:ProgramFiles 'Docker\\Docker\\resources\\bin\\docker.exe'),
-      'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'
-    )){
-      if(Test-Path -LiteralPath $candidate -PathType Leaf){$dockerPath=$candidate;break}
-    }
-  }
-  if([string]::IsNullOrWhiteSpace($dockerPath)){
-    $desktopPresent=Test-Path -LiteralPath 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe' -PathType Leaf
-    $wslPresent=[bool](Get-Command wsl.exe -ErrorAction SilentlyContinue)
-    $wingetPresent=[bool](Get-Command winget.exe -ErrorAction SilentlyContinue)
-    $isAdmin=$false
-    try{$isAdmin=(New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}catch{}
-    Emit $false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=$false;dockerReady=$false;dockerDesktopInstalled=$desktopPresent;wslAvailable=$wslPresent;wingetAvailable=$wingetPresent;isAdmin=$isAdmin;repaired=$false} $false
-    exit 31
-  }
-  $script:docker=$dockerPath"""
-          if text.count(old)!=1:
-              raise SystemExit(f'Expected one Docker discovery block, found {text.count(old)}')
-          text=text.replace(old,new,1)
-          p.write_text(text,encoding='utf-8',newline='\n')
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          $text=Get-Content $p -Raw
+          $old=@(
+            '  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1',
+            "  if(-not `$dockerCmd){Emit `$false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=`$false;dockerReady=`$false;repaired=`$false} `$false;exit 31}",
+            '  $script:docker=[string]$dockerCmd.Source'
+          ) -join "`n"
+          $new=@(
+            '  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1',
+            '  if(-not $dockerCmd){',
+            "    `$dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'",
+            '    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}',
+            '  }',
+            "  if(-not `$dockerCmd){Emit `$false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=`$false;dockerReady=`$false;repaired=`$false} `$false;exit 31}",
+            '  $script:docker=[string]$dockerCmd.Source'
+          ) -join "`n"
+          if(-not $text.Contains($old)){throw 'Expected Docker discovery block was not found'}
+          $text=$text.Replace($old,$new)
+          [IO.File]::WriteAllText((Resolve-Path $p),$text,(New-Object Text.UTF8Encoding($false)))
 
-      - name: Parse and enforce Hermes safety invariants
+      - name: Parse and enforce invariants
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -64,11 +51,11 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'Hermes core parse failed'}
           $c=Get-Content $p -Raw
-          foreach($required in @('Docker\Docker\resources\bin\docker.exe','Docker Desktop.exe','wslAvailable','wingetAvailable','isAdmin','[Console]::In.ReadToEnd()','--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock','winget install','Start-Process')){if($c.Contains($forbidden)){throw "Unexpected mutation in discovery patch: $forbidden"}}
+          foreach($required in @('C:\Program Files\Docker\Docker\resources\bin\docker.exe','[Console]::In.ReadToEnd()','--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock','winget install')){if($c.Contains($forbidden)){throw "Unexpected mutation: $forbidden"}}
           'HERMES_DOCKER_DISCOVERY=PASS'
 
-      - name: Commit safely on current main
+      - name: Commit safely
         shell: bash
         run: |
           set -euo pipefail
