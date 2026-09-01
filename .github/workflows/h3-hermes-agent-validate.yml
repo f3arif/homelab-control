@@ -1,18 +1,16 @@
-name: H3 Hermes Agent Validate
+name: H3 Hermes Docker Desktop Validate
 
 on:
   pull_request:
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
-      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
       - '.github/workflows/h3-hermes-agent-validate.yml'
   push:
     branches: [main]
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
-      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
 
 permissions:
   contents: read
@@ -27,46 +25,46 @@ jobs:
       - name: Parse PowerShell
         shell: powershell
         run: |
-          $files=@(
-            'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1',
-            'afz-openai-agent\Push-Deploy-Watcher.ps1'
-          )
-          foreach($file in $files){
-            $tokens=$null;$errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
-            if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
-          }
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
 
-      - name: Validate audit-only request and safety invariants
+      - name: Validate guarded Docker Desktop deployment
         shell: powershell
         run: |
           $r=Get-Content 'afz-openai-agent\requests\h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
           if([int]$r.schema -ne 1){throw 'schema'}
-          if([string]$r.action -ne 'install-and-configure'){throw 'existing watcher binding requires install-and-configure action'}
-          if([string]$r.status -ne 'AUDIT_ONLY'){throw 'status'}
-          if([string]$r.recovery_mode -ne 'post-timeout-audit-only'){throw 'recovery mode'}
+          if([string]$r.action -ne 'install-and-configure' -or [string]$r.status -ne 'ACTIVE'){throw 'active action'}
+          if([string]$r.deployment -ne 'docker-desktop'){throw 'deployment'}
           if([string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){throw 'target'}
-          if([string]$r.provider -ne 'custom'){throw 'provider'}
-          if([string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'base_url'}
-          if([string]$r.base_model -ne 'qwen3.6:35b-a3b'){throw 'base model'}
-          if([string]$r.hermes_model -ne 'qwen3.6:35b-a3b-hermes64k'){throw 'alias'}
+          if([string]$r.image -ne 'nousresearch/hermes-agent:latest' -or [string]$r.container_name -ne 'hermes-h3'){throw 'image/container'}
+          if([string]$r.dashboard_host_ip -ne '100.106.186.118' -or [int]$r.dashboard_port -ne 9119){throw 'tailscale dashboard bind'}
+          if([string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'host ollama loopback'}
+          if([string]$r.container_base_url -ne 'http://host.docker.internal:11434/v1'){throw 'docker host bridge'}
           if([int]$r.context_length -ne 65536){throw 'context'}
-          if([bool]$r.start_gateway -or [bool]$r.run_generation_test){throw 'gateway/generation must remain disabled'}
+          if([string]$r.memory_limit -ne '4g' -or [int]$r.cpu_limit -ne 2 -or [string]$r.shm_size -ne '1g'){throw 'resource limits'}
+          if([bool]$r.expose_api -or [bool]$r.run_generation_test -or [bool]$r.mutate_ollama){throw 'unsafe flags'}
 
           $s=Get-Content 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1' -Raw
           foreach($required in @(
-            'post-timeout-audit-only',
-            'StrictHostKeyChecking=yes',
-            'http://127.0.0.1:11434/api/tags',
-            'show --modelfile',
+            'nousresearch/hermes-agent:latest',
+            'http://host.docker.internal:11434/v1',
+            'HERMES_DASHBOARD_BASIC_AUTH_USERNAME=afz',
+            'HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=',
+            'HERMES_DASHBOARD_BASIC_AUTH_SECRET=',
+            '--memory=4g',
+            '--cpus=2',
+            '--shm-size=1g',
+            '100.106.186.118',
+            '9119:9119',
+            'http://127.0.0.1:9119/api/status',
             'generationTestStarted=$false',
-            'gatewayStarted=$false',
-            'HERMES_READY_LOCAL_OLLAMA_64K',
-            'HERMES_INSTALLED_CONFIG_INCOMPLETE',
-            'HERMES_LAUNCHER_MISSING_AFTER_TIMEOUT',
+            'ollamaMutationStarted=$false',
+            'apiPublished=$false',
+            'StrictHostKeyChecking=yes',
             "'-File','-'",
-            '-RedirectStandardInput $inFile'
-          )){
-            if(-not $s.Contains($required)){throw "Missing audit-only invariant: $required"}
+            'HERMES_READY_LOCAL_OLLAMA_64K'
+          )){if(-not $s.Contains($required)){throw "Missing guarded Docker invariant: $required"}}
+          foreach($forbidden in @('HERMES_DASHBOARD_INSECURE','/var/run/docker.sock','8642:8642','API_SERVER_ENABLED=true')){
+            if($s.Contains($forbidden)){throw "Forbidden Docker exposure: $forbidden"}
           }
-          if($s.Contains("'-Command','-'")){throw 'Windows OpenSSH PowerShell -Command - stdin transport is forbidden for this audit'}
