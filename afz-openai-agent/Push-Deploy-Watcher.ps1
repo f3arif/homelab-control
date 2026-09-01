@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# HOTRELOAD_CANARY=20260901T0158Z hermes-r4-runtime-refresh
+# HOTRELOAD_CANARY=20260901T0332Z hermes-r5-bounded-preflight-refresh
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
