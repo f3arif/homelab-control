@@ -1,4 +1,5 @@
 name: HP Envy Hermes Codex Finalize
+# retrigger: 2026-09-01 guarded finalize; no generation
 
 on:
   push:
