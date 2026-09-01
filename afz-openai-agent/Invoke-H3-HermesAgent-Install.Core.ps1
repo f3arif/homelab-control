@@ -290,7 +290,9 @@ tool_loop_guardrails:
 $inFile=Join-Path $env:TEMP ('afz-h3-hermes-docker-'+[guid]::NewGuid().ToString('n')+'.ps1')
 $outFile=Join-Path $env:TEMP ('afz-h3-hermes-docker-'+[guid]::NewGuid().ToString('n')+'.out')
 $errFile=Join-Path $env:TEMP ('afz-h3-hermes-docker-'+[guid]::NewGuid().ToString('n')+'.err')
-$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','-')
+$bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Hermes remote stdin was empty.''};Invoke-Expression $script'
+$bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
+$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded)
 try{
   [IO.File]::WriteAllText($inFile,$remote,$utf8)
   $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
