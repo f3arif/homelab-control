@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "hpenvy-hermes-openai-codex-primary-20260901-r6",
+  "id": "hpenvy-hermes-openai-codex-primary-20260901-r7",
   "taskName": "HP Envy Hermes OpenAI Codex Primary",
   "target": "coolyo@100.71.26.69",
   "action": "verify-and-configure-primary",
