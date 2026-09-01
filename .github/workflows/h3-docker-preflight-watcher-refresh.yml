@@ -1,0 +1,49 @@
+name: H3 Docker Preflight Watcher Refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-docker-preflight-watcher-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Advance watcher canary only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Push-Deploy-Watcher.ps1'
+          $text=Get-Content -LiteralPath $p -Raw
+          $replacement='# HOTRELOAD_CANARY=20260901T0410Z h3-docker-preflight-binding'
+          $updated=[regex]::Replace($text,'(?m)^# HOTRELOAD_CANARY=.*$',$replacement,1)
+          if($updated -eq $text){throw 'Watcher canary did not advance'}
+          [IO.File]::WriteAllText((Resolve-Path $p),$updated,(New-Object Text.UTF8Encoding($false)))
+      - name: Parse and verify bindings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Push-Deploy-Watcher.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ($errors|ForEach-Object Message|Out-String)}
+          $t=Get-Content -LiteralPath $p -Raw
+          foreach($x in @('Handle-H3DockerDesktopPreflight','Invoke-H3-DockerDesktop-Preflight.ps1','h3-docker-desktop-preflight.json','Handle-H3HermesRequest')){if(-not $t.Contains($x)){throw "Binding missing: $x"}}
+          foreach($x in @('winget install','Restart-Computer','shutdown.exe','ollama pull','/api/generate')){if($t.Contains($x)){throw "Forbidden watcher mutation: $x"}}
+      - name: Commit safely
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1
+          git commit -m 'Refresh watcher for H3 Docker preflight'
+          git pull --rebase origin main
+          git push origin HEAD:main
