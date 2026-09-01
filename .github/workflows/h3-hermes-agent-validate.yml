@@ -46,7 +46,7 @@ jobs:
           foreach($p in @($wrapper,$core)){
             $tokens=$null;$errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors | ForEach-Object { Write-Error ("$p: "+$_.Message) }; exit 1}
+            if($errors.Count){$errors | ForEach-Object { Write-Error ("${p}: "+$_.Message) }; exit 1}
           }
           $w=Get-Content $wrapper -Raw
           foreach($required in @('EMERGENCY_DIAGNOSTIC_ACK_ONLY','AFZ-H3-HERMES-DOCKER-LATEST.txt','Invoke-H3-HermesAgent-Install.Core.ps1')){if(-not $w.Contains($required)){throw "Wrapper missing: $required"}}
