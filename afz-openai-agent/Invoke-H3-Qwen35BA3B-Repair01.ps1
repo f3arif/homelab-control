@@ -61,14 +61,19 @@ Invoke-WebRequest -Uri '$runnerUrl' -OutFile `$scriptPath -UseBasicParsing -Head
 `$tokens=`$null;`$errors=`$null;[void][System.Management.Automation.Language.Parser]::ParseFile(`$scriptPath,[ref]`$tokens,[ref]`$errors);if(`$errors.Count -gt 0){throw ('Repair runner parse failure: '+(`$errors.Message -join '; '))}
 `$text=[IO.File]::ReadAllText(`$scriptPath);if(`$text -notmatch [regex]::Escape('$Model') -or `$text -notmatch 'max_repair_model_calls=1'){throw 'Repair runner contract markers missing.'}
 `$arg="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ```"`$scriptPath```" -SourceSha '$ExpectedSha'"
-`$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg;`$principal=New-ScheduledTaskPrincipal -UserId 'Faiz' -LogonType Interactive -RunLevel Highest;`$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+`$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg
+`$userId=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+if([string]::IsNullOrWhiteSpace(`$userId) -or `$userId -notmatch '\\'){throw "Unable to resolve authenticated H3 Windows identity: '`$userId'"}
+`$principal=New-ScheduledTaskPrincipal -UserId `$userId -LogonType Interactive -RunLevel Highest
+`$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 `$existing=Get-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue;if(-not `$existing){Register-ScheduledTask -TaskName `$taskName -Action `$action -Principal `$principal -Settings `$settings -Force|Out-Null}else{Set-ScheduledTask -TaskName `$taskName -Action `$action -Principal `$principal -Settings `$settings|Out-Null}
 `$prior=Read-State;if(`$prior){`$attempted=`$false;if(`$prior.PSObject.Properties.Name -contains 'repair_model_call_attempted'){`$attempted=[bool]`$prior.repair_model_call_attempted};if(`$attempted){[pscustomobject]@{ok=`$true;classification='QWEN35B_REPAIR_ALREADY_STARTED';jobId=`$jobId;state=`$prior}|ConvertTo-Json -Depth 40 -Compress;exit 0}}
 `$current=Get-ScheduledTask -TaskName `$taskName -ErrorAction Stop;if([string]`$current.State -ne 'Running'){Start-ScheduledTask -TaskName `$taskName}
 `$deadline=(Get-Date).AddSeconds(75);do{Start-Sleep -Seconds 1;`$s=Read-State;if(`$s){`$attempted=`$false;if(`$s.PSObject.Properties.Name -contains 'repair_model_call_attempted'){`$attempted=[bool]`$s.repair_model_call_attempted};if(`$attempted -or [string]`$s.status -in @('blocked','failed','completed')){break}}}while((Get-Date)-lt `$deadline)
-`$s=Read-State;if(-not `$s){throw 'Repair task created but no state appeared within 75 seconds.'}
+`$s=Read-State
+if(-not `$s){`$current=Get-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue;`$info=Get-ScheduledTaskInfo -TaskName `$taskName -ErrorAction SilentlyContinue;throw "Repair task created but no state appeared within 75 seconds. principal=`$userId taskState=$([string]`$current.State) lastResult=$([string]`$info.LastTaskResult)"}
 `$classification='QWEN35B_REPAIR_STATE_READY';if([bool]`$s.repair_model_call_attempted){`$classification='QWEN35B_REPAIR_MODEL_CALL_STARTED'}elseif([string]`$s.status -eq 'blocked'){`$classification='QWEN35B_REPAIR_BLOCKED'}
-[pscustomobject]@{ok=`$true;classification=`$classification;jobId=`$jobId;task=`$taskName;state=`$s}|ConvertTo-Json -Depth 40 -Compress
+[pscustomobject]@{ok=`$true;classification=`$classification;jobId=`$jobId;task=`$taskName;principal=`$userId;state=`$s}|ConvertTo-Json -Depth 40 -Compress
 "@
   $r=Invoke-H3 $remote;if([int]$r.exit -ne 0){throw "H3 repair launcher failed exit=$($r.exit) stdout=$($r.stdout) stderr=$($r.stderr)"}
   $line=@(([string]$r.stdout -split "`r?`n")|Where-Object {$_.Trim() -match '^\{.*\}$'}|Select-Object -Last 1);if(-not $line){throw "H3 repair launcher returned no JSON. stdout=$($r.stdout) stderr=$($r.stderr)"};$proof=([string]$line).Trim()|ConvertFrom-Json -ErrorAction Stop;if(-not [bool]$proof.ok){throw 'H3 repair launcher returned ok=false.'}
