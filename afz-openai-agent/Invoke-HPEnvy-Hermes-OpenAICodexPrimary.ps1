@@ -12,20 +12,12 @@ $ExpectedProvider='openai-codex'
 $ExpectedModel='gpt-5.6-luna'
 $ExpectedAction='verify-and-configure-primary'
 $TaskName='HP Envy Hermes OpenAI Codex Primary'
-$StateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-hermes-openai-codex-primary'
+$SystemStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-hermes-openai-codex-primary'
+$UserStateRoot='C:\Users\Faiz\AppData\Local\AFZ\CodexPrimary'
 $MirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $MirrorPath=Join-Path $MirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-PRIMARY-LATEST.txt'
 $HookMirror='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius\HPENVY-HERMES-OPENAI-CODEX-PRIMARY-HOOK-LATEST.txt'
-$KnownHostsPath=Join-Path $StateRoot 'hpenvy-tailscale-known_hosts'
-$IdentityPath='C:\Users\Faiz\.ssh\hpenvy-restic'
-New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
 
-function Write-State([object]$Object,[string]$Path){
-  $json=$Object | ConvertTo-Json -Depth 12
-  $json | Set-Content -LiteralPath $Path -Encoding UTF8
-  try{if(Test-Path -LiteralPath $MirrorRoot -PathType Container){$json | Set-Content -LiteralPath $MirrorPath -Encoding UTF8}}catch{}
-  try{$hookDir=Split-Path -Parent $HookMirror;if(Test-Path -LiteralPath $hookDir -PathType Container){$json | Set-Content -LiteralPath $HookMirror -Encoding UTF8}}catch{}
-}
 function Marker([string]$Text,[string]$Name){
   $m=[regex]::Match([string]$Text,'(?m)^'+[regex]::Escape($Name)+'=([^\r\n]*)$')
   if($m.Success){return $m.Groups[1].Value.Trim()}
@@ -35,11 +27,24 @@ function SshClass([string]$Text,[int]$Code){
   if($Code -eq 0){return 'SSH_OK'}
   $t=([string]$Text).ToLowerInvariant()
   if($t -match 'host key verification failed|remote host identification has changed'){return 'SSH_HOST_KEY_REJECTED'}
-  if($t -match 'permission denied|no supported authentication methods available|load key .* permission denied|bad permissions'){return 'SSH_AUTH_REJECTED'}
+  if($t -match 'permission denied|no supported authentication methods available|bad permissions'){return 'SSH_AUTH_REJECTED'}
   if($t -match 'connection timed out|operation timed out'){return 'SSH_CONNECT_TIMEOUT'}
   if($t -match 'connection refused'){return 'SSH_CONNECTION_REFUSED'}
   if($t -match 'no route to host|network is unreachable'){return 'SSH_NETWORK_UNREACHABLE'}
   return 'SSH_EXIT_'+$Code
+}
+
+$currentName=''
+try{$currentName=[Security.Principal.WindowsIdentity]::GetCurrent().Name}catch{$currentName="$env:USERDOMAIN\$env:USERNAME"}
+$isSystem=($currentName -match '(?i)(^|\\)SYSTEM$' -or [string]$env:USERNAME -ieq 'SYSTEM')
+$StateRoot=$(if($isSystem){$SystemStateRoot}else{$UserStateRoot})
+New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
+
+function Write-State([object]$Object,[string]$Path){
+  $json=$Object | ConvertTo-Json -Depth 12
+  try{$json | Set-Content -LiteralPath $Path -Encoding UTF8}catch{}
+  try{if(Test-Path -LiteralPath $MirrorRoot -PathType Container){$json | Set-Content -LiteralPath $MirrorPath -Encoding UTF8}}catch{}
+  try{$hookDir=Split-Path -Parent $HookMirror;if(Test-Path -LiteralPath $hookDir -PathType Container){$json | Set-Content -LiteralPath $HookMirror -Encoding UTF8}}catch{}
 }
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
@@ -54,20 +59,19 @@ if(([string]$req.status).Trim().ToLowerInvariant() -ne 'active'){throw 'Request 
 
 $statePath=Join-Path $StateRoot ($id+'.json')
 if(Test-Path -LiteralPath $statePath -PathType Leaf){
-  try{$prior=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([string]$prior.classification -eq 'HP_HERMES_CODEX_PRIMARY_CONFIGURED'){Write-State $prior $statePath;Write-Output ($prior|ConvertTo-Json -Depth 12 -Compress);exit 0}}catch{}
+  try{
+    $prior=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+    if([string]$prior.classification -eq 'HP_HERMES_CODEX_PRIMARY_CONFIGURED'){
+      Write-State $prior $statePath
+      Write-Output ($prior|ConvertTo-Json -Depth 12 -Compress)
+      exit 0
+    }
+  }catch{}
 }
 
-# The GitHub control hook runs as SYSTEM, while the already-authorized HP Envy SSH
-# identity is intentionally scoped to Faiz. Never weaken/copy that private key. Instead,
-# hand this exact typed request to the existing AFZ WindowsMain Worker queue, whose
-# scheduled worker runs in the Faiz user context. The queued script only invokes this
-# same runner; it contains no credential or token material.
-$currentName=''
-try{$currentName=[Security.Principal.WindowsIdentity]::GetCurrent().Name}catch{$currentName="$env:USERDOMAIN\$env:USERNAME"}
-$isSystem=($currentName -match '(?i)(^|\\)SYSTEM$' -or [string]$env:USERNAME -ieq 'SYSTEM')
 if($isSystem){
   if([string]$env:AFZ_CODEX_USER_WORKER -eq '1'){
-    $r=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_USER_WORKER_WRONG_IDENTITY';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity='SYSTEM';rawOutputPersistedInResult=$false;time=(Get-Date -Format o)}
+    $r=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_USER_WORKER_WRONG_IDENTITY';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity='SYSTEM';time=(Get-Date -Format o)}
     Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Compress);exit 49
   }
   $queueDir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Queue\windows-main'
@@ -92,14 +96,24 @@ exit 0
     Move-Item -LiteralPath $tmp -Destination $taskPath -Force
   }
   $r=[ordered]@{schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel;classification='HP_HERMES_CODEX_QUEUED_FAIZ_WORKER';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity='SYSTEM';worker='windows-main';queueTask=$taskId;privateKeyCopied=$false;globalKnownHostsModified=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='execution-bridge-existing-worker';time=(Get-Date -Format o)}
-  Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Depth 12 -Compress);exit 0
+  Write-State $r $statePath
+  Write-Output ($r|ConvertTo-Json -Depth 12 -Compress)
+  exit 0
 }
 
 $ssh=(Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
 if(-not $ssh){$ssh=(Get-Command ssh -ErrorAction SilentlyContinue).Source}
-if(-not $ssh -or -not(Test-Path -LiteralPath $IdentityPath -PathType Leaf)){
-  $r=[ordered]@{schema=1;requestId=$id;classification='SSH_AUTH_REJECTED';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshClassification='SSH_AUTH_REJECTED';sshIdentitySource='proven-hpenvy-identity-unavailable';executionIdentity=$currentName;rawOutputPersistedInResult=$false;time=(Get-Date -Format o)}
-  Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Compress);exit 47
+if(-not $ssh){throw 'OpenSSH client not found'}
+
+# Validate the existing proven alias before using it; do not inspect or copy key bytes.
+$old=$ErrorActionPreference;$ErrorActionPreference='Continue'
+$resolved=(& $ssh -G hpenvy-restic 2>&1 | Out-String).Trim();$resolveExit=$LASTEXITCODE
+$ErrorActionPreference=$old
+$resolvedHost=Marker $resolved 'hostname'
+$resolvedUser=Marker $resolved 'user'
+if($resolveExit -ne 0 -or $resolvedHost -ne '100.71.26.69' -or $resolvedUser -ne 'coolyo'){
+  $r=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_SSH_ALIAS_MISMATCH';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity=$currentName;sshAlias='hpenvy-restic';resolvedHost=$resolvedHost;resolvedUser=$resolvedUser;time=(Get-Date -Format o)}
+  Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Compress);exit 48
 }
 
 $remote=@'
@@ -126,11 +140,25 @@ print('true' if ok else 'false')
 PY
 )"
 printf 'AUTH_VERIFIED=%s\n' "$AUTH_VERIFIED"
-if [ "$AUTH_VERIFIED" != true ]; then echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_AUTH_NOT_VERIFIED'; exit 44; fi
-if pgrep -af '[h]ermes.*gateway' >/dev/null 2>&1; then echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_GATEWAY_ALREADY_RUNNING_SAFE_STOP'; exit 43; fi
+if [ "$AUTH_VERIFIED" != true ]; then echo 'PROVIDER_SWITCHED=false'; echo 'GENERATION_STARTED=false'; echo 'GATEWAY_STARTED=false'; echo 'SECRET_VALUES_EMITTED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_AUTH_NOT_VERIFIED'; exit 44; fi
+if pgrep -af '[h]ermes.*gateway' >/dev/null 2>&1; then echo 'PROVIDER_SWITCHED=false'; echo 'GENERATION_STARTED=false'; echo 'GATEWAY_STARTED=false'; echo 'SECRET_VALUES_EMITTED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_GATEWAY_ALREADY_RUNNING_SAFE_STOP'; exit 43; fi
+
+read_model(){ awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+default:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG"; }
+read_provider(){ awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+provider:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG"; }
+read_context(){ awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+context_length:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG"; }
+read_base(){ awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+base_url:/{print;exit}' "$CONFIG"; }
+
+model="$(read_model)"; provider="$(read_provider)"; ctx="$(read_context)"; base="$(read_base)"
+if [ "$provider" = "$PROVIDER" ] && [ "$model" = "$MODEL" ] && [ "$ctx" = "$CONTEXT" ] && [ -z "$base" ]; then
+  printf 'MODEL=%s\nPROVIDER=%s\nCONTEXT_LENGTH=%s\nBASE_URL_PRESENT=false\n' "$model" "$provider" "$ctx"
+  echo 'PROVIDER_SWITCHED=true'; echo 'GENERATION_STARTED=false'; echo 'GATEWAY_STARTED=false'; echo 'SECRET_VALUES_EMITTED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_PRIMARY_CONFIGURED'; exit 0
+fi
+
 backup="$CONFIG.afz-pre-codex-$(date +%Y%m%dT%H%M%S).bak"
 cp -p "$CONFIG" "$backup"
-if ! "$LAUNCHER" config set model.default "$MODEL" >/dev/null 2>&1 || ! "$LAUNCHER" config set model.provider "$PROVIDER" >/dev/null 2>&1 || ! "$LAUNCHER" config set model.context_length "$CONTEXT" >/dev/null 2>&1; then cp -p "$backup" "$CONFIG"; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_SET_FAILED_ROLLED_BACK'; exit 45; fi
+if ! "$LAUNCHER" config set model.default "$MODEL" >/dev/null 2>&1 || ! "$LAUNCHER" config set model.provider "$PROVIDER" >/dev/null 2>&1 || ! "$LAUNCHER" config set model.context_length "$CONTEXT" >/dev/null 2>&1; then
+  cp -p "$backup" "$CONFIG"; echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_SET_FAILED_ROLLED_BACK'; exit 45
+fi
 if ! "$LAUNCHER" config unset model.base_url >/dev/null 2>&1; then
 python3 - "$CONFIG" <<'PY'
 import sys,re
@@ -144,33 +172,36 @@ for line in lines:
 open(p,'w',encoding='utf-8').writelines(out)
 PY
 fi
-python3 - "$CONFIG" <<'PY'
-import sys,re
-text=open(sys.argv[1],encoding='utf-8').read().splitlines();m=False;d={}
-for line in text:
-    if re.match(r'^model:\s*(?:#.*)?$',line):m=True;continue
-    if m and re.match(r'^[^\s#][^:]*:',line):m=False
-    if not m:continue
-    z=re.match(r'^\s+(default|provider|context_length|base_url)\s*:\s*["\']?([^"\']*)',line)
-    if z:d[z.group(1)]=z.group(2).strip()
-print('MODEL='+d.get('default',''));print('PROVIDER='+d.get('provider',''));print('CONTEXT_LENGTH='+d.get('context_length',''));print('BASE_URL_PRESENT='+('true' if 'base_url' in d else 'false'))
-PY
-printf 'PROVIDER_SWITCHED=true\nGENERATION_STARTED=false\nGATEWAY_STARTED=false\nSECRET_VALUES_EMITTED=false\n'
-provider="$(awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+provider:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
-model="$(awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+default:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
-ctx="$(awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+context_length:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
-base="$(awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+base_url:/{print;exit}' "$CONFIG")"
-if [ "$provider" = "$PROVIDER" ] && [ "$model" = "$MODEL" ] && [ "$ctx" = "$CONTEXT" ] && [ -z "$base" ]; then echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_PRIMARY_CONFIGURED'; exit 0; fi
-cp -p "$backup" "$CONFIG"; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_VERIFY_FAILED_ROLLED_BACK'; exit 46
+model="$(read_model)"; provider="$(read_provider)"; ctx="$(read_context)"; base="$(read_base)"
+base_present=false; [ -n "$base" ] && base_present=true
+printf 'MODEL=%s\nPROVIDER=%s\nCONTEXT_LENGTH=%s\nBASE_URL_PRESENT=%s\n' "$model" "$provider" "$ctx" "$base_present"
+echo 'GENERATION_STARTED=false'; echo 'GATEWAY_STARTED=false'; echo 'SECRET_VALUES_EMITTED=false'
+if [ "$provider" = "$PROVIDER" ] && [ "$model" = "$MODEL" ] && [ "$ctx" = "$CONTEXT" ] && [ "$base_present" = false ]; then
+  echo 'PROVIDER_SWITCHED=true'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_PRIMARY_CONFIGURED'; exit 0
+fi
+cp -p "$backup" "$CONFIG"; echo 'PROVIDER_SWITCHED=false'; echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_VERIFY_FAILED_ROLLED_BACK'; exit 46
 '@
 
-$sshArgs=@('-o','BatchMode=yes','-o','ConnectTimeout=15','-o',("UserKnownHostsFile={0}" -f $KnownHostsPath),'-o','StrictHostKeyChecking=accept-new','-o','IdentitiesOnly=yes','-i',$IdentityPath,$ExpectedTarget,'bash -s')
+$sshArgs=@('-o','BatchMode=yes','-o','ConnectTimeout=15','-o','StrictHostKeyChecking=yes','hpenvy-restic','bash -s')
 $old=$ErrorActionPreference;$ErrorActionPreference='Continue'
 $raw=($remote | & $ssh @sshArgs 2>&1 | Out-String).Trim();$code=$LASTEXITCODE
 $ErrorActionPreference=$old
 $class=Marker $raw 'FINAL_CLASSIFICATION';$sshClass=SshClass $raw $code
 if([string]::IsNullOrWhiteSpace($class)){$class=$(if($code -ne 0){$sshClass}else{'HP_HERMES_CODEX_UNKNOWN_RESULT'})}
-$r=[ordered]@{schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel;classification=$class;authVerified=((Marker $raw 'AUTH_VERIFIED') -eq 'true');configuredProvider=(Marker $raw 'PROVIDER');configuredModel=(Marker $raw 'MODEL');contextLength=(Marker $raw 'CONTEXT_LENGTH');baseUrlPresent=((Marker $raw 'BASE_URL_PRESENT') -eq 'true');providerSwitched=((Marker $raw 'PROVIDER_SWITCHED') -eq 'true');generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshExitCode=$code;sshClassification=$sshClass;sshKnownHostsScope='afz-job-local-tailscale-ip';sshIdentitySource='proven-hpenvy-restic';executionIdentity=$currentName;globalKnownHostsModified=$false;privateKeyCopied=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)}
+$r=[ordered]@{
+  schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel
+  classification=$class
+  authVerified=((Marker $raw 'AUTH_VERIFIED') -eq 'true')
+  configuredProvider=(Marker $raw 'PROVIDER')
+  configuredModel=(Marker $raw 'MODEL')
+  contextLength=(Marker $raw 'CONTEXT_LENGTH')
+  baseUrlPresent=((Marker $raw 'BASE_URL_PRESENT') -eq 'true')
+  providerSwitched=((Marker $raw 'PROVIDER_SWITCHED') -eq 'true')
+  generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false
+  sshExitCode=$code;sshClassification=$sshClass;sshAlias='hpenvy-restic';executionIdentity=$currentName
+  globalKnownHostsModified=$false;privateKeyCopied=$false;rawOutputPersistedInResult=$false
+  githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)
+}
 Write-State $r $statePath
 Write-Output ($r|ConvertTo-Json -Depth 12 -Compress)
 if($class -ne 'HP_HERMES_CODEX_PRIMARY_CONFIGURED'){exit 47}
