@@ -46,6 +46,18 @@ function Parse-Device([string]$Text){
   $m=[regex]::Match($clean,'(?m)^AFZ_OAUTH_LOG=([^\r\n]+)$');if($m.Success){$log=$m.Groups[1].Value.Trim()}
   return [ordered]@{url=$url;code=$code;remotePid=$remotePidValue;remoteLog=$log}
 }
+function Classify-SshFailure([string]$Text,[int]$ExitCode){
+  if($ExitCode -eq 0){return 'SSH_OK'}
+  $t=([string]$Text).ToLowerInvariant()
+  if($t -match 'host key verification failed|remote host identification has changed'){return 'SSH_HOST_KEY_REJECTED'}
+  if($t -match 'permission denied|no supported authentication methods available'){return 'SSH_AUTH_REJECTED'}
+  if($t -match 'connection timed out|operation timed out'){return 'SSH_CONNECT_TIMEOUT'}
+  if($t -match 'connection refused'){return 'SSH_CONNECTION_REFUSED'}
+  if($t -match 'no route to host|network is unreachable'){return 'SSH_NETWORK_UNREACHABLE'}
+  if($t -match 'could not resolve hostname|name or service not known'){return 'SSH_NAME_RESOLUTION_FAILED'}
+  if($t -match 'connection reset|connection closed'){return 'SSH_CONNECTION_CLOSED'}
+  return 'SSH_EXIT_'+$ExitCode
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
@@ -77,9 +89,6 @@ $ssh=(Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
 if(-not $ssh){$ssh=(Get-Command ssh -ErrorAction SilentlyContinue).Source}
 if(-not $ssh){throw 'OpenSSH client not found'}
 
-# Fixed remote script only. It replaces stale OAuth prompts for this exact provider,
-# then launches Hermes under util-linux script(1) so the interactive device prompt
-# remains alive after SSH disconnects. No model/provider configuration is changed.
 $remoteScript=@'
 set -eu
 root="$HOME/.hermes/afz-openai-oauth"
@@ -103,11 +112,12 @@ $raw=($remoteScript | & $ssh @sshArgs 2>&1 | Out-String).Trim()
 $sshExit=$LASTEXITCODE
 $ErrorActionPreference=$old
 $device=Parse-Device $raw
-$classification=$(if($device.code -and $device.url){'AUTH_DEVICE_CODE_READY'}else{'AUTH_DEVICE_CODE_NOT_EMITTED'})
+$transportClass=Classify-SshFailure $raw $sshExit
+$classification=$(if($device.code -and $device.url){'AUTH_DEVICE_CODE_READY'}elseif($sshExit -ne 0){$transportClass}else{'AUTH_DEVICE_CODE_NOT_EMITTED'})
 $r=[ordered]@{
   schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;action=$ExpectedAction
   classification=$classification;deviceUrl=$device.url;deviceCode=$device.code;remoteOauthPid=$device.remotePid;remoteOauthLog=$device.remoteLog
-  sshExitCode=$sshExit;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false
+  sshExitCode=$sshExit;sshClassification=$transportClass;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false
   rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)
 }
 Write-State $r $statePath
