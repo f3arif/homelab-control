@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# HOTRELOAD_CANARY=20260901T0337Z hermes-r5-stdin-preflight-refresh
+# HOTRELOAD_CANARY=20260901T0410Z h3-docker-preflight-binding
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
