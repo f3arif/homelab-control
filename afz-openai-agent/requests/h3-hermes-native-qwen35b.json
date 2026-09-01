@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-native-qwen35b-20260901-r1",
+  "id": "h3-hermes-native-qwen35b-20260901-r2",
   "action": "install-and-configure-native",
   "status": "ACTIVE",
   "target": "h3",
