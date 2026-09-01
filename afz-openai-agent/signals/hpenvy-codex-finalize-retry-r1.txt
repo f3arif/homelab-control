@@ -1,0 +1,7 @@
+hpenvy-codex-finalize-r1
+purpose=force-fresh-exact-sha-consumption
+provider=openai-codex
+model=gpt-5.6-luna
+generation=false
+gateway=false
+network_changes=false
