@@ -14,7 +14,7 @@ $ids=[ordered]@{
  dimpuWedding='9E948DCA-E312-3D65-33D5-2086B99C59CC'
  saniaWedding='C31F19D3-3F08-D772-512D-25F7AA40041C'
 }
-Write-Output 'AFZ_JELLYFIN_HOMEVIDEOS_API_VERIFY_V1'
+Write-Output 'AFZ_JELLYFIN_HOMEVIDEOS_API_VERIFY_V2'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'READ_ONLY=true'
 Write-Output 'SECRET_EXPOSED=false'
@@ -32,18 +32,23 @@ finally:c.close()
 [IO.File]::WriteAllText($tmp,$code,(New-Object Text.UTF8Encoding($false)))
 try{$exe=$py.Path;if([IO.Path]::GetFileName($exe)-match '^py(\.exe)?$'){$token=(& $exe -3 $tmp $db|Out-String).Trim()}else{$token=(& $exe $tmp $db|Out-String).Trim()}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
 if([string]::IsNullOrWhiteSpace($token)){Write-Output 'STATUS=SAFE_STOP|reason=NO_API_KEY';exit 2}
-$h=@{Authorization=('MediaBrowser Client="AFZ-HomeVideos-Verify", Device="Windows-main", DeviceId="afz-homevideos-verify", Version="1.0", Token="'+$token+'"');Accept='application/json'}
-try{$vf=@(Invoke-RestMethod -Uri ($base+'/Library/VirtualFolders') -Headers $h -TimeoutSec 15)}catch{Write-Output ('STATUS=SAFE_STOP|reason=VIRTUALFOLDERS_FAILED|error='+$_.Exception.Message);exit 3}
-$home=@($vf|Where-Object{[string]$_.Name -eq 'Home Videos and Photos'})
-Write-Output ('HOME_VIRTUALFOLDER_MATCH_COUNT='+$home.Count)
-foreach($x in $home){Write-Output ('HOME_VF|name='+[string]$x.Name+'|locations='+(@($x.Locations|ForEach-Object{[string]$_}) -join ';'))}
+$h=@{Authorization=('MediaBrowser Client="AFZ-HomeVideos-Verify", Device="Windows-main", DeviceId="afz-homevideos-verify", Version="2.0", Token="'+$token+'"');Accept='application/json'}
+try{$vf=Invoke-RestMethod -Uri ($base+'/Library/VirtualFolders') -Headers $h -TimeoutSec 15}catch{Write-Output ('STATUS=SAFE_STOP|reason=VIRTUALFOLDERS_FAILED|error='+$_.Exception.Message);exit 3}
+$homeVf=@($vf|Where-Object{[string]$_.Name -eq 'Home Videos and Photos'})
+Write-Output ('HOME_VIRTUALFOLDER_MATCH_COUNT='+$homeVf.Count)
+foreach($x in $homeVf){Write-Output ('HOME_VF|name='+[string]$x.Name+'|locations='+(@($x.Locations|ForEach-Object{[string]$_}) -join ';'))}
 function Query-Count([string]$userId,[string]$parentId,[bool]$recursive){
   $r=[string]$recursive
   $uri=$base+'/Users/'+$userId+'/Items?ParentId='+$parentId+'&Recursive='+$r+'&Limit=1&EnableTotalRecordCount=true'
   try{$q=Invoke-RestMethod -Uri $uri -Headers $h -TimeoutSec 15;return [int]$q.TotalRecordCount}catch{return -1}
 }
 foreach($u in $users.GetEnumerator()){
-  try{$views=Invoke-RestMethod -Uri ($base+'/Users/'+$u.Value+'/Views?IncludeExternalContent=true') -Headers $h -TimeoutSec 15;$items=@($views.Items);$hv=@($items|Where-Object{[string]$_.Name -eq 'Home Videos and Photos'});Write-Output ('USER_VIEWS|user='+$u.Key+'|count='+$items.Count+'|homeMatch='+$hv.Count+'|homeIds='+(@($hv|ForEach-Object{[string]$_.Id}) -join ';'))}catch{Write-Output ('USER_VIEWS_ERROR|user='+$u.Key+'|error='+$_.Exception.Message)}
+  try{
+    $views=Invoke-RestMethod -Uri ($base+'/Users/'+$u.Value+'/Views?IncludeExternalContent=true') -Headers $h -TimeoutSec 15
+    $items=@($views.Items|ForEach-Object{$_})
+    $hv=@($items|Where-Object{[string]$_.Name -eq 'Home Videos and Photos'})
+    Write-Output ('USER_VIEWS|user='+$u.Key+'|count='+$items.Count+'|homeMatch='+$hv.Count+'|homeIds='+(@($hv|ForEach-Object{[string]$_.Id}) -join ';'))
+  }catch{Write-Output ('USER_VIEWS_ERROR|user='+$u.Key+'|error='+$_.Exception.Message)}
   foreach($e in $ids.GetEnumerator()){
     $direct=Query-Count $u.Value $e.Value $false
     $rec=Query-Count $u.Value $e.Value $true
