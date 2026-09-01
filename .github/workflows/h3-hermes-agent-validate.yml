@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+      - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
       - '.github/workflows/h3-hermes-agent-validate.yml'
   workflow_dispatch:
@@ -31,34 +32,30 @@ jobs:
           if($r.dashboard_host_ip -ne '100.106.186.118' -or $r.dashboard_port -ne 9119 -or $r.dashboard_username -ne 'afz'){throw 'dashboard'}
           if($r.container_base_url -ne 'http://host.docker.internal:11434/v1'){throw 'ollama route'}
           if($r.context_length -ne 65536 -or $r.memory_limit -ne '4g' -or $r.cpu_limit -ne 2 -or $r.shm_size -ne '1g'){throw 'resource policy'}
-          if(-not $r.verify_before_repair -or -not $r.publish_result){throw 'verify/publish policy'}
+          if(-not $r.verify_before_repair -or -not $r.publish_result -or -not $r.emergency_diagnostic_ack){throw 'verify/publish/ack policy'}
           if($r.result_branch -ne 'h3-direct-results' -or $r.result_path -ne 'afz-openai-agent/results/h3-hermes-docker-latest.json'){throw 'result route'}
           if($r.expose_api -or $r.run_generation_test -or $r.mutate_ollama){throw 'safety flags'}
           'REQUEST=PASS'
 
-      - name: Parse and enforce runner invariants
+      - name: Parse wrapper and core
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
-          $text=Get-Content $p -Raw
-          $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors | ForEach-Object { Write-Error $_.Message }; exit 1}
+          $wrapper='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $core='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          foreach($p in @($wrapper,$core)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors | ForEach-Object { Write-Error ("$p: "+$_.Message) }; exit 1}
+          }
+          $w=Get-Content $wrapper -Raw
+          foreach($required in @('EMERGENCY_DIAGNOSTIC_ACK_ONLY','AFZ-H3-HERMES-DOCKER-LATEST.txt','Invoke-H3-HermesAgent-Install.Core.ps1')){if(-not $w.Contains($required)){throw "Wrapper missing: $required"}}
+          $c=Get-Content $core -Raw
           foreach($required in @(
-            'Test-CurrentHealth',
-            'verify_before_repair',
-            'Publish-Result',
-            'h3-direct-results',
-            'h3-hermes-docker-latest.json',
-            '--memory=4g',
-            '--cpus=2',
-            '--shm-size=1g',
-            'host.docker.internal:11434/v1',
-            'HERMES_READY_LOCAL_OLLAMA_64K',
-            'repaired=$false',
-            'generationTestStarted=$false',
-            'ollamaMutationStarted=$false'
-          )){if(-not $text.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock')){if($text.Contains($forbidden)){throw "Forbidden runner content: $forbidden"}}
-          'RUNNER=PASS'
+            'Test-CurrentHealth','verify_before_repair','Publish-Result','h3-direct-results','h3-hermes-docker-latest.json',
+            '--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K',
+            'repaired=$false','generationTestStarted=$false','ollamaMutationStarted=$false'
+          )){if(-not $c.Contains($required)){throw "Core missing: $required"}}
+          $all=$w+"`n"+$c
+          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock')){if($all.Contains($forbidden)){throw "Forbidden runner content: $forbidden"}}
+          'RUNNERS=PASS'
