@@ -1,1 +1,1 @@
-h3-hermes-qwen35b-r2 trigger-carrier requested=2026-09-01T14:13:00-04:00 provider_switch=false generation=false gateway=false network_changes=false target_sha=6e6e02858c2d5f811ec31dd01d1c608ead30e5df
+h3-hermes-qwen35b-r3 trigger-carrier requested=2026-09-01T14:23:00-04:00 provider_switch=false generation=false gateway=false network_changes=false target_sha=98de56b68c21deac0834d7b1a9aa82f0fbabea73
