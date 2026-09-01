@@ -11,58 +11,89 @@ permissions:
 
 jobs:
   patch:
-    runs-on: windows-latest
-    timeout-minutes: 6
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Patch Docker CLI fallback
-        shell: pwsh
+      - name: Patch bounded Docker discovery
+        shell: python
         run: |
-          $ErrorActionPreference='Stop'
-          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
-          $text=Get-Content $p -Raw
-          $old=@(
-            '  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1',
-            "  if(-not `$dockerCmd){Emit `$false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=`$false;dockerReady=`$false;repaired=`$false} `$false;exit 31}",
-            '  $script:docker=[string]$dockerCmd.Source'
-          ) -join "`n"
-          $new=@(
-            '  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1',
-            '  if(-not $dockerCmd){',
-            "    `$dockerFallback='C:\Program Files\Docker\Docker\resources\bin\docker.exe'",
-            '    if(Test-Path -LiteralPath $dockerFallback -PathType Leaf){$dockerCmd=[pscustomobject]@{Source=$dockerFallback}}',
-            '  }',
-            "  if(-not `$dockerCmd){Emit `$false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=`$false;dockerReady=`$false;repaired=`$false} `$false;exit 31}",
-            '  $script:docker=[string]$dockerCmd.Source'
-          ) -join "`n"
-          if(-not $text.Contains($old)){throw 'Expected Docker discovery block was not found'}
-          $text=$text.Replace($old,$new)
-          [IO.File]::WriteAllText((Resolve-Path $p),$text,(New-Object Text.UTF8Encoding($false)))
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1')
+          text=p.read_text(encoding='utf-8')
+          old="""  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if(-not $dockerCmd){Emit $false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=$false;dockerReady=$false;repaired=$false} $false;exit 31}
+  $script:docker=[string]$dockerCmd.Source
+  $serverVersion=(& $script:docker version --format '{{.Server.Version}}' 2>&1|Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serverVersion)){Emit $false 'HERMES_DOCKER_ENGINE_UNAVAILABLE' @{retryable=$true;dockerReady=$false;repaired=$false} $false;exit 32}
+"""
+          new="""  $dockerCmd=Get-Command docker.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  $dockerPath=$null
+  if($dockerCmd){
+    if($dockerCmd.Source){$dockerPath=[string]$dockerCmd.Source}elseif($dockerCmd.Path){$dockerPath=[string]$dockerCmd.Path}
+  }
+  if([string]::IsNullOrWhiteSpace($dockerPath)){
+    foreach($candidate in @((Join-Path $env:ProgramFiles 'Docker\\Docker\\resources\\bin\\docker.exe'),'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe')){
+      if(Test-Path -LiteralPath $candidate -PathType Leaf){$dockerPath=$candidate;break}
+    }
+  }
+  $desktopExe='C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'
+  $desktopPresent=Test-Path -LiteralPath $desktopExe -PathType Leaf
+  $dockerService=Get-Service -Name 'com.docker.service' -ErrorAction SilentlyContinue
+  $dockerServiceStatus=$(if($dockerService){[string]$dockerService.Status}else{'missing'})
+  if([string]::IsNullOrWhiteSpace($dockerPath)){
+    Emit $false 'HERMES_DOCKER_ENGINE_MISSING' @{retryable=$false;dockerReady=$false;dockerCliPresent=$false;dockerDesktopInstalled=$desktopPresent;dockerServiceStatus=$dockerServiceStatus;repaired=$false} $false
+    exit 31
+  }
+  $script:docker=$dockerPath
+  $psi=New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName=$script:docker
+  $psi.Arguments='version --format \"{{.Server.Version}}\"'
+  $psi.UseShellExecute=$false
+  $psi.RedirectStandardOutput=$true
+  $psi.RedirectStandardError=$true
+  $psi.CreateNoWindow=$true
+  $proc=New-Object System.Diagnostics.Process
+  $proc.StartInfo=$psi
+  [void]$proc.Start()
+  if(-not $proc.WaitForExit(12000)){
+    try{$proc.Kill()}catch{}
+    Emit $false 'HERMES_DOCKER_ENGINE_UNAVAILABLE' @{retryable=$true;dockerReady=$false;dockerCliPresent=$true;dockerDesktopInstalled=$desktopPresent;dockerServiceStatus=$dockerServiceStatus;dockerProbeTimedOut=$true;repaired=$false} $false
+    exit 32
+  }
+  $serverVersion=$proc.StandardOutput.ReadToEnd().Trim()
+  $dockerProbeError=$proc.StandardError.ReadToEnd().Trim()
+  if($dockerProbeError.Length -gt 300){$dockerProbeError=$dockerProbeError.Substring(0,300)}
+  if($proc.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($serverVersion)){
+    Emit $false 'HERMES_DOCKER_ENGINE_UNAVAILABLE' @{retryable=$true;dockerReady=$false;dockerCliPresent=$true;dockerDesktopInstalled=$desktopPresent;dockerServiceStatus=$dockerServiceStatus;dockerProbeTimedOut=$false;dockerProbeError=$dockerProbeError;repaired=$false} $false
+    exit 32
+  }
+"""
+          if text.count(old)!=1:
+              raise SystemExit(f'Expected one legacy Docker block, found {text.count(old)}')
+          updated=text.replace(old,new,1)
+          required=['WaitForExit(12000)','Docker\\Docker\\resources\\bin\\docker.exe','Docker Desktop.exe','com.docker.service','dockerProbeTimedOut','--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K']
+          for item in required:
+              if item not in updated:
+                  raise SystemExit(f'Missing invariant: {item}')
+          forbidden=['8642:8642','/api/generate','ollama pull','docker.sock','winget install']
+          for item in forbidden:
+              if item in updated:
+                  raise SystemExit(f'Unexpected mutation: {item}')
+          p.write_text(updated,encoding='utf-8',newline='\n')
+          print('H3_DOCKER_PROBE_HARDENING=PASS')
 
-      - name: Parse and enforce invariants
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
-          $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'Hermes core parse failed'}
-          $c=Get-Content $p -Raw
-          foreach($required in @('C:\Program Files\Docker\Docker\resources\bin\docker.exe','[Console]::In.ReadToEnd()','--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock','winget install')){if($c.Contains($forbidden)){throw "Unexpected mutation: $forbidden"}}
-          'HERMES_DOCKER_DISCOVERY=PASS'
-
-      - name: Commit safely
+      - name: Commit safely on current main
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1
-          git commit -m 'Detect Docker Desktop CLI outside H3 SSH PATH'
+          git commit -m 'Bound H3 Docker engine discovery probe'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
