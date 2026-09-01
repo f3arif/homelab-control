@@ -15,6 +15,7 @@ $TaskName='HP Envy Hermes OpenAI Codex Primary'
 $StateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-hermes-openai-codex-primary'
 $MirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $MirrorPath=Join-Path $MirrorRoot 'HPENVY-HERMES-OPENAI-CODEX-PRIMARY-LATEST.txt'
+$KnownHostsPath=Join-Path $StateRoot 'hpenvy-tailscale-known_hosts'
 New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
 
 function Write-State([object]$Object,[string]$Path){
@@ -193,7 +194,18 @@ echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_VERIFY_FAILED_ROLLED_BACK'
 exit 46
 '@
 
-$sshArgs=@('-o','BatchMode=yes','-o','ConnectTimeout=15','-o','StrictHostKeyChecking=yes',$ExpectedTarget,'bash -s')
+# Use a job-scoped known-hosts file instead of the interactive user's global
+# known_hosts. The endpoint is the fixed Tailscale IP from the typed request.
+# accept-new permits only first trust for this dedicated file; any later key change
+# is still rejected by OpenSSH. No Tailscale, firewall, or global SSH settings change.
+$sshArgs=@(
+  '-o','BatchMode=yes',
+  '-o','ConnectTimeout=15',
+  '-o',("UserKnownHostsFile={0}" -f $KnownHostsPath),
+  '-o','StrictHostKeyChecking=accept-new',
+  $ExpectedTarget,
+  'bash -s'
+)
 $old=$ErrorActionPreference;$ErrorActionPreference='Continue'
 $raw=($remoteScript | & $ssh @sshArgs 2>&1 | Out-String).Trim()
 $sshExit=$LASTEXITCODE
@@ -220,6 +232,8 @@ $r=[ordered]@{
   secretValuesEmitted=$false
   sshExitCode=$sshExit
   sshClassification=$sshClass
+  sshKnownHostsScope='afz-job-local-tailscale-ip'
+  globalKnownHostsModified=$false
   rawOutputPersistedInResult=$false
   githubControl=$true
   oneDriveRole='observability-only'
