@@ -67,7 +67,8 @@ Invoke-WebRequest -Uri '$runnerUrl' -OutFile `$scriptPath -UseBasicParsing -Head
 `$current=Get-ScheduledTask -TaskName `$taskName -ErrorAction Stop;if([string]`$current.State -ne 'Running'){Start-ScheduledTask -TaskName `$taskName}
 `$deadline=(Get-Date).AddSeconds(75);do{Start-Sleep -Seconds 1;`$s=Read-State;if(`$s){`$attempted=`$false;if(`$s.PSObject.Properties.Name -contains 'repair_model_call_attempted'){`$attempted=[bool]`$s.repair_model_call_attempted};if(`$attempted -or [string]`$s.status -in @('blocked','failed','completed')){break}}}while((Get-Date)-lt `$deadline)
 `$s=Read-State;if(-not `$s){throw 'Repair task created but no state appeared within 75 seconds.'}
-[pscustomobject]@{ok=`$true;classification=$(if([bool]`$s.repair_model_call_attempted){'QWEN35B_REPAIR_MODEL_CALL_STARTED'}elseif([string]`$s.status -eq 'blocked'){'QWEN35B_REPAIR_BLOCKED'}else{'QWEN35B_REPAIR_STATE_READY'});jobId=`$jobId;task=`$taskName;state=`$s}|ConvertTo-Json -Depth 40 -Compress
+`$classification='QWEN35B_REPAIR_STATE_READY';if([bool]`$s.repair_model_call_attempted){`$classification='QWEN35B_REPAIR_MODEL_CALL_STARTED'}elseif([string]`$s.status -eq 'blocked'){`$classification='QWEN35B_REPAIR_BLOCKED'}
+[pscustomobject]@{ok=`$true;classification=`$classification;jobId=`$jobId;task=`$taskName;state=`$s}|ConvertTo-Json -Depth 40 -Compress
 "@
   $r=Invoke-H3 $remote;if([int]$r.exit -ne 0){throw "H3 repair launcher failed exit=$($r.exit) stdout=$($r.stdout) stderr=$($r.stderr)"}
   $line=@(([string]$r.stdout -split "`r?`n")|Where-Object {$_.Trim() -match '^\{.*\}$'}|Select-Object -Last 1);if(-not $line){throw "H3 repair launcher returned no JSON. stdout=$($r.stdout) stderr=$($r.stderr)"};$proof=([string]$line).Trim()|ConvertFrom-Json -ErrorAction Stop;if(-not [bool]$proof.ok){throw 'H3 repair launcher returned ok=false.'}
