@@ -1,5 +1,6 @@
 {
-  "id": "afz-remoteops-start-20260831-radiohilal-edge-promo-resume-r1",
+  "id": "afz-remoteops-hpenvy-hermes-codex-primary-20260901-r1",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued RadioHilal ReadyForReview safe edge-promo candidate processor gets another scheduling pass. Do not create or duplicate the RadioHilal queue item, do not bypass CPU/RAM resource guards, do not approve or alter any Original, and allow only the pre-existing bounded candidate processor to create separate Candidates when edge-only promo removal is safe; otherwise leave the item for human review. OneDrive is backup-only."
+  "phase": "hpenvy-hermes-codex-primary-only",
+  "purpose": "Verify the already-completed HP Envy Hermes OpenAI Codex OAuth login and configure only the HP Envy Hermes primary provider as openai-codex with model gpt-5.6-luna. Do not regenerate OAuth, start the AFZ Remote Ops task, invoke unrelated H3/Tailscale/Surfshark/FamilyPTT hooks, start a gateway, run model generation, expose Ollama, or modify firewall/network configuration."
 }
