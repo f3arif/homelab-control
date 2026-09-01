@@ -1,1 +1,1 @@
-hermes-oauth-r4-oauth-first force-source-sync requested=2026-08-31T23:35:30-04:00 provider_switch=false generation=false
+hermes-oauth-r5-fixed-parser force-source-sync requested=2026-08-31T23:42:00-04:00 provider_switch=false generation=false
