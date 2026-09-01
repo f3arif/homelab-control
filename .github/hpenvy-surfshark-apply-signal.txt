@@ -1,1 +1,1 @@
-hermes-oauth-r6-ssh-classifier force-source-sync requested=2026-09-01T09:59:00-04:00 provider_switch=false generation=false
+hpenvy-codex-r8-authlist force-source-sync requested=2026-09-01T13:37:00-04:00 provider_switch=false generation=false gateway=false network_changes=false target_sha=efd9209c8e9c3ae68bb4fd5e546cf9cd36eb058f
