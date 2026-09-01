@@ -1,8 +1,8 @@
 AFZ direct agent source recovery
-reason=hpenvy-hermes-openai-codex-device-auth-r3-hook-result
+reason=hpenvy-hermes-openai-codex-device-auth-r3-existing-hook-carrier
 target=windows-main
 authority=github-exact-sha
 operation=source-sync-only
 provider_switch=false
 model_generation=false
-requested_at=2026-08-31T23:21:30-04:00
+requested_at=2026-08-31T23:25:00-04:00
