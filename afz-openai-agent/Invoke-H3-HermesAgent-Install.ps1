@@ -75,12 +75,15 @@ $code=75
 $probeResult=$null
 $probeError=$null
 if((Test-Path -LiteralPath $key -PathType Leaf) -and (Test-Path -LiteralPath $known -PathType Leaf) -and (Test-Path -LiteralPath $ssh -PathType Leaf)){
-  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Docker preflight stdin was empty.''};Invoke-Expression $script'
+  $bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
+  $inFile=Join-Path $env:TEMP ('afz-h3-docker-probe-'+[guid]::NewGuid().ToString('n')+'.ps1')
   $outFile=Join-Path $env:TEMP ('afz-h3-docker-probe-'+[guid]::NewGuid().ToString('n')+'.out')
   $errFile=Join-Path $env:TEMP ('afz-h3-docker-probe-'+[guid]::NewGuid().ToString('n')+'.err')
-  $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
+  $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded)
   try{
-    $sp=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+    [IO.File]::WriteAllText($inFile,$probe,(New-Object Text.UTF8Encoding($false)))
+    $sp=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
     if(-not $sp.WaitForExit(30000)){
       try{$sp.Kill()}catch{}
       $probeError='H3 Docker preflight exceeded 30 seconds.'
@@ -94,7 +97,7 @@ if((Test-Path -LiteralPath $key -PathType Leaf) -and (Test-Path -LiteralPath $kn
       if($null -eq $probeResult){$probeError=$(if($probeErrRaw){$probeErrRaw}else{"H3 Docker preflight returned no JSON. exit=$($sp.ExitCode)"})}
     }
   }catch{$probeError=$_.Exception.Message}
-  finally{Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue}
+  finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
 }else{$probeError='Required H3 SSH preflight path is missing on Windows-main.'}
 
 if($probeResult -and [bool]$probeResult.ok -and [string]$probeResult.classification -eq 'HERMES_DOCKER_ENGINE_READY'){
