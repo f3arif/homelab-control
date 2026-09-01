@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-docker-desktop-20260831-r2",
+  "id": "h3-hermes-docker-desktop-20260831-r3",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "deployment": "docker-desktop",
@@ -23,6 +23,7 @@
   "publish_result": true,
   "result_branch": "h3-direct-results",
   "result_path": "afz-openai-agent/results/h3-hermes-docker-latest.json",
+  "emergency_diagnostic_ack": true,
   "expose_api": false,
   "run_generation_test": false,
   "mutate_ollama": false
