@@ -25,7 +25,7 @@ jobs:
           import re
           path = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
           text = path.read_text(encoding='utf-8')
-          replacement = '# HOTRELOAD_CANARY=20260901T0158Z hermes-r4-runtime-refresh'
+          replacement = '# HOTRELOAD_CANARY=20260901T0332Z hermes-r5-bounded-preflight-refresh'
           updated, count = re.subn(r'(?m)^# HOTRELOAD_CANARY=.*$', replacement, text, count=1)
           if count != 1:
               raise SystemExit('Expected exactly one HOTRELOAD_CANARY line')
@@ -40,7 +40,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Push-Deploy-Watcher.ps1
-          git commit -m 'Refresh H3 Hermes r4 push watcher runtime'
+          git commit -m 'Refresh H3 Hermes r5 push watcher runtime'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
