@@ -13,6 +13,7 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-postreturn-inspect'
 $statePath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-QWEN35B-POSTRETURN-INSPECT-LATEST.json'
+$buildMirrorPath=Join-Path $mirrorRoot 'AFZ-QWEN35B-BUILD-ERROR-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 
@@ -65,6 +66,12 @@ try{`$t=Get-ScheduledTask -TaskName 'AFZ H3 Qwen35B A3B PostReturn Recovery' -Er
     $line=@(($stdout -split "`r?`n")|Where-Object {$_.Trim() -match '^\{.*\}$'}|Select-Object -Last 1)
     if(-not $line){throw "H3 inspector returned no JSON. stdout=$stdout stderr=$stderr"}
     $proof=([string]$line).Trim()|ConvertFrom-Json -ErrorAction Stop
+    try{
+      if(Test-Path -LiteralPath $mirrorRoot -PathType Container){
+        $buildDiag=[ordered]@{schema=1;jobId=$jobId;modelCallIssued=$false;build_exit=$(if($proof.result -and $proof.result.build){$proof.result.build.exit_code}else{$null});build_stdout_tail=[string]$proof.build_stdout_tail;build_stderr_tail=[string]$proof.build_stderr_tail;observed_at=[string]$proof.observed_at}
+        [IO.File]::WriteAllText($buildMirrorPath,($buildDiag|ConvertTo-Json -Depth 8 -Compress),$utf8)
+      }
+    }catch{}
     Save-State ([ordered]@{schema=1;ok=$true;status='completed';classification='QWEN35B_POSTRETURN_INSPECTED';jobId=$jobId;modelCallIssued=$false;proof=$proof;time=(Get-Date -Format o)})
     exit 0
   }finally{Remove-Item -LiteralPath $out,$err -Force -ErrorAction SilentlyContinue}
