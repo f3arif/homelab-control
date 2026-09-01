@@ -33,10 +33,14 @@ try{
 `$ErrorActionPreference='Stop'
 if(`$env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: `$env:COMPUTERNAME"}
 `$job='$jobId'
+`$root='C:\Projects\Qwen36-35B-A3B-Website-Test-20260830-r1'
 `$state='C:\ProgramData\AFZ\H3Qwen35BA3B\'+`$job+'.json'
-`$result='C:\Projects\Qwen36-35B-A3B-Website-Test-20260830-r1\AFZ-BENCHMARK-RESULT.json'
-`$raw='C:\Projects\Qwen36-35B-A3B-Website-Test-20260830-r1\AFZ-QWEN-RAW.txt'
-`$response='C:\Projects\Qwen36-35B-A3B-Website-Test-20260830-r1\AFZ-OLLAMA-RESPONSE.json'
+`$result=Join-Path `$root 'AFZ-BENCHMARK-RESULT.json'
+`$raw=Join-Path `$root 'AFZ-QWEN-RAW.txt'
+`$response=Join-Path `$root 'AFZ-OLLAMA-RESPONSE.json'
+`$buildStdout=Join-Path `$root 'AFZ-npm-build.stdout.log'
+`$buildStderr=Join-Path `$root 'AFZ-npm-build.stderr.log'
+function Tail([string]`$p,[int]`$n=80){if(Test-Path -LiteralPath `$p -PathType Leaf){try{return ((Get-Content -LiteralPath `$p -Tail `$n -Encoding UTF8 -ErrorAction Stop)-join "`n")}catch{return '[READ_ERROR] '+`$_.Exception.Message}};return `$null}
 `$stateObj=`$null;if(Test-Path -LiteralPath `$state -PathType Leaf){try{`$stateObj=Get-Content -LiteralPath `$state -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
 `$resultObj=`$null;if(Test-Path -LiteralPath `$result -PathType Leaf){try{`$resultObj=Get-Content -LiteralPath `$result -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
 `$responseSummary=`$null
@@ -48,7 +52,7 @@ if(Test-Path -LiteralPath `$response -PathType Leaf){
 }
 `$taskObj=`$null
 try{`$t=Get-ScheduledTask -TaskName 'AFZ H3 Qwen35B A3B PostReturn Recovery' -ErrorAction Stop;`$ti=Get-ScheduledTaskInfo -TaskName `$t.TaskName -ErrorAction SilentlyContinue;`$taskObj=[ordered]@{state=[string]`$t.State;last_result=`$(if(`$ti){[int64]`$ti.LastTaskResult}else{`$null});last_run=`$(if(`$ti){`$ti.LastRunTime.ToString('o')}else{`$null})}}catch{`$taskObj=[ordered]@{error=`$_.Exception.Message}}
-[ordered]@{schema=1;ok=`$true;classification='QWEN35B_POSTRETURN_READONLY_STATE';jobId=`$job;modelCallIssued=`$false;host=`$env:COMPUTERNAME;state=`$stateObj;result=`$resultObj;response=`$responseSummary;raw_exists=(Test-Path -LiteralPath `$raw -PathType Leaf);task=`$taskObj;observed_at=(Get-Date -Format o)}|ConvertTo-Json -Depth 50 -Compress
+[ordered]@{schema=1;ok=`$true;classification='QWEN35B_POSTRETURN_READONLY_STATE';jobId=`$job;modelCallIssued=`$false;host=`$env:COMPUTERNAME;state=`$stateObj;result=`$resultObj;response=`$responseSummary;raw_exists=(Test-Path -LiteralPath `$raw -PathType Leaf);build_stdout_tail=(Tail `$buildStdout 80);build_stderr_tail=(Tail `$buildStderr 80);task=`$taskObj;observed_at=(Get-Date -Format o)}|ConvertTo-Json -Depth 50 -Compress
 "@
   $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
   $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=12','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
