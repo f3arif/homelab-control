@@ -1,0 +1,46 @@
+name: H3 Hermes Push Watcher Refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-push-watcher-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Change watcher canary only
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          path = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          text = path.read_text(encoding='utf-8')
+          replacement = '# HOTRELOAD_CANARY=20260901T0147Z hermes-r3-runtime-refresh'
+          updated, count = re.subn(r'(?m)^# HOTRELOAD_CANARY=.*$', replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Expected exactly one HOTRELOAD_CANARY line')
+          if updated == text:
+              raise SystemExit('Watcher canary already has requested value')
+          path.write_text(updated, encoding='utf-8', newline='\n')
+
+      - name: Commit safely on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1
+          git commit -m 'Refresh H3 Hermes push watcher runtime'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
