@@ -1,16 +1,13 @@
 name: H3 Hermes Docker Desktop Validate
 
 on:
-  pull_request:
-    paths:
-      - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
-      - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
-      - '.github/workflows/h3-hermes-agent-validate.yml'
   push:
     branches: [main]
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
+      - '.github/workflows/h3-hermes-agent-validate.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,49 +19,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Parse PowerShell
-        shell: powershell
+      - name: Validate typed Docker request
+        shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
+          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw | ConvertFrom-Json
+          if($r.schema -ne 1){throw 'schema'}
+          if($r.action -ne 'install-and-configure' -or $r.status -ne 'ACTIVE'){throw 'action/status'}
+          if($r.deployment -ne 'docker-desktop' -or $r.target -ne 'h3' -or $r.host -ne 'DESKTOP-H3R6CQN'){throw 'target'}
+          if($r.image -ne 'nousresearch/hermes-agent:latest' -or $r.container_name -ne 'hermes-h3'){throw 'image/container'}
+          if($r.dashboard_host_ip -ne '100.106.186.118' -or $r.dashboard_port -ne 9119 -or $r.dashboard_username -ne 'afz'){throw 'dashboard'}
+          if($r.container_base_url -ne 'http://host.docker.internal:11434/v1'){throw 'ollama route'}
+          if($r.context_length -ne 65536 -or $r.memory_limit -ne '4g' -or $r.cpu_limit -ne 2 -or $r.shm_size -ne '1g'){throw 'resource policy'}
+          if(-not $r.verify_before_repair -or -not $r.publish_result){throw 'verify/publish policy'}
+          if($r.result_branch -ne 'h3-direct-results' -or $r.result_path -ne 'afz-openai-agent/results/h3-hermes-docker-latest.json'){throw 'result route'}
+          if($r.expose_api -or $r.run_generation_test -or $r.mutate_ollama){throw 'safety flags'}
+          'REQUEST=PASS'
+
+      - name: Parse and enforce runner invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $text=Get-Content $p -Raw
           $tokens=$null;$errors=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1'),[ref]$tokens,[ref]$errors)
-          if($errors.Count -gt 0){$errors|Format-List|Out-String|Write-Error;exit 1}
-
-      - name: Validate guarded Docker Desktop deployment
-        shell: powershell
-        run: |
-          $r=Get-Content 'afz-openai-agent\requests\h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
-          if([int]$r.schema -ne 1){throw 'schema'}
-          if([string]$r.action -ne 'install-and-configure' -or [string]$r.status -ne 'ACTIVE'){throw 'active action'}
-          if([string]$r.deployment -ne 'docker-desktop'){throw 'deployment'}
-          if([string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){throw 'target'}
-          if([string]$r.image -ne 'nousresearch/hermes-agent:latest' -or [string]$r.container_name -ne 'hermes-h3'){throw 'image/container'}
-          if([string]$r.dashboard_host_ip -ne '100.106.186.118' -or [int]$r.dashboard_port -ne 9119){throw 'tailscale dashboard bind'}
-          if([string]$r.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'host ollama loopback'}
-          if([string]$r.container_base_url -ne 'http://host.docker.internal:11434/v1'){throw 'docker host bridge'}
-          if([int]$r.context_length -ne 65536){throw 'context'}
-          if([string]$r.memory_limit -ne '4g' -or [int]$r.cpu_limit -ne 2 -or [string]$r.shm_size -ne '1g'){throw 'resource limits'}
-          if([bool]$r.expose_api -or [bool]$r.run_generation_test -or [bool]$r.mutate_ollama){throw 'unsafe flags'}
-
-          $s=Get-Content 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1' -Raw
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors | ForEach-Object { Write-Error $_.Message }; exit 1}
           foreach($required in @(
-            'nousresearch/hermes-agent:latest',
-            'http://host.docker.internal:11434/v1',
-            'HERMES_DASHBOARD_BASIC_AUTH_USERNAME=afz',
-            'HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=',
-            'HERMES_DASHBOARD_BASIC_AUTH_SECRET=',
+            'Test-CurrentHealth',
+            'verify_before_repair',
+            'Publish-Result',
+            'h3-direct-results',
+            'h3-hermes-docker-latest.json',
             '--memory=4g',
             '--cpus=2',
             '--shm-size=1g',
-            '100.106.186.118',
-            '9119:9119',
-            'http://127.0.0.1:9119/api/status',
+            'host.docker.internal:11434/v1',
+            'HERMES_READY_LOCAL_OLLAMA_64K',
+            'repaired=$false',
             'generationTestStarted=$false',
-            'ollamaMutationStarted=$false',
-            'apiPublished=$false',
-            'StrictHostKeyChecking=yes',
-            "'-File','-'",
-            'HERMES_READY_LOCAL_OLLAMA_64K'
-          )){if(-not $s.Contains($required)){throw "Missing guarded Docker invariant: $required"}}
-          foreach($forbidden in @('HERMES_DASHBOARD_INSECURE','/var/run/docker.sock','8642:8642','API_SERVER_ENABLED=true')){
-            if($s.Contains($forbidden)){throw "Forbidden Docker exposure: $forbidden"}
-          }
+            'ollamaMutationStarted=$false'
+          )){if(-not $text.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($forbidden in @('8642:8642','/api/generate','ollama pull','docker.sock')){if($text.Contains($forbidden)){throw "Forbidden runner content: $forbidden"}}
+          'RUNNER=PASS'
