@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "hpenvy-hermes-openai-codex-auth-20260831-r3",
+  "id": "hpenvy-hermes-openai-codex-auth-20260831-r4",
   "taskName": "HP Envy Hermes OpenAI Codex Auth",
   "target": "coolyo@100.71.26.69",
   "action": "start-device-auth",
