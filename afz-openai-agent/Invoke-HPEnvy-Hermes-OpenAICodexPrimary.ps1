@@ -76,6 +76,57 @@ $ssh=(Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
 if(-not $ssh){$ssh=(Get-Command ssh -ErrorAction SilentlyContinue).Source}
 if(-not $ssh){throw 'OpenSSH client not found'}
 
+# Discover an already-authorized SSH identity without exposing key contents. This is
+# limited to AFZ's system key directory and Faiz's conventional private-key names,
+# and probes only the fixed HP Envy Tailscale account from the typed request.
+$identityCandidates=New-Object System.Collections.Generic.List[string]
+$afzKeyRoot='C:\ProgramData\AFZ\OpenAIAgent\keys'
+if(Test-Path -LiteralPath $afzKeyRoot -PathType Container){
+  Get-ChildItem -LiteralPath $afzKeyRoot -File -ErrorAction SilentlyContinue |
+    Where-Object {$_.Name -notmatch '(?i)[.]pub$|known[_-]?hosts|[.]txt$|[.]json$'} |
+    ForEach-Object {$identityCandidates.Add($_.FullName)}
+}
+$userSsh='C:\Users\Faiz\.ssh'
+foreach($name in @('id_ed25519','id_rsa','id_ecdsa')){
+  $p=Join-Path $userSsh $name
+  if(Test-Path -LiteralPath $p -PathType Leaf){$identityCandidates.Add($p)}
+}
+$selectedIdentity=$null
+$selectedIdentitySource=$null
+foreach($candidate in @($identityCandidates | Select-Object -Unique)){
+  $probeArgs=@(
+    '-o','BatchMode=yes',
+    '-o','ConnectTimeout=8',
+    '-o',("UserKnownHostsFile={0}" -f $KnownHostsPath),
+    '-o','StrictHostKeyChecking=accept-new',
+    '-o','IdentitiesOnly=yes',
+    '-i',$candidate,
+    $ExpectedTarget,
+    "printf 'AFZ_SSH_PROBE_OK\\n'"
+  )
+  $oldProbeEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+  $probeRaw=(& $ssh @probeArgs 2>&1 | Out-String).Trim()
+  $probeExit=$LASTEXITCODE
+  $ErrorActionPreference=$oldProbeEap
+  if($probeExit -eq 0 -and $probeRaw -match '(?m)^AFZ_SSH_PROBE_OK$'){
+    $selectedIdentity=$candidate
+    $selectedIdentitySource=$(if($candidate.StartsWith($afzKeyRoot,[StringComparison]::OrdinalIgnoreCase)){'afz-system-key'}else{'faiz-user-key'})
+    break
+  }
+}
+if(-not $selectedIdentity){
+  $r=[ordered]@{
+    schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel
+    classification='SSH_AUTH_REJECTED';authVerified=$false;configuredProvider=$null;configuredModel=$null;contextLength=$null;baseUrlPresent=$false
+    providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false
+    sshExitCode=255;sshClassification='SSH_AUTH_REJECTED';sshKnownHostsScope='afz-job-local-tailscale-ip';sshIdentitySource='none-authorized-found'
+    globalKnownHostsModified=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)
+  }
+  Write-State $r $statePath
+  Write-Output ($r|ConvertTo-Json -Depth 12 -Compress)
+  exit 47
+}
+
 $remoteScript=@'
 set -u
 LAUNCHER="$HOME/.local/bin/hermes"
@@ -194,15 +245,13 @@ echo 'FINAL_CLASSIFICATION=HP_HERMES_CODEX_CONFIG_VERIFY_FAILED_ROLLED_BACK'
 exit 46
 '@
 
-# Use a job-scoped known-hosts file instead of the interactive user's global
-# known_hosts. The endpoint is the fixed Tailscale IP from the typed request.
-# accept-new permits only first trust for this dedicated file; any later key change
-# is still rejected by OpenSSH. No Tailscale, firewall, or global SSH settings change.
 $sshArgs=@(
   '-o','BatchMode=yes',
   '-o','ConnectTimeout=15',
   '-o',("UserKnownHostsFile={0}" -f $KnownHostsPath),
-  '-o','StrictHostKeyChecking=accept-new',
+  '-o','StrictHostKeyChecking=yes',
+  '-o','IdentitiesOnly=yes',
+  '-i',$selectedIdentity,
   $ExpectedTarget,
   'bash -s'
 )
@@ -233,6 +282,7 @@ $r=[ordered]@{
   sshExitCode=$sshExit
   sshClassification=$sshClass
   sshKnownHostsScope='afz-job-local-tailscale-ip'
+  sshIdentitySource=$selectedIdentitySource
   globalKnownHostsModified=$false
   rawOutputPersistedInResult=$false
   githubControl=$true
