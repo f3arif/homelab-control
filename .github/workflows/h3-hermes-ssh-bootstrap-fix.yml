@@ -1,0 +1,60 @@
+name: H3 Hermes SSH Bootstrap Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-ssh-bootstrap-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Hermes SSH transport only
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1')
+          text=p.read_text(encoding='utf-8')
+          old="""$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','-')"""
+          new="""$bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Hermes remote stdin was empty.''};Invoke-Expression $script'
+          $bootstrapEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
+          $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$bootstrapEncoded)"""
+          if text.count(old)!=1:
+              raise SystemExit(f'Expected one legacy Hermes SSH command, found {text.count(old)}')
+          text=text.replace(old,new,1)
+          p.write_text(text,encoding='utf-8',newline='\n')
+
+      - name: Parse and enforce transport invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'Hermes core parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('[Console]::In.ReadToEnd()','H3 Hermes remote stdin was empty.','-EncodedCommand','$bootstrapEncoded','IdentitiesOnly=yes','BatchMode=yes','StrictHostKeyChecking=yes','UserKnownHostsFile=')){if(-not $c.Contains($required)){throw "Missing transport invariant: $required"}}
+          foreach($required in @('--memory=4g','--cpus=2','--shm-size=1g','host.docker.internal:11434/v1','HERMES_READY_LOCAL_OLLAMA_64K','generationTestStarted=$false','ollamaMutationStarted=$false')){if(-not $c.Contains($required)){throw "Missing Hermes invariant: $required"}}
+          foreach($forbidden in @("'Bypass','-File','-'",'8642:8642','/api/generate','ollama pull','docker.sock')){if($c.Contains($forbidden)){throw "Forbidden core content: $forbidden"}}
+          'HERMES_SSH_BOOTSTRAP=PASS'
+
+      - name: Commit safely on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.Core.ps1
+          git commit -m 'Use proven stdin bootstrap for H3 Hermes SSH'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
