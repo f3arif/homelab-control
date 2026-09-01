@@ -1,1 +1,1 @@
-hpenvy-codex-r8-authlist force-source-sync requested=2026-09-01T13:37:00-04:00 provider_switch=false generation=false gateway=false network_changes=false target_sha=efd9209c8e9c3ae68bb4fd5e546cf9cd36eb058f
+h3-hermes-qwen35b-r2 trigger-carrier requested=2026-09-01T14:13:00-04:00 provider_switch=false generation=false gateway=false network_changes=false target_sha=6e6e02858c2d5f811ec31dd01d1c608ead30e5df
