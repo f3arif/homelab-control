@@ -25,6 +25,14 @@ if($null -eq $result){
   if($code -eq 0){$code=75}
 }
 function V([string]$name,$fallback=$null){if($result.PSObject.Properties.Name -contains $name){return $result.$name};return $fallback}
+function SafeText($value){
+  if($null -eq $value){return $null}
+  $s=([string]$value).Trim()
+  if([string]::IsNullOrWhiteSpace($s)){return $null}
+  $s=[regex]::Replace($s,'(?i)(password|secret|token)\s*[:=]\s*[^\s;]+','$1=<redacted>')
+  if($s.Length -gt 1200){$s=$s.Substring(0,1200)+'...<truncated>'}
+  return $s
+}
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $diagPath=Join-Path $diagRoot 'AFZ-H3-HERMES-DOCKER-LATEST.txt'
 try{
@@ -39,6 +47,8 @@ try{
       jobId=(V 'jobId')
       ok=[bool](V 'ok' $false)
       classification=[string](V 'classification' 'UNKNOWN')
+      retryable=[bool](V 'retryable' $false)
+      transportError=(SafeText (V 'error'))
       deployment=[string](V 'deployment' 'docker-desktop')
       containerName=(V 'containerName')
       dashboardUrl=(V 'dashboardUrl')
