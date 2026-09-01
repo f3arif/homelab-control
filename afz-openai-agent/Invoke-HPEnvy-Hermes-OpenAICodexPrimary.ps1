@@ -57,10 +57,48 @@ if(Test-Path -LiteralPath $statePath -PathType Leaf){
   try{$prior=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([string]$prior.classification -eq 'HP_HERMES_CODEX_PRIMARY_CONFIGURED'){Write-State $prior $statePath;Write-Output ($prior|ConvertTo-Json -Depth 12 -Compress);exit 0}}catch{}
 }
 
+# The GitHub control hook runs as SYSTEM, while the already-authorized HP Envy SSH
+# identity is intentionally scoped to Faiz. Never weaken/copy that private key. Instead,
+# hand this exact typed request to the existing AFZ WindowsMain Worker queue, whose
+# scheduled worker runs in the Faiz user context. The queued script only invokes this
+# same runner; it contains no credential or token material.
+$currentName=''
+try{$currentName=[Security.Principal.WindowsIdentity]::GetCurrent().Name}catch{$currentName="$env:USERDOMAIN\$env:USERNAME"}
+$isSystem=($currentName -match '(?i)(^|\\)SYSTEM$' -or [string]$env:USERNAME -ieq 'SYSTEM')
+if($isSystem){
+  if([string]$env:AFZ_CODEX_USER_WORKER -eq '1'){
+    $r=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_USER_WORKER_WRONG_IDENTITY';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity='SYSTEM';rawOutputPersistedInResult=$false;time=(Get-Date -Format o)}
+    Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Compress);exit 49
+  }
+  $queueDir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Queue\windows-main'
+  $workerResultDir='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+  $taskId=('000-hpenvy-hermes-codex-faiz-'+$id)
+  $taskPath=Join-Path $queueDir ($taskId+'.ps1')
+  $workerResultPath=Join-Path $workerResultDir ($taskId+'.txt')
+  New-Item -ItemType Directory -Force -Path $queueDir | Out-Null
+  if(-not(Test-Path -LiteralPath $taskPath -PathType Leaf) -and -not(Test-Path -LiteralPath $workerResultPath -PathType Leaf)){
+    $task=@"
+`$ErrorActionPreference='Stop'
+`$env:AFZ_CODEX_USER_WORKER='1'
+`$runner='$InstallRoot\afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexPrimary.ps1'
+`$request='$InstallRoot\afz-openai-agent\requests\hpenvy-hermes-openai-codex-primary.json'
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$runner -InstallRoot '$InstallRoot' -RequestPath `$request
+`$code=`$LASTEXITCODE
+if(`$code -ne 0){exit `$code}
+exit 0
+"@
+    $tmp=Join-Path $queueDir ('.'+$taskId+'.'+[guid]::NewGuid().ToString('N')+'.tmp')
+    [IO.File]::WriteAllText($tmp,$task,(New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tmp -Destination $taskPath -Force
+  }
+  $r=[ordered]@{schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel;classification='HP_HERMES_CODEX_QUEUED_FAIZ_WORKER';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;executionIdentity='SYSTEM';worker='windows-main';queueTask=$taskId;privateKeyCopied=$false;globalKnownHostsModified=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='execution-bridge-existing-worker';time=(Get-Date -Format o)}
+  Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Depth 12 -Compress);exit 0
+}
+
 $ssh=(Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
 if(-not $ssh){$ssh=(Get-Command ssh -ErrorAction SilentlyContinue).Source}
 if(-not $ssh -or -not(Test-Path -LiteralPath $IdentityPath -PathType Leaf)){
-  $r=[ordered]@{schema=1;requestId=$id;classification='SSH_AUTH_REJECTED';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshClassification='SSH_AUTH_REJECTED';sshIdentitySource='proven-hpenvy-identity-unavailable';rawOutputPersistedInResult=$false;time=(Get-Date -Format o)}
+  $r=[ordered]@{schema=1;requestId=$id;classification='SSH_AUTH_REJECTED';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshClassification='SSH_AUTH_REJECTED';sshIdentitySource='proven-hpenvy-identity-unavailable';executionIdentity=$currentName;rawOutputPersistedInResult=$false;time=(Get-Date -Format o)}
   Write-State $r $statePath;Write-Output ($r|ConvertTo-Json -Compress);exit 47
 }
 
@@ -108,15 +146,14 @@ PY
 fi
 python3 - "$CONFIG" <<'PY'
 import sys,re
-text=open(sys.argv[1],encoding='utf-8').read().splitlines();m=False;d={};base=False
+text=open(sys.argv[1],encoding='utf-8').read().splitlines();m=False;d={}
 for line in text:
     if re.match(r'^model:\s*(?:#.*)?$',line):m=True;continue
     if m and re.match(r'^[^\s#][^:]*:',line):m=False
     if not m:continue
     z=re.match(r'^\s+(default|provider|context_length|base_url)\s*:\s*["\']?([^"\']*)',line)
     if z:d[z.group(1)]=z.group(2).strip()
-base='base_url' in d
-print('MODEL='+d.get('default',''));print('PROVIDER='+d.get('provider',''));print('CONTEXT_LENGTH='+d.get('context_length',''));print('BASE_URL_PRESENT='+('true' if base else 'false'))
+print('MODEL='+d.get('default',''));print('PROVIDER='+d.get('provider',''));print('CONTEXT_LENGTH='+d.get('context_length',''));print('BASE_URL_PRESENT='+('true' if 'base_url' in d else 'false'))
 PY
 printf 'PROVIDER_SWITCHED=true\nGENERATION_STARTED=false\nGATEWAY_STARTED=false\nSECRET_VALUES_EMITTED=false\n'
 provider="$(awk '/^model:/{m=1;next} m&&/^[^[:space:]#]/{m=0} m&&/^[[:space:]]+provider:/{sub(/^[^:]+:[[:space:]]*/,"");gsub(/[\"'\'' ]/,"");print;exit}' "$CONFIG")"
@@ -133,7 +170,7 @@ $raw=($remote | & $ssh @sshArgs 2>&1 | Out-String).Trim();$code=$LASTEXITCODE
 $ErrorActionPreference=$old
 $class=Marker $raw 'FINAL_CLASSIFICATION';$sshClass=SshClass $raw $code
 if([string]::IsNullOrWhiteSpace($class)){$class=$(if($code -ne 0){$sshClass}else{'HP_HERMES_CODEX_UNKNOWN_RESULT'})}
-$r=[ordered]@{schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel;classification=$class;authVerified=((Marker $raw 'AUTH_VERIFIED') -eq 'true');configuredProvider=(Marker $raw 'PROVIDER');configuredModel=(Marker $raw 'MODEL');contextLength=(Marker $raw 'CONTEXT_LENGTH');baseUrlPresent=((Marker $raw 'BASE_URL_PRESENT') -eq 'true');providerSwitched=((Marker $raw 'PROVIDER_SWITCHED') -eq 'true');generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshExitCode=$code;sshClassification=$sshClass;sshKnownHostsScope='afz-job-local-tailscale-ip';sshIdentitySource='proven-hpenvy-restic';globalKnownHostsModified=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)}
+$r=[ordered]@{schema=1;requestId=$id;taskName=$TaskName;target=$ExpectedTarget;provider=$ExpectedProvider;model=$ExpectedModel;classification=$class;authVerified=((Marker $raw 'AUTH_VERIFIED') -eq 'true');configuredProvider=(Marker $raw 'PROVIDER');configuredModel=(Marker $raw 'MODEL');contextLength=(Marker $raw 'CONTEXT_LENGTH');baseUrlPresent=((Marker $raw 'BASE_URL_PRESENT') -eq 'true');providerSwitched=((Marker $raw 'PROVIDER_SWITCHED') -eq 'true');generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;sshExitCode=$code;sshClassification=$sshClass;sshKnownHostsScope='afz-job-local-tailscale-ip';sshIdentitySource='proven-hpenvy-restic';executionIdentity=$currentName;globalKnownHostsModified=$false;privateKeyCopied=$false;rawOutputPersistedInResult=$false;githubControl=$true;oneDriveRole='observability-only';time=(Get-Date -Format o)}
 Write-State $r $statePath
 Write-Output ($r|ConvertTo-Json -Depth 12 -Compress)
 if($class -ne 'HP_HERMES_CODEX_PRIMARY_CONFIGURED'){exit 47}
