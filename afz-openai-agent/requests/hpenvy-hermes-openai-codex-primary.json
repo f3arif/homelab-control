@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "hpenvy-hermes-openai-codex-primary-20260901-r1",
+  "taskName": "HP Envy Hermes OpenAI Codex Primary",
+  "target": "coolyo@100.71.26.69",
+  "action": "verify-and-configure-primary",
+  "provider": "openai-codex",
+  "model": "gpt-5.6-luna",
+  "context_length": 65536,
+  "allow_provider_switch": true,
+  "allow_generation": false,
+  "allow_gateway_start": false,
+  "allow_firewall_change": false,
+  "allow_tailscale_change": false,
+  "qwen_accelerator": {
+    "target": "h3",
+    "host": "DESKTOP-H3R6CQN",
+    "base_model": "qwen3.6:35b-a3b",
+    "preferred_model": "qwen3.6:35b-a3b-hermes64k",
+    "expose_ollama": false
+  },
+  "control_plane": "github",
+  "result_mirror_role": "observability-only",
+  "status": "active"
+}
