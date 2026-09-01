@@ -1,0 +1,96 @@
+name: H3 Hermes Docker Live Read Only
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-hermes-docker-live-signal.txt'
+      - '.github/workflows/h3-hermes-docker-live-readonly.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-hermes-docker-live-readonly
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify Hermes Desktop backend on H3
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.106.186.118'
+          port='9119'
+          code='000'
+          rm -f /tmp/hermes-status.json
+          for attempt in $(seq 1 20); do
+            code=$(curl --silent --show-error \
+              --connect-timeout 3 --max-time 6 \
+              --output /tmp/hermes-status.json \
+              --write-out '%{http_code}' \
+              "http://${host}:${port}/api/status" || true)
+            echo "HERMES_LIVE_ATTEMPT=${attempt} HTTP=${code}"
+            if [[ "$code" == '200' || "$code" == '401' ]]; then
+              break
+            fi
+            sleep 6
+          done
+
+          if [[ "$code" != '200' && "$code" != '401' ]]; then
+            echo "HERMES_TCP9119_REACHABLE=FAIL"
+            exit 1
+          fi
+          echo "HERMES_TCP9119_REACHABLE=PASS"
+          echo "HERMES_HTTP_STATUS=${code}"
+
+          if [[ "$code" == '200' ]]; then
+            echo 'HERMES_STATUS_BEGIN'
+            python -m json.tool /tmp/hermes-status.json
+            echo 'HERMES_STATUS_END'
+            python - <<'PY'
+          import json
+          p='/tmp/hermes-status.json'
+          with open(p,'r',encoding='utf-8') as f:
+              s=json.load(f)
+          auth_required=bool(s.get('auth_required'))
+          providers=[str(x).lower() for x in (s.get('auth_providers') or [])]
+          print('HERMES_AUTH_REQUIRED=' + ('PASS' if auth_required else 'FAIL'))
+          print('HERMES_BASIC_AUTH_PROVIDER=' + ('PASS' if 'basic' in providers else 'FAIL'))
+          if not auth_required or 'basic' not in providers:
+              raise SystemExit(2)
+          PY
+          else
+            echo 'HERMES_AUTH_REQUIRED=PASS'
+            echo 'HERMES_BASIC_AUTH_PROVIDER=PASS_BY_HTTP_401'
+          fi
+
+          if nc -z -w 3 "$host" 8642; then
+            echo 'HERMES_API8642_NOT_EXPOSED=FAIL'
+            exit 3
+          else
+            echo 'HERMES_API8642_NOT_EXPOSED=PASS'
+          fi
+
+      - name: Enforce read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/h3-hermes-docker-live-readonly.yml'
+          ! grep -Eq 'curl .*(-X|--request)[[:space:]]+(POST|PUT|PATCH|DELETE)' "$wf"
+          ! grep -Eq '\bssh\b|docker[[:space:]]+(run|rm|stop|start|pull)|Start-ScheduledTask|Stop-Process' "$wf"
+          echo 'READ_ONLY_CONTRACT=PASS'
