@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "h3-docker-desktop-preflight-20260901-r1",
+  "action": "preflight-docker-desktop",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "read_only": true,
+  "minimum_free_disk_gb": 20,
+  "allow_install": false,
+  "allow_reboot": false,
+  "mutate_ollama": false
+}
