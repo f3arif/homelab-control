@@ -73,6 +73,14 @@ function Invoke-HPEnvySurfsharkExitNode {
   if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
 }
+function Invoke-HPEnvyHermesOpenAICodexAuth {
+  # User-authorized, fixed-target OAuth device flow only. The helper is unable to
+  # switch provider/model, start a gateway, run generation, or execute arbitrary shell.
+  $helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Hermes-OpenAICodexAuth.ps1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-hermes-openai-codex-auth.json'
+  if(-not(Test-Path -LiteralPath $helper -PathType Leaf) -or -not(Test-Path -LiteralPath $request -PathType Leaf)){return}
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -InstallRoot $InstallRoot -RequestPath $request *> $null}catch{}
+}
 
 if([string]::IsNullOrWhiteSpace($RequestPath)){throw 'RequestPath is required'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "Request missing: $RequestPath"}
@@ -87,8 +95,12 @@ if($requestedTask -ne $taskName){throw "Unsupported task name: $requestedTask"}
 Invoke-H3SshKeyAclRepair
 Invoke-H3TailscaleUnattended
 
-# HP Envy audit is fixed-target and read-only unless a separate local authorization gate is present.
+# HP Envy networking audit remains independently guarded.
 Invoke-HPEnvySurfsharkExitNode
+
+# Start only the fixed Hermes OpenAI Codex OAuth device flow. It cannot alter provider
+# selection or invoke a model; those remain separately gated until authorization is verified.
+Invoke-HPEnvyHermesOpenAICodexAuth
 
 # FamilyPTT requests are independently typed and idempotent.
 Invoke-Phase1FamilyPttPrep
