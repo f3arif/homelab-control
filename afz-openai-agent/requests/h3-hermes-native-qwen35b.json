@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-native-qwen35b-20260901-r1",
+  "action": "install-and-configure-native",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "provider": "custom",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "qwen3.6:35b-a3b",
+  "context_length": 65536,
+  "hermes_commit": "f50b5bb0fa5b48caef753c790bf0b09a3570918a",
+  "verify_existing_model_first": true,
+  "reuse_existing_model": true,
+  "start_gateway": false,
+  "run_generation_test": false,
+  "expose_ollama": false,
+  "mutate_ollama": false,
+  "control_plane": "github",
+  "result_mirror_role": "observability-only"
+}
