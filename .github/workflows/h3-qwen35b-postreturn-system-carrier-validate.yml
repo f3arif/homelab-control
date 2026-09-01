@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1'
+      - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1'
       - 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
       - '.github/workflows/h3-qwen35b-postreturn-system-carrier-validate.yml'
 
@@ -22,6 +23,7 @@ jobs:
           $ErrorActionPreference='Stop'
           foreach($path in @(
             'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1',
+            'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1',
             'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1'
           )){
             $tokens=$null;$errors=$null
@@ -33,6 +35,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $carrier=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1' -Raw
+          $v2=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-PostReturnRecoveryV2.ps1' -Raw
           $transport=Get-Content 'afz-openai-agent/Invoke-H3-Qwen35BA3B-TransportRecovery.ps1' -Raw
           foreach($needle in @(
             "`$jobId='qwen35b-a3b-website-20260830-r1'",
@@ -47,8 +50,29 @@ jobs:
             "`$taskAction='REFRESHED_EXISTING'",
             "`$taskAction='REFRESHED_AND_STARTED'"
           )){if(-not $carrier.Contains($needle)){throw "carrier invariant missing: $needle"}}
-          if($carrier -match '127\.0\.0\.1:11434/api/generate'){throw 'carrier must not contain Ollama generate endpoint'}
-          if($carrier -match '(?im)^\s*[&]?\s*ollama(?:\.exe)?\s'){throw 'carrier must not invoke Ollama CLI'}
           if(-not $transport.Contains('Invoke-H3-Qwen35BA3B-PostReturnRecovery.ps1')){throw 'transport recovery must chain post-return helper'}
           if(-not $transport.Contains('This continuation is independent of the one-call transport activation')){throw 'transport post-return safety marker missing'}
+
+          foreach($needle in @(
+            "`$sourceKey='C:\Users\Faiz\.ssh\afz_h3_worker'",
+            "`$key=Join-Path `$keyRoot 'afz_h3_worker_system'",
+            "`$expectedFingerprint='SHA256:xUZpwFvzX4H4qhRFHYNrHsITVC6XZXJ8vYe6yoN7R7I'",
+            "`$systemSidText='S-1-5-18'",
+            'Ensure-SystemControlPaths',
+            'Set-SystemOnlyFileAcl',
+            'Set-SystemOnlyDirectoryAcl',
+            'Copy-Item -LiteralPath $sourceKey -Destination $key -Force',
+            'Qwen35B post-return V2 must run as SYSTEM',
+            'modelCallIssuedByRecovery=`$false',
+            'saved.done',
+            'Saved Ollama response is not a successful completed response.',
+            'Forbidden model-call primitive found in post-return recovery.'
+          )){if(-not $v2.Contains($needle)){throw "V2 SYSTEM self-heal invariant missing: $needle"}}
+
+          foreach($text in @($carrier,$v2)){
+            if($text -match '127\.0\.0\.1:11434/api/generate'){throw 'post-return carrier must not contain Ollama generate endpoint'}
+            if($text -match '(?im)^\s*[&]?\s*ollama(?:\.exe)?\s'){throw 'post-return carrier must not invoke Ollama CLI'}
+          }
+          # V2 may contain the word curl only in a defensive regex that rejects downloaded recovery scripts.
+          if($v2 -match '(?im)^\s*[&]?\s*curl(?:\.exe)?\s'){throw 'V2 must not execute curl'}
           Write-Host 'QWEN35B_POSTRETURN_SYSTEM_CARRIER_CONTRACT=PASS'
