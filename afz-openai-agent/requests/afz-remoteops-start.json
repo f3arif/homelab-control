@@ -1,5 +1,5 @@
 {
-  "id": "afz-remoteops-start-20260831-hpenvy-surfshark-apply-r3",
+  "id": "afz-remoteops-start-20260831-radiohilal-edge-promo-resume-r1",
   "taskName": "AFZ Remote Ops",
-  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the fixed-target HP Envy Surfshark exit-node guarded apply request can run from GitHub. The HP Envy carrier must fail closed unless the existing machine-local authorization sentinel is present. If authorized, route only public Internet traffic entering tailscale0 through surfshark, preserve Tailscale table 52 and LAN/private routes, keep HP Envy locally generated traffic on its normal management path, preserve Tailscale netfilter admission, and verify post-state. OneDrive is backup-only."
+  "purpose": "Start the existing AFZ Remote Ops scheduled task once so the already-queued RadioHilal ReadyForReview safe edge-promo candidate processor gets another scheduling pass. Do not create or duplicate the RadioHilal queue item, do not bypass CPU/RAM resource guards, do not approve or alter any Original, and allow only the pre-existing bounded candidate processor to create separate Candidates when edge-only promo removal is safe; otherwise leave the item for human review. OneDrive is backup-only."
 }
