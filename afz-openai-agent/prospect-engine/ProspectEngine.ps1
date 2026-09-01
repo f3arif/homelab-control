@@ -8,6 +8,7 @@ $script:ProspectOutlookTokenFile = Join-Path $script:ProspectRoot 'outlook-refre
 $script:ProspectAuditFile = Join-Path $script:ProspectRoot 'audit.ndjson'
 $script:ProspectOutlookFlow = $null
 $script:ProspectOutlookAccess = $null
+$script:ProspectSearchActive = $false
 New-Item -ItemType Directory -Force -Path $script:ProspectRoot | Out-Null
 
 function Write-ProspectAudit {
@@ -485,7 +486,31 @@ function Invoke-ProspectEngineRoute {
     return $true
   }
   if ($Path -eq '/api/prospects/search' -and $method -eq 'POST') {
-    Send-Json $Context 200 (Invoke-ProspectResearch (Read-JsonBody $Context))
+    if ($script:ProspectSearchActive) {
+      Send-Json $Context 409 @{ok=$false;code='research_in_progress';error='A prospect research batch is already running. Wait for it to finish before starting another.';retryable=$true}
+      return $true
+    }
+    $script:ProspectSearchActive = $true
+    try {
+      try {
+        Send-Json $Context 200 (Invoke-ProspectResearch (Read-JsonBody $Context))
+      } catch {
+        $code = [string]$_.Exception.Data['AfzErrorCode']
+        $retryAfter = 0
+        try { $retryAfter = [int]$_.Exception.Data['RetryAfterSeconds'] } catch {}
+        Write-ProspectAudit 'research' '' $false $_.Exception.Message
+        if ($code -in @('openai_rate_limit','openai_quota')) {
+          Send-Json $Context 429 ([ordered]@{
+            ok=$false;code=$code;error=$_.Exception.Message
+            retryable=($code -eq 'openai_rate_limit');retryAfterSeconds=$retryAfter
+          })
+        } else {
+          Send-Json $Context 502 @{ok=$false;code='research_failed';error=$_.Exception.Message;retryable=$false}
+        }
+      }
+    } finally {
+      $script:ProspectSearchActive = $false
+    }
     return $true
   }
   if ($Path -eq '/api/prospects/update' -and $method -eq 'POST') {

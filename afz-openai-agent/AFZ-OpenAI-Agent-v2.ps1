@@ -315,11 +315,72 @@ function Invoke-Tool {
   }
 }
 
+function Get-OpenAIRequestFailure {
+  param($ErrorRecord)
+  $status = 0
+  $retryAfter = 0
+  $raw = [string]$ErrorRecord.ErrorDetails.Message
+  try { $status = [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+  try { $retryAfter = [int]$ErrorRecord.Exception.Response.Headers['Retry-After'] } catch {}
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    try {
+      $stream = $ErrorRecord.Exception.Response.GetResponseStream()
+      $reader = New-Object IO.StreamReader($stream)
+      try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } catch {}
+  }
+  $code = ''
+  $type = ''
+  $message = [string]$ErrorRecord.Exception.Message
+  if (-not [string]::IsNullOrWhiteSpace($raw)) {
+    try {
+      $parsed = $raw | ConvertFrom-Json
+      if ($parsed.error) {
+        $code = [string]$parsed.error.code
+        $type = [string]$parsed.error.type
+        if ($parsed.error.message) { $message = [string]$parsed.error.message }
+      }
+    } catch {}
+  }
+  return [pscustomobject][ordered]@{status=$status;retryAfter=$retryAfter;code=$code;type=$type;message=$message}
+}
+
+function Throw-OpenAIBoundedError {
+  param([string]$Code,[string]$Message,[int]$RetryAfterSeconds=0)
+  $exception = New-Object -TypeName System.InvalidOperationException -ArgumentList $Message
+  $exception.Data['AfzErrorCode'] = $Code
+  $exception.Data['RetryAfterSeconds'] = $RetryAfterSeconds
+  throw $exception
+}
+
 function Invoke-OpenAIResponse {
   param($Body)
   $headers = @{Authorization="Bearer $OpenAIKey";'Content-Type'='application/json'}
   $json = $Body | ConvertTo-Json -Depth 40 -Compress
-  return Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/responses' -Headers $headers -Body $json -TimeoutSec 180
+  $maxAttempts = 3
+  for ($attempt=1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+      return Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/responses' -Headers $headers -Body $json -TimeoutSec 180
+    } catch {
+      $failure = Get-OpenAIRequestFailure $_
+      if ($failure.status -ne 429) { throw }
+      $isQuota = ($failure.code -in @('insufficient_quota','billing_hard_limit_reached')) -or
+        ($failure.type -eq 'insufficient_quota') -or ($failure.message -match '(?i)quota|billing limit|credit balance')
+      if ($isQuota) {
+        Write-AgentLog "openai-429 code=$($failure.code) type=$($failure.type) retryable=false"
+        Throw-OpenAIBoundedError 'openai_quota' 'OpenAI API quota or billing is blocking live research. No prospects were added. Add API billing or credits to the API project, then try again.' 0
+      }
+      $delay = $failure.retryAfter
+      if ($delay -lt 1) { $delay = [math]::Min(20,4*$attempt) }
+      if ($attempt -lt $maxAttempts) {
+        Write-AgentLog "openai-429 code=$($failure.code) attempt=$attempt retryIn=$delay"
+        Start-Sleep -Seconds $delay
+        continue
+      }
+      Write-AgentLog "openai-429 code=$($failure.code) attempts=$maxAttempts retryable=true"
+      Throw-OpenAIBoundedError 'openai_rate_limit' 'OpenAI is temporarily rate-limiting live research after three bounded attempts. No prospects were added. Wait a few minutes, then try again.' $delay
+    }
+  }
 }
 
 function Get-ResponseText {
