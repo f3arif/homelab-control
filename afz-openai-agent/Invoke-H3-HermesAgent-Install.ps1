@@ -11,7 +11,7 @@ if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "H3 Hermes re
 $req=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8|ConvertFrom-Json
 $id=([string]$req.id).Trim()
 if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid H3 Hermes request identity.'}
-if([string]$req.action -ne 'refresh-desktop-backend' -or [string]$req.status -ne 'ACTIVE'){throw 'H3 Hermes Desktop refresh request is not active.'}
+if([string]$req.action -ne 'install-and-configure' -or [string]$req.status -ne 'ACTIVE'){throw 'H3 Hermes Desktop refresh request is not active.'}
 if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'H3 Hermes target mismatch.'}
 if([string]$req.provider_name -ne 'ollama' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'H3 Hermes provider route mismatch.'}
 if([string]$req.base_model -ne 'qwen3.6:35b-a3b' -or [int]$req.context_length -ne 65536){throw 'H3 Hermes model mismatch.'}
@@ -65,7 +65,7 @@ function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 16 -Compress;exit $code}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST';host=$env:COMPUTERNAME;retryable=$false}) 30}
 $hermesRoot=Join-Path $env:LOCALAPPDATA 'hermes'
 $hermesPath=Join-Path $hermesRoot 'bin\hermes.exe'
-$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r14.json'
+$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r15.json'
 if(-not(Test-Path -LiteralPath $hermesPath -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false}) 41}
 if(Test-Path -LiteralPath $marker -PathType Leaf){
   try{$prior=Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json;$prior.classification='HERMES_DESKTOP_BACKEND_REFRESH_ALREADY_APPLIED';$prior.ok=$true;$prior.retryable=$false;Emit $prior 0}catch{}
@@ -88,9 +88,9 @@ try{
 
 $all=@(Get-CimInstance Win32_Process -ErrorAction Stop)
 $byId=@{};foreach($p in $all){$byId[[int]$p.ProcessId]=$p}
-function Has-HermesElectronAncestor([int]$Pid){
+function Has-HermesElectronAncestor([int]$ProcessId){
   $seen=New-Object Collections.Generic.HashSet[int]
-  $current=$Pid
+  $current=$ProcessId
   for($depth=0;$depth -lt 8;$depth++){
     if(-not $byId.ContainsKey($current)){return $false}
     $p=$byId[$current]
