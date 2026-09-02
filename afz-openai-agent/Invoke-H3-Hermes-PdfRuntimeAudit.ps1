@@ -78,9 +78,8 @@ function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 30 -Compress;exit $code}
 function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
   if($null -eq $PyArgs -or $PyArgs.Count -eq 0){throw 'Run-Python received empty argument list.'}
   foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
-  $out=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.out')
-  $err=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.err')
   $codeFile=$null
+  $p=$null
   try{
     $effectiveArgs=@($PyArgs)
     if($effectiveArgs.Count -ge 2 -and [string]$effectiveArgs[0] -eq '-c'){
@@ -98,15 +97,27 @@ function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
       }else{$quoted+=$s}
     }
     $argLine=$quoted -join ' '
-    $p=Start-Process -FilePath $script:python -ArgumentList $argLine -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+    $psi=New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName=$script:python
+    $psi.Arguments=$argLine
+    $psi.UseShellExecute=$false
+    $psi.CreateNoWindow=$true
+    $psi.RedirectStandardOutput=$true
+    $psi.RedirectStandardError=$true
+    $p=New-Object System.Diagnostics.Process
+    $p.StartInfo=$psi
+    if(-not $p.Start()){throw 'Run-Python process failed to start.'}
+    $stdoutTask=$p.StandardOutput.ReadToEndAsync()
+    $stderrTask=$p.StandardError.ReadToEndAsync()
     $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
-    if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
-    $stdout=$(if(Test-Path $out){[IO.File]::ReadAllText($out)}else{''})
-    $stderr=$(if(Test-Path $err){[IO.File]::ReadAllText($err)}else{''})
+    if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}else{try{$p.WaitForExit()}catch{}}
+    try{$stdout=$stdoutTask.GetAwaiter().GetResult()}catch{$stdout=''}
+    try{$stderr=$stderrTask.GetAwaiter().GetResult()}catch{$stderr=''}
     $stderrPreview=$stderr;if($stderrPreview.Length -gt 600){$stderrPreview=$stderrPreview.Substring(0,600)}
-    return [pscustomobject]@{timedOut=$to;exit=$(if($to){$null}else{[int]$p.ExitCode});stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
+    $exit=$(if($to){$null}else{[int]$p.ExitCode})
+    return [pscustomobject]@{timedOut=$to;exit=$exit;stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
   }finally{
-    Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+    if($p){try{$p.Dispose()}catch{}}
     if($codeFile){Remove-Item -LiteralPath $codeFile -Force -ErrorAction SilentlyContinue}
   }
 }
