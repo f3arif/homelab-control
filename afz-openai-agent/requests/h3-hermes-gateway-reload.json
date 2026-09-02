@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-gateway-reload-20260902-r1",
+  "action": "reload-gateway-native",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "require_empty_active_registry": true,
+  "use_native_restart": true,
+  "change_provider": false,
+  "mutate_ollama": false,
+  "change_network": false,
+  "run_model_generation": false
+}
