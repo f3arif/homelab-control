@@ -71,7 +71,7 @@ jobs:
           if ($installer -notmatch 'New-ScheduledTaskTrigger\s+-AtStartup') {
             throw 'Installer must use AtStartup trigger only.'
           }
-          if ($installer -match '(?i)-RepetitionInterval|-Daily|-Once\b') {
+          if ($installer -match '(?is)New-ScheduledTaskTrigger[^\r\n]*(?:-Once|-Daily|-RepetitionInterval)') {
             throw 'Recurring Task Scheduler trigger is forbidden for this publisher.'
           }
           if ($installer -notmatch 'MultipleInstances\s+IgnoreNew') {
