@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-pdf-dependency-repair-20260902-r1",
+  "action": "install-pdf-skill-dependencies",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "venv_only": true,
+  "packages": ["pypdf", "reportlab", "pdfplumber"],
+  "use_upstream_skill_command": true,
+  "verify_latest_cached_pdf": true,
+  "return_document_text": false,
+  "restart_gateway": false,
+  "change_provider": false,
+  "mutate_ollama": false,
+  "change_network_config": false,
+  "run_model_generation": false
+}
