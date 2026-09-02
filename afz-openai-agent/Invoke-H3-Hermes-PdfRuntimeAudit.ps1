@@ -163,6 +163,16 @@ try{
   if(-not $depsReady){
     if(-not $repairMode){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 10}
     $stamp=Get-Date -Format 'yyyyMMdd-HHmmss';$preFreeze=Join-Path $root ('pdf-deps-pre-'+$stamp+'.txt')
+    $pipBootstrapped=$false
+    $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20
+    if($pipProbe.timedOut -or $pipProbe.exit -ne 0){
+      $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120
+      if($ensure.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_BOOTSTRAP_TIMEOUT';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';ensurepipStderrBytes=$ensure.stderrBytes;ensurepipStderrPreview=$ensure.stderrPreview;preFreeze=$preFreeze}) 48}
+      if($ensure.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_BOOTSTRAP_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';ensurepipExit=$ensure.exit;ensurepipStderrBytes=$ensure.stderrBytes;ensurepipStderrPreview=$ensure.stderrPreview;preFreeze=$preFreeze}) 48}
+      $pipBootstrapped=$true
+      $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20
+      if($pipProbe.timedOut -or $pipProbe.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_VERIFY_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';pythonTimedOut=$pipProbe.timedOut;pythonExit=$pipProbe.exit;pythonStderrBytes=$pipProbe.stderrBytes;pythonStderrPreview=$pipProbe.stderrPreview;preFreeze=$preFreeze}) 49}
+    }
     $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;if(-not $freeze.timedOut -and $freeze.exit -eq 0){[IO.File]::WriteAllText($preFreeze,$freeze.stdout,(New-Object Text.UTF8Encoding($false)))}
     $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150
     $pipExit=$pip.exit;$pipErrBytes=$pip.stderrBytes
@@ -188,7 +198,7 @@ try{
     try{$obj=$rr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_INVALID_JSON';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readStdoutBytes=[Text.Encoding]::UTF8.GetByteCount($rr.stdout);preFreeze=$preFreeze}) 55}
     $pages=@($obj.pages);$chars=0;foreach($pageText in $pages){$chars+=([string]$pageText).Length}
     $classification=$(if([int]$obj.page_count -gt 0 -and $chars -gt 0){'HERMES_PDF_DEPENDENCIES_AND_READ_VERIFIED'}else{'HERMES_PDF_LIKELY_SCANNED_OCR_REQUIRED'})
-    Emit ([ordered]@{ok=$true;classification=$classification;mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});readOnly=(-not $repairMode);packages=@('pypdf','reportlab','pdfplumber');versions=$versions;dependenciesInstalled=$installed;pipExit=$pipExit;pipStderrBytes=$pipErrBytes;preFreeze=$preFreeze;pageCount=[int]$sampleMeta.page_count;samplePages=[int]$sampleMeta.sample_pages;extractedChars=$chars;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;documentTextReturned=$false;configChanged=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 0
+    Emit ([ordered]@{ok=$true;classification=$classification;mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});readOnly=(-not $repairMode);packages=@('pypdf','reportlab','pdfplumber');versions=$versions;dependenciesInstalled=$installed;pipBootstrapped=$pipBootstrapped;pipExit=$pipExit;pipStderrBytes=$pipErrBytes;preFreeze=$preFreeze;pageCount=[int]$sampleMeta.page_count;samplePages=[int]$sampleMeta.sample_pages;extractedChars=$chars;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;documentTextReturned=$false;configChanged=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 0
   }finally{Remove-Item -LiteralPath $subset -Force -ErrorAction SilentlyContinue}
 }catch{
   $msg=[string]$_.Exception.Message;if($msg.Length -gt 500){$msg=$msg.Substring(0,500)}
