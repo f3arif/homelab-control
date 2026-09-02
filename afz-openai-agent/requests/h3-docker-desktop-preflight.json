@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-docker-desktop-preflight-20260901-r2",
+  "id": "h3-docker-desktop-preflight-20260902-r3",
   "action": "preflight-docker-desktop",
   "status": "ACTIVE",
   "target": "h3",
