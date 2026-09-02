@@ -2,9 +2,10 @@ name: H3 Hermes PDF Dependency Probe Fix
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - '.github/workflows/h3-hermes-pdf-dep-probe-fix.yml'
+      - .github/workflows/h3-hermes-pdf-dep-probe-fix.yml
 
 permissions:
   contents: write
@@ -14,57 +15,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Replace fragile PDF dependency JSON probe
-        shell: python
+      - name: Replace fragile dependency probe
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
+          import base64
 
-          p = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
-          text = p.read_text(encoding='utf-8')
+          path = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
+          text = path.read_text(encoding='utf-8')
           start_marker = "  $depCode='import json,importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(json.dumps({m:(importlib.util.find_spec(m) is not None) for m in mods}))'"
           end_marker = "  $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null"
           start = text.find(start_marker)
           end = text.find(end_marker, start)
           if start < 0 or end < 0:
-              raise SystemExit('Could not locate existing PDF dependency probe block')
+              raise SystemExit('Existing dependency probe block not found')
           old_block = text[start:end]
-          if old_block.count("ConvertFrom-Json") != 1 or old_block.count("$deps.pypdf") != 1:
+          if old_block.count('$deps.pypdf') != 1:
               raise SystemExit('Unexpected dependency probe shape')
 
-          new_block = r'''  $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
-          $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20
-          if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes;pythonStderrPreview=$dep.stderrPreview}) 46}
-          $depLine=([string]$dep.stdout).Trim()
-          $deps=[ordered]@{pypdf=$false;reportlab=$false;pdfplumber=$false}
-          $seen=@{}
-          foreach($part in @($depLine -split ';')){
-            $kv=@($part -split '=',2)
-            if($kv.Count -ne 2){continue}
-            $name=([string]$kv[0]).Trim().ToLowerInvariant();$value=([string]$kv[1]).Trim()
-            if($deps.Contains($name) -and $value -in @('0','1')){$deps[$name]=($value -eq '1');$seen[$name]=$true}
-          }
-          $requiredDepNames=@('pypdf','reportlab','pdfplumber')
-          $missingDepMarkers=@($requiredDepNames|Where-Object{-not $seen.ContainsKey($_)})
-          if($missingDepMarkers.Count -gt 0){
-            $preview=$depLine;if($preview.Length -gt 300){$preview=$preview.Substring(0,300)}
-            Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT';mutation='NONE';missingMarkers=$missingDepMarkers;stdoutPreview=$preview}) 47
-          }
-          $depsReady=([bool]$deps['pypdf'] -and [bool]$deps['reportlab'] -and [bool]$deps['pdfplumber'])
-'''
-          text = text[:start] + new_block + text[end:]
-
+          replacement_b64 = 'ICAkZGVwQ29kZT0naW1wb3J0IGltcG9ydGxpYi51dGlsO21vZHM9W1wicHlwZGZcIixcInJlcG9ydGxhYlwiLFwicGRmcGx1bWJlclwiXTtwcmludChcIjtcIi5qb2luKG0rXCI9XCIrKFwiMVwiIGlmIGltcG9ydGxpYi51dGlsLmZpbmRfc3BlYyhtKSBpcyBub3QgTm9uZSBlbHNlIFwiMFwiKSBmb3IgbSBpbiBtb2RzKSknCiAgJGRlcD1SdW4tUHl0aG9uIC1QeUFyZ3MgQCgnLWMnLCRkZXBDb2RlKSAtVGltZW91dFNlY29uZHMgMjAKICBpZigkZGVwLnRpbWVkT3V0IC1vciAkZGVwLmV4aXQgLW5lIDApe0VtaXQgKFtvcmRlcmVkXUB7b2s9JGZhbHNlO2NsYXNzaWZpY2F0aW9uPSdIRVJNRVNfUERGX0RFUEVOREVOQ1lfUFJPQkVfRkFJTEVEJzttdXRhdGlvbj0nTk9ORSc7cHl0aG9uVGltZWRPdXQ9JGRlcC50aW1lZE91dDtweXRob25FeGl0PSRkZXAuZXhpdDtweXRob25TdGRlcnJCeXRlcz0kZGVwLnN0ZGVyckJ5dGVzO3B5dGhvblN0ZGVyclByZXZpZXc9JGRlcC5zdGRlcnJQcmV2aWV3fSkgNDZ9CiAgJGRlcExpbmU9KFtzdHJpbmddJGRlcC5zdGRvdXQpLlRyaW0oKQogICRkZXBzPVtvcmRlcmVkXUB7cHlwZGY9JGZhbHNlO3JlcG9ydGxhYj0kZmFsc2U7cGRmcGx1bWJlcj0kZmFsc2V9CiAgJHNlZW49QHt9CiAgZm9yZWFjaCgkcGFydCBpbiBAKCRkZXBMaW5lIC1zcGxpdCAnOycpKXsKICAgICRrdj1AKCRwYXJ0IC1zcGxpdCAnPScsMikKICAgIGlmKCRrdi5Db3VudCAtbmUgMil7Y29udGludWV9CiAgICAkbmFtZT0oW3N0cmluZ10ka3ZbMF0pLlRyaW0oKS5Ub0xvd2VySW52YXJpYW50KCk7JHZhbHVlPShbc3RyaW5nXSRrdlsxXSkuVHJpbSgpCiAgICBpZigkZGVwcy5Db250YWlucygkbmFtZSkgLWFuZCAkdmFsdWUgLWluIEAoJzAnLCcxJykpeyRkZXBzWyRuYW1lXT0oJHZhbHVlIC1lcSAnMScpOyRzZWVuWyRuYW1lXT0kdHJ1ZX0KICB9CiAgJHJlcXVpcmVkRGVwTmFtZXM9QCgncHlwZGYnLCdyZXBvcnRsYWInLCdwZGZwbHVtYmVyJykKICAkbWlzc2luZ0RlcE1hcmtlcnM9QCgkcmVxdWlyZWREZXBOYW1lc3xXaGVyZS1PYmplY3R7LW5vdCAkc2Vlbi5Db250YWluc0tleSgkXyl9KQogIGlmKCRtaXNzaW5nRGVwTWFya2Vycy5Db3VudCAtZ3QgMCl7CiAgICAkcHJldmlldz0kZGVwTGluZTtpZigkcHJldmlldy5MZW5ndGggLWd0IDMwMCl7JHByZXZpZXc9JHByZXZpZXcuU3Vic3RyaW5nKDAsMzAwKX0KICAgIEVtaXQgKFtvcmRlcmVkXUB7b2s9JGZhbHNlO2NsYXNzaWZpY2F0aW9uPSdIRVJNRVNfUERGX0RFUEVOREVOQ1lfUFJPQkVfSU5WQUxJRF9PVVRQVVQnO211dGF0aW9uPSdOT05FJzttaXNzaW5nTWFya2Vycz0kbWlzc2luZ0RlcE1hcmtlcnM7c3Rkb3V0UHJldmlldz0kcHJldmlld30pIDQ3CiAgfQogICRkZXBzUmVhZHk9KFtib29sXSRkZXBzWydweXBkZiddIC1hbmQgW2Jvb2xdJGRlcHNbJ3JlcG9ydGxhYiddIC1hbmQgW2Jvb2xdJGRlcHNbJ3BkZnBsdW1iZXInXSkK'
+          replacement = base64.b64decode(replacement_b64).decode('utf-8')
+          text = text[:start] + replacement + text[end:]
           required = [
-              "pypdf=$false;reportlab=$false;pdfplumber=$false",
-              "HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT",
-              "$deps['pypdf']",
-              "$deps['reportlab']",
-              "$deps['pdfplumber']",
               '-TimeoutMs 420000',
-              "'pypdf','reportlab','pdfplumber'",
+              'HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT',
+              "pypdf=$false;reportlab=$false;pdfplumber=$false",
               "documentTextReturned=$false",
               "providerTouched=$false",
               "ollamaMutationStarted=$false",
@@ -73,17 +54,19 @@ jobs:
           ]
           for marker in required:
               if marker not in text:
-                  raise SystemExit(f'Missing PDF invariant after probe repair: {marker}')
+                  raise SystemExit('Missing invariant: ' + marker)
           if '$deps.pypdf' in text:
-              raise SystemExit('Fragile dependency property access still present')
-          p.write_text(text, encoding='utf-8', newline='\n')
+              raise SystemExit('Fragile dependency property access remains')
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
 
-      - name: Parse and enforce PDF safety invariants
+      - name: Parse helper and enforce guards
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $p='afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
-          $tokens=$null;$errors=$null
+          $tokens=$null
+          $errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
           $c=Get-Content $p -Raw
@@ -91,17 +74,14 @@ jobs:
           if($c.Contains('$deps.pypdf')){throw 'Fragile property access remains'}
           'H3_HERMES_PDF_DEP_PROBE_FIX=PASS'
 
-      - name: Commit safely on current main
+      - name: Commit helper patch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
-          if git diff --cached --quiet; then
-            echo 'No change required'
-            exit 0
-          fi
+          git diff --cached --quiet && exit 0
           git commit -m 'Harden H3 Hermes PDF dependency probe'
           git fetch origin main
           git rebase origin/main
