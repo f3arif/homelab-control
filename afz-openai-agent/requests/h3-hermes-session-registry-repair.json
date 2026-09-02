@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-session-registry-repair-20260902-r1",
+  "id": "h3-hermes-session-registry-repair-20260902-r2",
   "enabled": true,
   "action": "repair-exact-empty-legacy-registry",
   "target": "h3",
