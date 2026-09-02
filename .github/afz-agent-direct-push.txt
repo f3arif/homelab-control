@@ -1,7 +1,7 @@
 AFZ direct agent source recovery
-reason=prospect-responses-web-search-400-fix
+reason=prospect-openai-utf8-json-transport-fix
 target=windows-main
 authority=github-exact-sha
 operation=source-sync-and-prospect-engine-health-verification
-source_commit=a3c5abbce4160e557abf6154236f2d1bad982160
-requested_at=2026-09-02T15:56:00Z
+source_commit=641c87e205a06ada6eab1f95b157ff480b239732
+requested_at=2026-09-02T16:35:30Z
