@@ -1,0 +1,3 @@
+request=afz-blog-git-migration-20260901-r1
+commit=764cf07a1248269c9b46162600cc61b575655013
+mode=guarded-baseline
