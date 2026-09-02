@@ -17,7 +17,7 @@ if($action -notin @('audit-telegram-attachments','audit-and-reload-telegram-gate
 if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'Telegram attachment target mismatch.'}
 $repairMode=($action -eq 'audit-and-reload-telegram-gateway')
 if([bool]$req.change_config -or [bool]$req.change_network){throw 'Telegram attachment request forbidden mutation flag.'}
-if($repairMode){if(-[bool]$req.restart_gateway -or [bool]$req.read_only){throw 'Telegram gateway reload mode guard mismatch.'}}
+if($repairMode){if(-not [bool]$req.restart_gateway -or [bool]$req.read_only){throw 'Telegram gateway reload mode guard mismatch.'}}
 else{if(-not [bool]$req.read_only -or [bool]$req.restart_gateway){throw 'Telegram attachment audit safety flags mismatch.'}}
 
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
