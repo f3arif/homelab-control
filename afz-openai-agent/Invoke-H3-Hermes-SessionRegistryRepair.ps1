@@ -41,6 +41,9 @@ function Save-Result($result,[string]$transport){
     backupPath=$(if($result.PSObject.Properties.Name -contains 'backupPath'){[string]$result.backupPath}else{$null})
     entryCount=$(if($result.PSObject.Properties.Name -contains 'entryCount'){$result.entryCount}else{$null})
     strictValidation=$(if($result.PSObject.Properties.Name -contains 'strictValidation'){[string]$result.strictValidation}else{$null})
+    sizeBytes=$(if($result.PSObject.Properties.Name -contains 'sizeBytes'){$result.sizeBytes}else{$null})
+    sha256=$(if($result.PSObject.Properties.Name -contains 'sha256'){[string]$result.sha256}else{$null})
+    errorType=$(if($result.PSObject.Properties.Name -contains 'errorType'){[string]$result.errorType}else{$null})
     gatewayProcessStopped=$false;providerTouched=$false;modelGenerationStarted=$false;ollamaMutationStarted=$false;networkChanged=$false
     observedAt=(Get-Date -Format o)
   }
