@@ -16,6 +16,7 @@ $watcherSrc=Join-Path $sourceRoot 'Push-Deploy-Watcher.ps1'
 $queueOrphanWatcher=Join-Path $sourceRoot 'Queue-Orphan-Request-Watcher.ps1'
 $familyPttAuditWatcher=Join-Path $sourceRoot 'FamilyPTT-Transport-Audit-Watcher-R3.ps1'
 $familyPttEdgeWatcher=Join-Path $sourceRoot 'FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
+$blogWatcher=Join-Path $sourceRoot 'AFZ-Blog-Request-Watcher.ps1'
 $remoteOpsOneShot=Join-Path $sourceRoot 'AFZ-RemoteOps-OneShot.ps1'
 $remoteOpsRequest=Join-Path $sourceRoot 'requests\afz-remoteops-start.json'
 $familyPttTwoHandsetPrepare=Join-Path $sourceRoot 'FamilyPTT-TwoHandset-Prepare.ps1'
@@ -150,6 +151,26 @@ if(Test-Path $familyPttEdgeWatcher){
   }
   $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction Stop
   if($familyPttEdgeTask.State -ne 'Running'){Start-ScheduledTask -TaskName $familyPttEdgeTaskName}
+}
+
+# AFZ Blog source-control cutover watcher. This task intentionally runs only in the
+# interactive Faiz profile because private GitHub credentials are provisioned there.
+# The watcher contract itself forbids service restart and publishing.
+if(Test-Path -LiteralPath $blogWatcher -PathType Leaf){
+  $blogTaskName='AFZ Blog Git Source Request Watcher'
+  $blogUser='DESKTOP-10SKF0M\Faiz'
+  $blogTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$blogWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $blogTaskTrigger=New-ScheduledTaskTrigger -AtLogOn -User $blogUser
+  $blogTaskPrincipal=New-ScheduledTaskPrincipal -UserId $blogUser -LogonType Interactive -RunLevel Highest
+  $blogTaskSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+  $blogTask=Get-ScheduledTask -TaskName $blogTaskName -ErrorAction SilentlyContinue
+  if($blogTask){
+    Set-ScheduledTask -TaskName $blogTaskName -Action $blogTaskAction -Trigger $blogTaskTrigger -Settings $blogTaskSettings -Principal $blogTaskPrincipal | Out-Null
+  }else{
+    Register-ScheduledTask -TaskName $blogTaskName -Action $blogTaskAction -Trigger $blogTaskTrigger -Settings $blogTaskSettings -Principal $blogTaskPrincipal -Force | Out-Null
+  }
+  $blogTask=Get-ScheduledTask -TaskName $blogTaskName -ErrorAction Stop
+  if($blogTask.State -ne 'Running'){Start-ScheduledTask -TaskName $blogTaskName}
 }
 
 Set-Content -LiteralPath $runtime -Value $patched -Encoding UTF8
