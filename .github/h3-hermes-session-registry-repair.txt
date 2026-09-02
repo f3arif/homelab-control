@@ -1,0 +1,11 @@
+H3 Hermes active-session registry guarded repair
+requested_at=2026-09-02T10:31:00-04:00
+target=DESKTOP-H3R6CQN
+authority=github-exact-sha
+repair_only_exact_empty_legacy_sessions_schema=true
+backup_before_mutation=true
+stop_gateway=false
+provider_change=false
+model_generation=false
+ollama_mutation=false
+network_change=false
