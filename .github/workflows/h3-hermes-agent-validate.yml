@@ -110,9 +110,10 @@ jobs:
             if(-not $dispatch.Contains($required)){throw "Dispatch helper missing: $required"}
           }
           $pdf=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1' -Raw
-          foreach($required in @('AFZ-H3-HERMES-PDF-RUNTIME-LATEST.txt','HERMES_PDF_TEXT_EXTRACTION_READY','HERMES_PDF_SKILL_MISSING','HERMES_PDF_DEPENDENCY_MISSING','latestCachedPdfSha256','documentTextReturned')){
+          foreach($required in @('AFZ-H3-HERMES-PDF-RUNTIME-LATEST.txt','HERMES_PDF_TEXT_EXTRACTION_READY','HERMES_PDF_SKILL_MISSING','HERMES_PDF_DEPENDENCY_MISSING','latestCachedPdfSha256','documentTextReturned','$remoteTemplate','__PY_B64__')){
             if(-not $pdf.Contains($required)){throw "PDF audit helper missing: $required"}
           }
+          if($pdf -match '\}\)\s+\$\(if\('){throw 'PDF audit contains unsafe interpolated remote exit subexpression'}
           $reload=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1' -Raw
           foreach($required in @('require_empty_active_registry','use_native_restart','HERMES_GATEWAY_NATIVE_RELOAD_VERIFIED','active_sessions.json','gateway restart')){
             if(-not $reload.Contains($required)){throw "Reload helper missing: $required"}
