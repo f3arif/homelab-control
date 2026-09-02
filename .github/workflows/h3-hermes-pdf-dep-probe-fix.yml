@@ -20,43 +20,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Replace fragile dependency probe
+      - name: Correct probe quoting and execute protocol canary
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import base64
+          import subprocess, sys
 
           path = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
           text = path.read_text(encoding='utf-8')
-          start_marker = "  $depCode='import json,importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(json.dumps({m:(importlib.util.find_spec(m) is not None) for m in mods}))'"
-          end_marker = "  $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null"
-          start = text.find(start_marker)
-          end = text.find(end_marker, start)
-          if start < 0 or end < 0:
-              raise SystemExit('Existing dependency probe block not found')
-          old_block = text[start:end]
-          if old_block.count('$deps.pypdf') != 1:
-              raise SystemExit('Unexpected dependency probe shape')
+          old = r'''  $depCode='import importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(\";\".join(m+\"=\"+(\"1\" if importlib.util.find_spec(m) is not None else \"0\") for m in mods))' '''.rstrip()
+          new = '''  $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))' '''.rstrip()
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one escaped probe line, found {text.count(old)}')
+          text = text.replace(old, new, 1)
 
-          replacement_b64 = 'ICAkZGVwQ29kZT0naW1wb3J0IGltcG9ydGxpYi51dGlsO21vZHM9W1wicHlwZGZcIixcInJlcG9ydGxhYlwiLFwicGRmcGx1bWJlclwiXTtwcmludChcIjtcIi5qb2luKG0rXCI9XCIrKFwiMVwiIGlmIGltcG9ydGxpYi51dGlsLmZpbmRfc3BlYyhtKSBpcyBub3QgTm9uZSBlbHNlIFwiMFwiKSBmb3IgbSBpbiBtb2RzKSknCiAgJGRlcD1SdW4tUHl0aG9uIC1QeUFyZ3MgQCgnLWMnLCRkZXBDb2RlKSAtVGltZW91dFNlY29uZHMgMjAKICBpZigkZGVwLnRpbWVkT3V0IC1vciAkZGVwLmV4aXQgLW5lIDApe0VtaXQgKFtvcmRlcmVkXUB7b2s9JGZhbHNlO2NsYXNzaWZpY2F0aW9uPSdIRVJNRVNfUERGX0RFUEVOREVOQ1lfUFJPQkVfRkFJTEVEJzttdXRhdGlvbj0nTk9ORSc7cHl0aG9uVGltZWRPdXQ9JGRlcC50aW1lZE91dDtweXRob25FeGl0PSRkZXAuZXhpdDtweXRob25TdGRlcnJCeXRlcz0kZGVwLnN0ZGVyckJ5dGVzO3B5dGhvblN0ZGVyclByZXZpZXc9JGRlcC5zdGRlcnJQcmV2aWV3fSkgNDZ9CiAgJGRlcExpbmU9KFtzdHJpbmddJGRlcC5zdGRvdXQpLlRyaW0oKQogICRkZXBzPVtvcmRlcmVkXUB7cHlwZGY9JGZhbHNlO3JlcG9ydGxhYj0kZmFsc2U7cGRmcGx1bWJlcj0kZmFsc2V9CiAgJHNlZW49QHt9CiAgZm9yZWFjaCgkcGFydCBpbiBAKCRkZXBMaW5lIC1zcGxpdCAnOycpKXsKICAgICRrdj1AKCRwYXJ0IC1zcGxpdCAnPScsMikKICAgIGlmKCRrdi5Db3VudCAtbmUgMil7Y29udGludWV9CiAgICAkbmFtZT0oW3N0cmluZ10ka3ZbMF0pLlRyaW0oKS5Ub0xvd2VySW52YXJpYW50KCk7JHZhbHVlPShbc3RyaW5nXSRrdlsxXSkuVHJpbSgpCiAgICBpZigkZGVwcy5Db250YWlucygkbmFtZSkgLWFuZCAkdmFsdWUgLWluIEAoJzAnLCcxJykpeyRkZXBzWyRuYW1lXT0oJHZhbHVlIC1lcSAnMScpOyRzZWVuWyRuYW1lXT0kdHJ1ZX0KICB9CiAgJHJlcXVpcmVkRGVwTmFtZXM9QCgncHlwZGYnLCdyZXBvcnRsYWInLCdwZGZwbHVtYmVyJykKICAkbWlzc2luZ0RlcE1hcmtlcnM9QCgkcmVxdWlyZWREZXBOYW1lc3xXaGVyZS1PYmplY3R7LW5vdCAkc2Vlbi5Db250YWluc0tleSgkXyl9KQogIGlmKCRtaXNzaW5nRGVwTWFya2Vycy5Db3VudCAtZ3QgMCl7CiAgICAkcHJldmlldz0kZGVwTGluZTtpZigkcHJldmlldy5MZW5ndGggLWd0IDMwMCl7JHByZXZpZXc9JHByZXZpZXcuU3Vic3RyaW5nKDAsMzAwKX0KICAgIEVtaXQgKFtvcmRlcmVkXUB7b2s9JGZhbHNlO2NsYXNzaWZpY2F0aW9uPSdIRVJNRVNfUERGX0RFUEVOREVOQ1lfUFJPQkVfSU5WQUxJRF9PVVRQVVQnO211dGF0aW9uPSdOT05FJzttaXNzaW5nTWFya2Vycz0kbWlzc2luZ0RlcE1hcmtlcnM7c3Rkb3V0UHJldmlldz0kcHJldmlld30pIDQ3CiAgfQogICRkZXBzUmVhZHk9KFtib29sXSRkZXBzWydweXBkZiddIC1hbmQgW2Jvb2xdJGRlcHNbJ3JlcG9ydGxhYiddIC1hbmQgW2Jvb2xdJGRlcHNbJ3BkZnBsdW1iZXInXSkK'
-          replacement = base64.b64decode(replacement_b64).decode('utf-8')
-          text = text[:start] + replacement + text[end:]
-          required = [
-              '-TimeoutMs 420000',
-              'HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT',
-              "pypdf=$false;reportlab=$false;pdfplumber=$false",
-              "documentTextReturned=$false",
-              "providerTouched=$false",
-              "ollamaMutationStarted=$false",
-              "networkChanged=$false",
-              "modelGenerationStarted=$false",
-          ]
-          for marker in required:
+          pycode = 'import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
+          cp = subprocess.run([sys.executable, '-c', pycode], text=True, capture_output=True, timeout=10)
+          if cp.returncode != 0:
+              raise SystemExit('Dependency protocol Python canary failed: ' + cp.stderr[:300])
+          parts = cp.stdout.strip().split(';')
+          if len(parts) != 3 or {p.split('=',1)[0] for p in parts} != {'pypdf','reportlab','pdfplumber'} or any(p.split('=',1)[1] not in {'0','1'} for p in parts):
+              raise SystemExit('Unexpected dependency protocol output: ' + cp.stdout[:300])
+
+          for marker in ['-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false']:
               if marker not in text:
                   raise SystemExit('Missing invariant: ' + marker)
-          if '$deps.pypdf' in text:
-              raise SystemExit('Fragile dependency property access remains')
+          if '\\"pypdf\\"' in text:
+              raise SystemExit('Escaped probe quote remains')
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
 
@@ -71,8 +62,8 @@ jobs:
           if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
           $c=Get-Content $p -Raw
           foreach($required in @('-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          if($c.Contains('$deps.pypdf')){throw 'Fragile property access remains'}
-          'H3_HERMES_PDF_DEP_PROBE_FIX=PASS'
+          if($c.Contains('$deps.pypdf')){throw 'Fragile dependency property access remains'}
+          'H3_HERMES_PDF_DEP_PROBE_QUOTING_FIX=PASS'
 
       - name: Commit helper patch
         shell: bash
@@ -82,7 +73,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
           git diff --cached --quiet && exit 0
-          git commit -m 'Harden H3 Hermes PDF dependency probe'
+          git commit -m 'Correct H3 Hermes PDF probe quoting'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
