@@ -63,6 +63,23 @@ try{
   }
 }catch{}
 
+# Read-only PDF runtime audit preflight. This inspects only skill/runtime metadata
+# and bounded extraction signals; it never publishes PDF text or mutates Hermes.
+$pdfAuditRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+$pdfAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
+try{
+  if((Test-Path -LiteralPath $pdfAuditRelay -PathType Leaf) -and (Test-Path -LiteralPath $pdfAuditRequest -PathType Leaf)){
+    $pdfReq=Get-Content -LiteralPath $pdfAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $pdfId=([string]$pdfReq.id).Trim()
+    $pdfDone=$false
+    if($pdfId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
+      $pdfStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-pdf-runtime-audit' ($pdfId+'.json')
+      if(Test-Path -LiteralPath $pdfStatePath -PathType Leaf){try{$pdfState=Get-Content -LiteralPath $pdfStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$pdfDone=[bool]$pdfState.ok}catch{}}
+      if(-not $pdfDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $pdfAuditRelay -InstallRoot $InstallRoot -RequestPath $pdfAuditRequest *> $null}
+    }
+  }
+}catch{}
+
 function Save-Result($result){
   $json=$result|ConvertTo-Json -Depth 20 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
