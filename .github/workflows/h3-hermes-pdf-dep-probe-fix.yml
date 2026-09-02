@@ -1,4 +1,4 @@
-name: H3 Hermes PDF Dependency Probe Fix
+name: H3 Hermes PDF Python Launcher Fix
 
 on:
   push:
@@ -12,58 +12,118 @@ permissions:
 
 jobs:
   fix:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: windows-latest
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Correct probe quoting and execute protocol canary
-        shell: bash
+      - name: Replace Run-Python launcher
+        shell: python
         run: |
-          python - <<'PY'
           from pathlib import Path
-          import subprocess, sys
 
           path = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
           text = path.read_text(encoding='utf-8')
-          old = r'''  $depCode='import importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(\";\".join(m+\"=\"+(\"1\" if importlib.util.find_spec(m) is not None else \"0\") for m in mods))' '''.rstrip()
-          new = '''  $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))' '''.rstrip()
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one escaped probe line, found {text.count(old)}')
-          text = text.replace(old, new, 1)
+          start = text.find('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
+          end = text.find('\ntry{\n  if($env:COMPUTERNAME', start)
+          if start < 0 or end < 0:
+              raise SystemExit('Could not locate Run-Python function')
+          old = text[start:end]
+          if old.count('Start-Process -FilePath $script:python -ArgumentList $PyArgs') != 1:
+              raise SystemExit('Unexpected Run-Python launcher shape')
 
-          pycode = 'import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
-          cp = subprocess.run([sys.executable, '-c', pycode], text=True, capture_output=True, timeout=10)
-          if cp.returncode != 0:
-              raise SystemExit('Dependency protocol Python canary failed: ' + cp.stderr[:300])
-          parts = cp.stdout.strip().split(';')
-          if len(parts) != 3 or {p.split('=',1)[0] for p in parts} != {'pypdf','reportlab','pdfplumber'} or any(p.split('=',1)[1] not in {'0','1'} for p in parts):
-              raise SystemExit('Unexpected dependency protocol output: ' + cp.stdout[:300])
+          new = r'''function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
+            if($null -eq $PyArgs -or $PyArgs.Count -eq 0){throw 'Run-Python received empty argument list.'}
+            foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
+            $out=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.out')
+            $err=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.err')
+            $codeFile=$null
+            try{
+              $effectiveArgs=@($PyArgs)
+              if($effectiveArgs.Count -ge 2 -and [string]$effectiveArgs[0] -eq '-c'){
+                $codeFile=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.py')
+                [IO.File]::WriteAllText($codeFile,[string]$effectiveArgs[1],(New-Object Text.UTF8Encoding($false)))
+                if($effectiveArgs.Count -gt 2){$effectiveArgs=@($codeFile)+@($effectiveArgs[2..($effectiveArgs.Count-1)])}else{$effectiveArgs=@($codeFile)}
+              }
+              $quoted=@()
+              foreach($a in $effectiveArgs){
+                $s=[string]$a
+                if($s.Contains('"')){throw 'Run-Python argument contains unsupported double quote after code staging.'}
+                if($s -match '\s'){
+                  if($s.EndsWith('\')){throw 'Run-Python spaced argument cannot end with backslash.'}
+                  $quoted+=('"'+$s+'"')
+                }else{$quoted+=$s}
+              }
+              $argLine=$quoted -join ' '
+              $p=Start-Process -FilePath $script:python -ArgumentList $argLine -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+              $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
+              if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
+              $stdout=$(if(Test-Path $out){[IO.File]::ReadAllText($out)}else{''})
+              $stderr=$(if(Test-Path $err){[IO.File]::ReadAllText($err)}else{''})
+              $stderrPreview=$stderr;if($stderrPreview.Length -gt 600){$stderrPreview=$stderrPreview.Substring(0,600)}
+              return [pscustomobject]@{timedOut=$to;exit=$(if($to){$null}else{[int]$p.ExitCode});stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
+            }finally{
+              Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+              if($codeFile){Remove-Item -LiteralPath $codeFile -Force -ErrorAction SilentlyContinue}
+            }
+          }
+          '''
+          # Keep normal file indentation, not Python block indentation.
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+          text = text[:start] + new + text[end:]
 
-          for marker in ['-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false']:
+          required = [
+              '$codeFile=',
+              '[IO.File]::WriteAllText($codeFile',
+              '$argLine=$quoted -join',
+              'Start-Process -FilePath $script:python -ArgumentList $argLine',
+              '-TimeoutMs 420000',
+              'HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT',
+              "'pypdf','reportlab','pdfplumber'",
+              'documentTextReturned=$false',
+              'providerTouched=$false',
+              'ollamaMutationStarted=$false',
+              'networkChanged=$false',
+              'modelGenerationStarted=$false',
+          ]
+          for marker in required:
               if marker not in text:
-                  raise SystemExit('Missing invariant: ' + marker)
-          if '\\"pypdf\\"' in text:
-              raise SystemExit('Escaped probe quote remains')
+                  raise SystemExit('Missing invariant after launcher patch: ' + marker)
+          if 'Start-Process -FilePath $script:python -ArgumentList $PyArgs' in text:
+              raise SystemExit('Old flattened Python launcher remains')
           path.write_text(text, encoding='utf-8', newline='\n')
-          PY
 
-      - name: Parse helper and enforce guards
-        shell: pwsh
+          # Build a canary from the exact patched Run-Python function.
+          start2 = text.index('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
+          end2 = text.index('\ntry{\n  if($env:COMPUTERNAME', start2)
+          fn = text[start2:end2]
+          canary = fn + r'''
+          $ErrorActionPreference='Stop'
+          $script:python=(Get-Command python.exe -ErrorAction Stop).Source
+          $r=Run-Python -PyArgs @('-c','import sys;print("AFZ_OK:"+sys.argv[1])','argument with spaces') -TimeoutSeconds 15
+          if($r.timedOut -or $r.exit -ne 0){throw "Run-Python canary failed exit=$($r.exit) stderr=$($r.stderrPreview)"}
+          if(([string]$r.stdout).Trim() -ne 'AFZ_OK:argument with spaces'){throw "Run-Python boundary canary mismatch: $($r.stdout)"}
+          'H3_HERMES_PDF_RUN_PYTHON_CANARY=PASS'
+          '''
+          Path('run-python-canary.ps1').write_text(canary, encoding='utf-8', newline='\n')
+
+      - name: Validate with Windows PowerShell 5.1
+        shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $p='afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
-          $tokens=$null
-          $errors=$null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\run-python-canary.ps1
+          if($LASTEXITCODE -ne 0){throw "Run-Python canary exit=$LASTEXITCODE"}
+          $p='afz-openai-agent\Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+          $tokens=$null;$errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper outer parse failed'}
           $c=Get-Content $p -Raw
           foreach($required in @('-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          if($c.Contains('$deps.pypdf')){throw 'Fragile dependency property access remains'}
-          'H3_HERMES_PDF_DEP_PROBE_QUOTING_FIX=PASS'
+          if($c.Contains('Start-Process -FilePath $script:python -ArgumentList $PyArgs')){throw 'Old Run-Python launcher remains'}
+          'H3_HERMES_PDF_PYTHON_LAUNCHER_FIX=PASS'
 
       - name: Commit helper patch
         shell: bash
@@ -73,7 +133,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
           git diff --cached --quiet && exit 0
-          git commit -m 'Correct H3 Hermes PDF probe quoting'
+          git commit -m 'Harden H3 Hermes PDF Python argument boundaries'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
