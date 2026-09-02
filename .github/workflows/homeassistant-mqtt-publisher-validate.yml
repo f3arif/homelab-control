@@ -1,0 +1,81 @@
+name: Home Assistant MQTT publisher validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/homeassistant/**'
+      - '.github/workflows/homeassistant-mqtt-publisher-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(
+            'afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1',
+            'afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1'
+          )
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path), [ref]$tokens, [ref]$errors
+            )
+            if (@($errors).Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$path :: $($_.Message)" }
+              throw "PowerShell parse failed: $path"
+            }
+            Write-Host "PARSE_PASS=$path"
+          }
+
+      - name: Validate publisher safety contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publisher = Get-Content 'afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1' -Raw
+          $installer = Get-Content 'afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1' -Raw
+
+          $requiredPublisher = @(
+            "http://100.71.26.69:8789/api/state",
+            "afz/fleet",
+            "homeassistant",
+            "windows-control-observer-1",
+            "h3-generic-readiness-observer-1",
+            "lenovo-direct-1",
+            "hpenvy-direct-1",
+            "raspi-direct-observer-1",
+            "default_entity_id"
+          )
+          foreach ($needle in $requiredPublisher) {
+            if (-not $publisher.Contains($needle)) { throw "Missing publisher contract marker: $needle" }
+          }
+
+          if ($publisher -match '(?i)OneDrive|SharePoint') {
+            if ($publisher -notmatch 'GitHub/OneDrive as a liveness source') {
+              throw 'Unexpected OneDrive/SharePoint runtime dependency.'
+            }
+          }
+          if ($publisher -match '(?i)POST\s+/api/jobs|Invoke-RestMethod\s+.*-Method\s+Post') {
+            throw 'Publisher must not create jobs or POST Control Hub actions.'
+          }
+
+          if ($installer -notmatch 'New-ScheduledTaskTrigger\s+-AtStartup') {
+            throw 'Installer must use AtStartup trigger only.'
+          }
+          if ($installer -match '(?i)-RepetitionInterval|-Daily|-Once\b') {
+            throw 'Recurring Task Scheduler trigger is forbidden for this publisher.'
+          }
+          if ($installer -notmatch 'MultipleInstances\s+IgnoreNew') {
+            throw 'Installer must enforce IgnoreNew.'
+          }
+
+          Write-Host 'SAFETY_CONTRACT=PASS'
