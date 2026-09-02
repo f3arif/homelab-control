@@ -108,11 +108,25 @@ try{
   $pdf=$pdfs[0]
   $skillText=[IO.File]::ReadAllText($skill);$suspicious=($skillText -match '(?im)^\s*pdf\s+text\b')
 
-  $depCode='import json,importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(json.dumps({m:(importlib.util.find_spec(m) is not None) for m in mods}))'
+  $depCode='import importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(\";\".join(m+\"=\"+(\"1\" if importlib.util.find_spec(m) is not None else \"0\") for m in mods))'
   $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20
   if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes;pythonStderrPreview=$dep.stderrPreview}) 46}
-  try{$deps=$dep.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';stdoutBytes=[Text.Encoding]::UTF8.GetByteCount($dep.stdout)}) 47}
-  $depsReady=([bool]$deps.pypdf -and [bool]$deps.reportlab -and [bool]$deps.pdfplumber)
+  $depLine=([string]$dep.stdout).Trim()
+  $deps=[ordered]@{pypdf=$false;reportlab=$false;pdfplumber=$false}
+  $seen=@{}
+  foreach($part in @($depLine -split ';')){
+    $kv=@($part -split '=',2)
+    if($kv.Count -ne 2){continue}
+    $name=([string]$kv[0]).Trim().ToLowerInvariant();$value=([string]$kv[1]).Trim()
+    if($deps.Contains($name) -and $value -in @('0','1')){$deps[$name]=($value -eq '1');$seen[$name]=$true}
+  }
+  $requiredDepNames=@('pypdf','reportlab','pdfplumber')
+  $missingDepMarkers=@($requiredDepNames|Where-Object{-not $seen.ContainsKey($_)})
+  if($missingDepMarkers.Count -gt 0){
+    $preview=$depLine;if($preview.Length -gt 300){$preview=$preview.Substring(0,300)}
+    Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT';mutation='NONE';missingMarkers=$missingDepMarkers;stdoutPreview=$preview}) 47
+  }
+  $depsReady=([bool]$deps['pypdf'] -and [bool]$deps['reportlab'] -and [bool]$deps['pdfplumber'])
   $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null
   if(-not $depsReady){
     if(-not $repairMode){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 10}
