@@ -75,6 +75,7 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
 function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 30 -Compress;exit $code}
+function Stage([string]$name){[Console]::Error.WriteLine(('AFZPDF_STAGE='+$name))}
 function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
   if($null -eq $PyArgs -or $PyArgs.Count -eq 0){throw 'Run-Python received empty argument list.'}
   foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
@@ -141,6 +142,7 @@ try{
   $skillText=[IO.File]::ReadAllText($skill);$suspicious=($skillText -match '(?im)^\s*pdf\s+text\b')
 
   $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
+  Stage 'dep-probe'
   $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20
   if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes;pythonStderrPreview=$dep.stderrPreview}) 46}
   $depLine=([string]$dep.stdout).Trim()
@@ -164,16 +166,21 @@ try{
     if(-not $repairMode){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 10}
     $stamp=Get-Date -Format 'yyyyMMdd-HHmmss';$preFreeze=Join-Path $root ('pdf-deps-pre-'+$stamp+'.txt')
     $pipBootstrapped=$false
+    Stage 'pip-probe'
     $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20
     if($pipProbe.timedOut -or $pipProbe.exit -ne 0){
+      Stage 'ensurepip'
       $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120
       if($ensure.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_BOOTSTRAP_TIMEOUT';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';ensurepipStderrBytes=$ensure.stderrBytes;ensurepipStderrPreview=$ensure.stderrPreview;preFreeze=$preFreeze}) 48}
       if($ensure.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_BOOTSTRAP_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';ensurepipExit=$ensure.exit;ensurepipStderrBytes=$ensure.stderrBytes;ensurepipStderrPreview=$ensure.stderrPreview;preFreeze=$preFreeze}) 48}
       $pipBootstrapped=$true
+      Stage 'pip-verify'
       $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20
       if($pipProbe.timedOut -or $pipProbe.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PIP_VERIFY_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';pythonTimedOut=$pipProbe.timedOut;pythonExit=$pipProbe.exit;pythonStderrBytes=$pipProbe.stderrBytes;pythonStderrPreview=$pipProbe.stderrPreview;preFreeze=$preFreeze}) 49}
     }
+    Stage 'pip-freeze'
     $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;if(-not $freeze.timedOut -and $freeze.exit -eq 0){[IO.File]::WriteAllText($preFreeze,$freeze.stdout,(New-Object Text.UTF8Encoding($false)))}
+    Stage 'pip-install'
     $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150
     $pipExit=$pip.exit;$pipErrBytes=$pip.stderrBytes
     if($pip.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_INSTALL_TIMEOUT';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';preFreeze=$preFreeze;pipStderrBytes=$pip.stderrBytes;pipStderrPreview=$pip.stderrPreview}) 50}
@@ -182,6 +189,7 @@ try{
   }
 
   $versionsCode='import json,pypdf,reportlab,pdfplumber;print(json.dumps({"pypdf":getattr(pypdf,"__version__",""),"reportlab":getattr(reportlab,"Version",getattr(reportlab,"__version__","")),"pdfplumber":getattr(pdfplumber,"__version__","")}))'
+  Stage 'import-verify'
   $vr=Run-Python -PyArgs @('-c',$versionsCode) -TimeoutSeconds 30
   if($vr.timedOut -or $vr.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});pythonExit=$vr.exit;pythonTimedOut=$vr.timedOut;pythonStderrBytes=$vr.stderrBytes;pythonStderrPreview=$vr.stderrPreview;preFreeze=$preFreeze}) 52}
   try{$versions=$vr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});preFreeze=$preFreeze}) 52}
@@ -189,9 +197,11 @@ try{
   $subset=Join-Path $env:TEMP ('afz-hermes-pdf-subset-'+[guid]::NewGuid().ToString('n')+'.pdf')
   try{
     $subsetCode='import sys,json;from pypdf import PdfReader,PdfWriter;r=PdfReader(sys.argv[1]);w=PdfWriter();n=min(int(sys.argv[3]),len(r.pages));[w.add_page(r.pages[i]) for i in range(n)];f=open(sys.argv[2],"wb");w.write(f);f.close();print(json.dumps({"page_count":len(r.pages),"sample_pages":n}))'
+    Stage 'sample-build'
     $sr=Run-Python -PyArgs @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) -TimeoutSeconds 45
     if($sr.timedOut -or $sr.exit -ne 0 -or -not(Test-Path -LiteralPath $subset -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_SAMPLE_BUILD_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});pythonExit=$sr.exit;pythonTimedOut=$sr.timedOut;pythonStderrBytes=$sr.stderrBytes;pythonStderrPreview=$sr.stderrPreview;preFreeze=$preFreeze}) 53}
     try{$sampleMeta=$sr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_SAMPLE_BUILD_INVALID_JSON';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});preFreeze=$preFreeze}) 53}
+    Stage 'pdf-read'
     $rr=Run-Python -PyArgs @($pdfRead,$subset,'--text') -TimeoutSeconds 90
     if($rr.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_TIMEOUT';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;samplePages=[int]$sampleMeta.sample_pages;readStderrBytes=$rr.stderrBytes;readStderrPreview=$rr.stderrPreview;preFreeze=$preFreeze}) 54}
     if($rr.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readExit=$rr.exit;readStderrBytes=$rr.stderrBytes;readStderrPreview=$rr.stderrPreview;samplePages=[int]$sampleMeta.sample_pages;preFreeze=$preFreeze}) 54}
@@ -208,7 +218,7 @@ try{
 $remote=$remoteTemplate.Replace('__REPAIR_MODE__',$(if($repair){'$true'}else{'$false'})).Replace('__MAX_PAGES__',[string]$maxPages)
 $routes=if($repair){@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()})}else{@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},[pscustomobject]@{target='Faiz@192.168.50.185';transport='lan-hostkey-alias';extra=@('-o','HostKeyAlias=100.106.186.118')})}
 $result=$null
-foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 420000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
+foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 600000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
 if($null -eq $result){$result=[pscustomobject]@{ok=$false;classification='HERMES_PDF_RUNTIME_UNREACHABLE'}}
 Save-Result $result
 exit $(if([bool]$result.ok){0}else{1})
