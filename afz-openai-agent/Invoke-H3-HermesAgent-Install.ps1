@@ -45,13 +45,14 @@ function Save-Result($result){
         selectedModel=$(if($result.PSObject.Properties.Name -contains 'selectedModel'){[string]$result.selectedModel}else{$null})
         modelProvider=$(if($result.PSObject.Properties.Name -contains 'modelProvider'){[string]$result.modelProvider}else{$null})
         desktopBackendCandidates=$(if($result.PSObject.Properties.Name -contains 'desktopBackendCandidates'){[int]$result.desktopBackendCandidates}else{0})
+        processAudit=$(if($result.PSObject.Properties.Name -contains 'processAudit'){@($result.processAudit)}else{@()})
         stoppedPids=$(if($result.PSObject.Properties.Name -contains 'stoppedPids'){@($result.stoppedPids)}else{@()})
         respawnedPid=$(if($result.PSObject.Properties.Name -contains 'respawnedPid'){$result.respawnedPid}else{$null})
         electronUiTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false
         error=$(if($result.PSObject.Properties.Name -contains 'error'){[string]$result.error}else{$null})
         observedAt=(Get-Date -Format o)
       }
-      [IO.File]::WriteAllText($diagPath,($safe|ConvertTo-Json -Depth 10),$utf8)
+      [IO.File]::WriteAllText($diagPath,($safe|ConvertTo-Json -Depth 12),$utf8)
     }
   }catch{}
   Write-Output $json
@@ -65,7 +66,7 @@ function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 16 -Compress;exit $code}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST';host=$env:COMPUTERNAME;retryable=$false}) 30}
 $hermesRoot=Join-Path $env:LOCALAPPDATA 'hermes'
 $hermesPath=Join-Path $hermesRoot 'bin\hermes.exe'
-$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r16.json'
+$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r17.json'
 if(-not(Test-Path -LiteralPath $hermesPath -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false}) 41}
 if(Test-Path -LiteralPath $marker -PathType Leaf){
   try{$prior=Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json;$prior.classification='HERMES_DESKTOP_BACKEND_REFRESH_ALREADY_APPLIED';$prior.ok=$true;$prior.retryable=$false;Emit $prior 0}catch{}
@@ -112,12 +113,46 @@ function Is-DesktopBackend($p){
   if(-not($subcommand -and $ephemeral)){return $false}
   return (Has-HermesElectronAncestor ([int]$p.ProcessId))
 }
+function Redact-CommandLine([string]$Text){
+  if([string]::IsNullOrWhiteSpace($Text)){return ''}
+  $s=$Text
+  $s=[regex]::Replace($s,'(?i)(--(?:api[-_]?key|token|password|secret)\s+)([^\s]+)','$1<redacted>')
+  $s=[regex]::Replace($s,'(?i)((?:TOKEN|API_KEY|PASSWORD|SECRET)=)([^\s]+)','$1<redacted>')
+  if($s.Length -gt 700){$s=$s.Substring(0,700)+'…'}
+  return $s
+}
+function Get-ProcessAudit{
+  $rows=@()
+  foreach($p in $all){
+    $cl=[string]$p.CommandLine
+    $name=[string]$p.Name
+    if($name -notmatch '(?i)hermes|electron|python|node' -and $cl -notmatch '(?i)hermes|tui_gateway|serve|dashboard'){continue}
+    $parentName=''
+    $parent=[int]$p.ParentProcessId
+    if($byId.ContainsKey($parent)){$parentName=[string]$byId[$parent].Name}
+    $rows += [ordered]@{
+      pid=[int]$p.ProcessId
+      parentPid=$parent
+      name=$name
+      parentName=$parentName
+      commandLine=(Redact-CommandLine $cl)
+      hasServe=[bool]($cl -match '(?i)(?:^|\s)serve(?:\s|$)')
+      hasDashboard=[bool]($cl -match '(?i)(?:^|\s)dashboard(?:\s|$)')
+      hasPort0=[bool]($cl -match '(?i)(?:--port\s+0(?:\s|$)|--port=0(?:\s|$))')
+      hasHermesCliMain=[bool]($cl -match '(?i)hermes_cli(?:[\\/]|\.)main')
+      hermesExeAncestor=[bool](Has-HermesElectronAncestor ([int]$p.ProcessId))
+    }
+    if($rows.Count -ge 40){break}
+  }
+  return @($rows)
+}
 $candidates=@($all|Where-Object{Is-DesktopBackend $_})
 if($candidates.Count -eq 0){
-  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=0;stoppedPids=@()}) 44
+  $audit=Get-ProcessAudit
+  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=0;processAudit=$audit;stoppedPids=@()}) 44
 }
 if($candidates.Count -ne 1){
-  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_AMBIGUOUS';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=$candidates.Count;stoppedPids=@()}) 45
+  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_AMBIGUOUS';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=$candidates.Count;processAudit=(Get-ProcessAudit);stoppedPids=@()}) 45
 }
 $oldPids=@([int]$candidates[0].ProcessId)
 Stop-Process -Id $oldPids[0] -Force -ErrorAction Stop
@@ -141,7 +176,7 @@ $result=[ordered]@{
   ok=$true
   classification=$(if($newPid){'HERMES_DESKTOP_BACKEND_REFRESHED'}else{'HERMES_DESKTOP_BACKEND_RECYCLE_TRIGGERED'})
   host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider
-  desktopBackendCandidates=1;stoppedPids=$oldPids;respawnedPid=$newPid
+  desktopBackendCandidates=1;processAudit=@();stoppedPids=$oldPids;respawnedPid=$newPid
   electronUiTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false;finishedAt=(Get-Date -Format o)
 }
 $result|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $marker -Encoding UTF8
