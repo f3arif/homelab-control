@@ -70,6 +70,19 @@ try{
   if($runnerText -eq $phaseBefore -or $runnerText -notmatch 'ollama_post_started' -or $runnerText -notmatch 'ollama_post_returned'){
     throw 'Ridge16K phase-evidence compatibility patch did not match the exact-SHA runner.'
   }
+
+  # r2 is a distinct benchmark requested after r1 exhausted the 11,000-token
+  # output cap. Keep the same prompt/model/context/call-count and change only the
+  # output allowance. The patch is job-specific so the frozen r1 protocol remains
+  # reproducible and unchanged.
+  if($JobId -eq 'qwenridge16k-afz-website-20260902-r2'){
+    $predictBefore=$runnerText
+    $runnerText=$runnerText.Replace('num_predict=11000','num_predict=15000')
+    if($runnerText -eq $predictBefore -or $runnerText -notmatch 'num_predict=15000'){
+      throw 'Ridge16K r2 num_predict patch did not match the exact-SHA runner.'
+    }
+  }
+
   [IO.File]::WriteAllText($tmp,$runnerText,$utf8)
 
   $tokens=$null;$errors=$null
