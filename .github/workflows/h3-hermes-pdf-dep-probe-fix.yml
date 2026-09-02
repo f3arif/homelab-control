@@ -1,4 +1,4 @@
-name: H3 Hermes PDF Stage Timeout Fix
+name: H3 Hermes PDF Clean Verification Fix
 
 on:
   push:
@@ -19,40 +19,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch PDF stage diagnostics and outer timeout
+      - name: Initialize pip bootstrap state on clean path
         shell: python
         run: |
           from pathlib import Path
           p=Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
           text=p.read_text(encoding='utf-8')
-          if '-TimeoutMs 420000' in text:
-              text=text.replace('-TimeoutMs 420000','-TimeoutMs 600000',1)
-          elif '-TimeoutMs 600000' not in text:
-              raise SystemExit('outer timeout anchor missing')
-
-          emit="function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 30 -Compress;exit $code}\n"
-          stage=emit+"function Stage([string]$name){[Console]::Error.WriteLine(('AFZPDF_STAGE='+$name))}\n"
-          if "function Stage([string]$name)" not in text:
-              if emit not in text: raise SystemExit('emit anchor missing')
-              text=text.replace(emit,stage,1)
-
-          pairs=[
-            ("  $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20\n","  Stage 'dep-probe'\n  $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20\n"),
-            ("    $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n","    Stage 'pip-probe'\n    $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n"),
-            ("      $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120\n","      Stage 'ensurepip'\n      $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120\n"),
-            ("      $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n","      Stage 'pip-verify'\n      $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n"),
-            ("    $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;","    Stage 'pip-freeze'\n    $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;"),
-            ("    $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150\n","    Stage 'pip-install'\n    $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150\n"),
-            ("  $vr=Run-Python -PyArgs @('-c',$versionsCode) -TimeoutSeconds 30\n","  Stage 'import-verify'\n  $vr=Run-Python -PyArgs @('-c',$versionsCode) -TimeoutSeconds 30\n"),
-            ("    $sr=Run-Python -PyArgs @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) -TimeoutSeconds 45\n","    Stage 'sample-build'\n    $sr=Run-Python -PyArgs @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) -TimeoutSeconds 45\n"),
-            ("    $rr=Run-Python -PyArgs @($pdfRead,$subset,'--text') -TimeoutSeconds 90\n","    Stage 'pdf-read'\n    $rr=Run-Python -PyArgs @($pdfRead,$subset,'--text') -TimeoutSeconds 90\n"),
-          ]
-          for old,new in pairs:
-              if new in text: continue
-              if old not in text: raise SystemExit('stage anchor missing: '+old[:60])
+          old="$installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null\n  if(-not $depsReady){"
+          new="$installed=$false;$pipBootstrapped=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null\n  if(-not $depsReady){"
+          if new not in text:
+              if old not in text: raise SystemExit('clean-path initialization anchor missing')
               text=text.replace(old,new,1)
-
-          for marker in ['-TimeoutMs 600000','AFZPDF_STAGE=',"Stage 'ensurepip'","Stage 'pip-install'","Stage 'pdf-read'","'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false']:
+          inner="    $pipBootstrapped=$false\n    Stage 'pip-probe'"
+          if inner in text:
+              text=text.replace(inner,"    Stage 'pip-probe'",1)
+          if text.count('$pipBootstrapped=$false') != 1:
+              raise SystemExit('pipBootstrapped must be initialized exactly once')
+          for marker in ['-TimeoutMs 600000','AFZPDF_STAGE=',"'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false']:
               if marker not in text: raise SystemExit('missing invariant: '+marker)
           p.write_text(text,encoding='utf-8',newline='\n')
 
@@ -65,8 +48,9 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
           $c=Get-Content $p -Raw
-          foreach($required in @('-TimeoutMs 600000','AFZPDF_STAGE=',"Stage 'ensurepip'","Stage 'pip-install'","Stage 'pdf-read'","'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          'H3_HERMES_PDF_STAGE_TIMEOUT_PATCH=PASS'
+          if(([regex]::Matches($c,[regex]::Escape('$pipBootstrapped=$false'))).Count -ne 1){throw 'pipBootstrapped initialization count invalid'}
+          foreach($required in @('-TimeoutMs 600000','AFZPDF_STAGE=',"'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          'H3_HERMES_PDF_CLEAN_PATH_STATE_FIX=PASS'
 
       - name: Commit helper patch
         shell: bash
@@ -76,7 +60,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
           git diff --cached --quiet && exit 0
-          git commit -m 'Add H3 PDF stage diagnostics and outer timeout headroom'
+          git commit -m 'Fix H3 PDF clean verification state'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
