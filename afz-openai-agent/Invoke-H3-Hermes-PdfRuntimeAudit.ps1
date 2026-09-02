@@ -36,7 +36,13 @@ foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType L
 function Save-Result($o){
   $j=$o | ConvertTo-Json -Depth 30
   [IO.File]::WriteAllText($statePath,$j,$utf8)
-  try{if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagPath,$j,$utf8)}}catch{}
+  try{
+    if(Test-Path -LiteralPath $diagRoot -PathType Container){
+      for($i=0;$i -lt 3;$i++){
+        try{[IO.File]::WriteAllText($diagPath,$j,$utf8);break}catch{if($i -ge 2){throw};Start-Sleep -Milliseconds 250}
+      }
+    }
+  }catch{}
   Write-Output ($o | ConvertTo-Json -Depth 30 -Compress)
 }
 
@@ -63,121 +69,121 @@ function Invoke-RemoteScript([string]$Target,[string[]]$Extra,[string]$Script,[i
   }finally{Remove-Item $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
 }
 
-$maxPages=[int]$req.max_pages
-$remote=@"
-`$ErrorActionPreference='Stop'
-`$ProgressPreference='SilentlyContinue'
-Set-StrictMode -Version 2.0
-function Emit(`$o,[int]`$code){`$o | ConvertTo-Json -Depth 30 -Compress;exit `$code}
-if(`$env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=`$false;classification='HERMES_PDF_AUDIT_WRONG_HOST';host=`$env:COMPUTERNAME}) 30}
-`$root=Join-Path `$env:LOCALAPPDATA 'hermes'
-`$source=Join-Path `$root 'hermes-agent'
-`$python=Join-Path `$source 'venv\Scripts\python.exe'
-`$cache=Join-Path `$root 'cache\documents'
-if(-not(Test-Path -LiteralPath `$python -PathType Leaf)){Emit ([ordered]@{ok=`$false;classification='HERMES_PDF_PYTHON_RUNTIME_MISSING';readOnly=`$true}) 41}
-`$pdfs=@()
-if(Test-Path -LiteralPath `$cache -PathType Container){`$pdfs=@(Get-ChildItem -LiteralPath `$cache -File -Filter '*.pdf' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)}
-if(`$pdfs.Count -eq 0){Emit ([ordered]@{ok=`$false;classification='HERMES_PDF_CACHE_PDF_NOT_FOUND';readOnly=`$true;cachePath=`$cache;cachedPdfCount=0}) 42}
-`$pdf=`$pdfs[0]
-
-`$skillCandidates=@(
-  (Join-Path `$source 'skills\productivity\pdf\SKILL.md'),
-  (Join-Path `$source 'skills\productivity\ocr-and-documents\SKILL.md'),
-  (Join-Path `$root 'skills\productivity\pdf\SKILL.md'),
-  (Join-Path `$root 'skills\pdf\SKILL.md'),
-  (Join-Path `$env:USERPROFILE '.hermes\skills\productivity\pdf\SKILL.md'),
-  (Join-Path `$env:USERPROFILE '.hermes\skills\pdf\SKILL.md')
-)
-`$skills=@()
-`$helperSignals=@()
-`$requiredHelperMissing=`$false
-foreach(`$sp in `$skillCandidates | Select-Object -Unique){
-  if(-not(Test-Path -LiteralPath `$sp -PathType Leaf)){continue}
-  `$st=[IO.File]::ReadAllText(`$sp)
-  `$hasPdfRead=(`$st -match 'pdf_read[.]py')
-  `$hasPyMu=(`$st -match 'extract_pymupdf[.]py|PyMuPDF|import\s+fitz')
-  `$hasSuspicious=(`$st -match '(?im)^\s*pdf\s+text\b')
-  `$skillDir=Split-Path -Parent `$sp
-  `$pdfRead=Join-Path `$skillDir 'scripts\pdf_read.py'
-  `$extractPyMu=Join-Path `$skillDir 'scripts\extract_pymupdf.py'
-  if(`$hasPdfRead -and -not(Test-Path -LiteralPath `$pdfRead -PathType Leaf)){`$requiredHelperMissing=`$true}
-  if((`$st -match 'extract_pymupdf[.]py') -and -not(Test-Path -LiteralPath `$extractPyMu -PathType Leaf)){`$requiredHelperMissing=`$true}
-  `$skills += [ordered]@{path=`$sp;sha256=(Get-FileHash -LiteralPath `$sp -Algorithm SHA256).Hash.ToLowerInvariant();sizeBytes=[int64](Get-Item `$sp).Length;referencesPdfRead=`$hasPdfRead;referencesPyMuPdf=`$hasPyMu;containsLiteralPdfTextCommand=`$hasSuspicious}
-  `$helperSignals += [ordered]@{skillPath=`$sp;pdfReadExists=(Test-Path -LiteralPath `$pdfRead -PathType Leaf);pdfReadPath=`$pdfRead;extractPyMuPdfExists=(Test-Path -LiteralPath `$extractPyMu -PathType Leaf);extractPyMuPdfPath=`$extractPyMu}
-}
-
-`$py=@'
+$pyCode=@'
 import sys, json, importlib.util
 path=sys.argv[1]
 max_pages=max(1,min(5,int(sys.argv[2])))
 deps={
-  'pypdf': importlib.util.find_spec('pypdf') is not None,
-  'pdfplumber': importlib.util.find_spec('pdfplumber') is not None,
-  'fitz': importlib.util.find_spec('fitz') is not None,
+    "pypdf": importlib.util.find_spec("pypdf") is not None,
+    "pdfplumber": importlib.util.find_spec("pdfplumber") is not None,
+    "fitz": importlib.util.find_spec("fitz") is not None,
 }
-out={'dependencies':deps,'engine':None,'pageCount':None,'pagesSampled':0,'extractedChars':0,'containsIslington':False,'containsHrv':False,'containsHeatRecovery':False,'errorType':None}
-text=''
+out={"dependencies":deps,"engine":None,"pageCount":None,"pagesSampled":0,"extractedChars":0,"containsIslington":False,"containsHrv":False,"containsHeatRecovery":False,"errorType":None}
+text=""
 try:
-    if deps['pypdf']:
+    if deps["pypdf"]:
         from pypdf import PdfReader
         doc=PdfReader(path)
-        out['engine']='pypdf'; out['pageCount']=len(doc.pages)
-        n=min(max_pages,len(doc.pages)); out['pagesSampled']=n
+        out["engine"]="pypdf"; out["pageCount"]=len(doc.pages)
+        n=min(max_pages,len(doc.pages)); out["pagesSampled"]=n
         for i in range(n):
-            try: text += (doc.pages[i].extract_text() or '') + '\n'
+            try: text += (doc.pages[i].extract_text() or "") + "\n"
             except Exception: pass
-    elif deps['fitz']:
+    elif deps["fitz"]:
         import fitz
         doc=fitz.open(path)
-        out['engine']='pymupdf'; out['pageCount']=doc.page_count
-        n=min(max_pages,doc.page_count); out['pagesSampled']=n
+        out["engine"]="pymupdf"; out["pageCount"]=doc.page_count
+        n=min(max_pages,doc.page_count); out["pagesSampled"]=n
         for i in range(n):
-            try: text += (doc.load_page(i).get_text('text') or '') + '\n'
+            try: text += (doc.load_page(i).get_text("text") or "") + "\n"
             except Exception: pass
         doc.close()
-    elif deps['pdfplumber']:
+    elif deps["pdfplumber"]:
         import pdfplumber
         with pdfplumber.open(path) as doc:
-            out['engine']='pdfplumber'; out['pageCount']=len(doc.pages)
-            n=min(max_pages,len(doc.pages)); out['pagesSampled']=n
+            out["engine"]="pdfplumber"; out["pageCount"]=len(doc.pages)
+            n=min(max_pages,len(doc.pages)); out["pagesSampled"]=n
             for i in range(n):
-                try: text += (doc.pages[i].extract_text() or '') + '\n'
+                try: text += (doc.pages[i].extract_text() or "") + "\n"
                 except Exception: pass
     else:
-        out['errorType']='NO_SUPPORTED_PDF_LIBRARY'
+        out["errorType"]="NO_SUPPORTED_PDF_LIBRARY"
     text=text[:100000]
     low=text.lower()
-    out['extractedChars']=len(text)
-    out['containsIslington']='islington' in low
-    out['containsHrv']='hrv' in low
-    out['containsHeatRecovery']='heat recovery' in low
+    out["extractedChars"]=len(text)
+    out["containsIslington"]="islington" in low
+    out["containsHrv"]="hrv" in low
+    out["containsHeatRecovery"]="heat recovery" in low
 except Exception as e:
-    out['errorType']=type(e).__name__
-print(json.dumps(out,separators=(',',':')))
+    out["errorType"]=type(e).__name__
+print(json.dumps(out,separators=(",",":")))
 '@
-`$probeRaw=(& `$python -c `$py `$pdf.FullName '$maxPages' 2>&1 | Out-String).Trim()
-`$probe=`$null
-foreach(`$line in @(`$probeRaw -split "`r?`n" | Where-Object{`$_})){try{`$probe=`$line | ConvertFrom-Json}catch{}}
-if(`$null -eq `$probe){`$probe=[pscustomobject]@{dependencies=[pscustomobject]@{pypdf=`$false;pdfplumber=`$false;fitz=`$false};engine=`$null;pageCount=`$null;pagesSampled=0;extractedChars=0;containsIslington=`$false;containsHrv=`$false;containsHeatRecovery=`$false;errorType='PROBE_RESULT_UNPARSEABLE'}}
-`$hasAnyDep=([bool]`$probe.dependencies.pypdf -or [bool]`$probe.dependencies.pdfplumber -or [bool]`$probe.dependencies.fitz)
-`$skillFound=(`$skills.Count -gt 0)
-`$suspicious=@(`$skills | Where-Object{[bool]`$_.containsLiteralPdfTextCommand}).Count -gt 0
-`$classification='HERMES_PDF_RUNTIME_AUDIT_COMPLETE'
-`$ok=`$true
-if(-not `$skillFound){`$classification='HERMES_PDF_SKILL_MISSING';`$ok=`$false}
-elseif(`$requiredHelperMissing){`$classification='HERMES_PDF_HELPER_MISSING';`$ok=`$false}
-elseif(-not `$hasAnyDep){`$classification='HERMES_PDF_DEPENDENCY_MISSING';`$ok=`$false}
-elseif(`$probe.errorType){`$classification='HERMES_PDF_EXTRACTION_FAILED';`$ok=`$false}
-elseif([int]`$probe.extractedChars -lt 50){`$classification='HERMES_PDF_LIKELY_SCANNED_OCR_REQUIRED';`$ok=`$true}
-elseif(`$suspicious){`$classification='HERMES_PDF_SKILL_COMMAND_MISMATCH';`$ok=`$false}
-else{`$classification='HERMES_PDF_TEXT_EXTRACTION_READY';`$ok=`$true}
+$pyB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pyCode))
+$maxPages=[int]$req.max_pages
+
+$remoteTemplate=@'
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+Set-StrictMode -Version 2.0
+function Emit($o,[int]$code){$o | ConvertTo-Json -Depth 30 -Compress;exit $code}
+if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_AUDIT_WRONG_HOST';host=$env:COMPUTERNAME}) 30}
+$root=Join-Path $env:LOCALAPPDATA 'hermes'
+$source=Join-Path $root 'hermes-agent'
+$python=Join-Path $source 'venv\Scripts\python.exe'
+$cache=Join-Path $root 'cache\documents'
+if(-not(Test-Path -LiteralPath $python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PYTHON_RUNTIME_MISSING';readOnly=$true}) 41}
+$pdfs=@()
+if(Test-Path -LiteralPath $cache -PathType Container){$pdfs=@(Get-ChildItem -LiteralPath $cache -File -Filter '*.pdf' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)}
+if($pdfs.Count -eq 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_CACHE_PDF_NOT_FOUND';readOnly=$true;cachePath=$cache;cachedPdfCount=0}) 42}
+$pdf=$pdfs[0]
+$skillCandidates=@(
+  (Join-Path $source 'skills\productivity\pdf\SKILL.md'),
+  (Join-Path $source 'skills\productivity\ocr-and-documents\SKILL.md'),
+  (Join-Path $root 'skills\productivity\pdf\SKILL.md'),
+  (Join-Path $root 'skills\pdf\SKILL.md'),
+  (Join-Path $env:USERPROFILE '.hermes\skills\productivity\pdf\SKILL.md'),
+  (Join-Path $env:USERPROFILE '.hermes\skills\pdf\SKILL.md')
+)
+$skills=@();$helperSignals=@();$requiredHelperMissing=$false
+foreach($sp in $skillCandidates | Select-Object -Unique){
+  if(-not(Test-Path -LiteralPath $sp -PathType Leaf)){continue}
+  $st=[IO.File]::ReadAllText($sp)
+  $hasPdfRead=($st -match 'pdf_read[.]py')
+  $hasPyMu=($st -match 'extract_pymupdf[.]py|PyMuPDF|import\s+fitz')
+  $hasSuspicious=($st -match '(?im)^\s*pdf\s+text\b')
+  $skillDir=Split-Path -Parent $sp
+  $pdfRead=Join-Path $skillDir 'scripts\pdf_read.py'
+  $extractPyMu=Join-Path $skillDir 'scripts\extract_pymupdf.py'
+  if($hasPdfRead -and -not(Test-Path -LiteralPath $pdfRead -PathType Leaf)){$requiredHelperMissing=$true}
+  if(($st -match 'extract_pymupdf[.]py') -and -not(Test-Path -LiteralPath $extractPyMu -PathType Leaf)){$requiredHelperMissing=$true}
+  $skills += [ordered]@{path=$sp;sha256=(Get-FileHash -LiteralPath $sp -Algorithm SHA256).Hash.ToLowerInvariant();sizeBytes=[int64](Get-Item $sp).Length;referencesPdfRead=$hasPdfRead;referencesPyMuPdf=$hasPyMu;containsLiteralPdfTextCommand=$hasSuspicious}
+  $helperSignals += [ordered]@{skillPath=$sp;pdfReadExists=(Test-Path -LiteralPath $pdfRead -PathType Leaf);pdfReadPath=$pdfRead;extractPyMuPdfExists=(Test-Path -LiteralPath $extractPyMu -PathType Leaf);extractPyMuPdfPath=$extractPyMu}
+}
+$py=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PY_B64__'))
+$probeRaw=(& $python -c $py $pdf.FullName '__MAX_PAGES__' 2>&1 | Out-String).Trim()
+$probe=$null
+foreach($line in @($probeRaw -split "`r?`n" | Where-Object{$_})){try{$probe=$line | ConvertFrom-Json}catch{}}
+if($null -eq $probe){$probe=[pscustomobject]@{dependencies=[pscustomobject]@{pypdf=$false;pdfplumber=$false;fitz=$false};engine=$null;pageCount=$null;pagesSampled=0;extractedChars=0;containsIslington=$false;containsHrv=$false;containsHeatRecovery=$false;errorType='PROBE_RESULT_UNPARSEABLE'}}
+$hasAnyDep=([bool]$probe.dependencies.pypdf -or [bool]$probe.dependencies.pdfplumber -or [bool]$probe.dependencies.fitz)
+$skillFound=($skills.Count -gt 0)
+$suspicious=@($skills | Where-Object{[bool]$_.containsLiteralPdfTextCommand}).Count -gt 0
+$classification='HERMES_PDF_RUNTIME_AUDIT_COMPLETE';$ok=$true
+if(-not $skillFound){$classification='HERMES_PDF_SKILL_MISSING';$ok=$false}
+elseif($requiredHelperMissing){$classification='HERMES_PDF_HELPER_MISSING';$ok=$false}
+elseif(-not $hasAnyDep){$classification='HERMES_PDF_DEPENDENCY_MISSING';$ok=$false}
+elseif($probe.errorType){$classification='HERMES_PDF_EXTRACTION_FAILED';$ok=$false}
+elseif([int]$probe.extractedChars -lt 50){$classification='HERMES_PDF_LIKELY_SCANNED_OCR_REQUIRED';$ok=$true}
+elseif($suspicious){$classification='HERMES_PDF_SKILL_COMMAND_MISMATCH';$ok=$false}
+else{$classification='HERMES_PDF_TEXT_EXTRACTION_READY';$ok=$true}
+$exitCode=1;if($ok){$exitCode=0}
 Emit ([ordered]@{
-  ok=`$ok;classification=`$classification;readOnly=`$true;host=`$env:COMPUTERNAME;
-  cachePath=`$cache;cachedPdfCount=`$pdfs.Count;latestCachedPdfName=`$pdf.Name;latestCachedPdfSizeBytes=[int64]`$pdf.Length;latestCachedPdfModified=`$pdf.LastWriteTime.ToString('o');latestCachedPdfSha256=(Get-FileHash -LiteralPath `$pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();
-  skillFound=`$skillFound;skills=`$skills;helpers=`$helperSignals;requiredHelperMissing=`$requiredHelperMissing;suspiciousLiteralPdfTextCommand=`$suspicious;
-  extraction=`$probe;documentTextReturned=`$false;configChanged=`$false;gatewayRestarted=`$false;providerTouched=`$false;ollamaMutationStarted=`$false;networkChanged=`$false;modelGenerationStarted=`$false;observedAt=(Get-Date -Format o)
-}) $(if(`$ok){0}else{1})
-"@
+  ok=$ok;classification=$classification;readOnly=$true;host=$env:COMPUTERNAME;
+  cachePath=$cache;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfModified=$pdf.LastWriteTime.ToString('o');latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();
+  skillFound=$skillFound;skills=$skills;helpers=$helperSignals;requiredHelperMissing=$requiredHelperMissing;suspiciousLiteralPdfTextCommand=$suspicious;
+  extraction=$probe;documentTextReturned=$false;configChanged=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)
+}) $exitCode
+'@
+$remote=$remoteTemplate.Replace('__PY_B64__',$pyB64).Replace('__MAX_PAGES__',[string]$maxPages)
 
 $routes=@(
   [pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},
