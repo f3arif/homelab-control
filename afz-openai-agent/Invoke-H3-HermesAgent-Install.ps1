@@ -65,7 +65,7 @@ function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 16 -Compress;exit $code}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST';host=$env:COMPUTERNAME;retryable=$false}) 30}
 $hermesRoot=Join-Path $env:LOCALAPPDATA 'hermes'
 $hermesPath=Join-Path $hermesRoot 'bin\hermes.exe'
-$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r15.json'
+$marker=Join-Path $hermesRoot 'afz-desktop-backend-refresh-r16.json'
 if(-not(Test-Path -LiteralPath $hermesPath -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false}) 41}
 if(Test-Path -LiteralPath $marker -PathType Leaf){
   try{$prior=Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json;$prior.classification='HERMES_DESKTOP_BACKEND_REFRESH_ALREADY_APPLIED';$prior.ok=$true;$prior.retryable=$false;Emit $prior 0}catch{}
@@ -107,17 +107,20 @@ function Has-HermesElectronAncestor([int]$ProcessId){
 function Is-DesktopBackend($p){
   $cl=[string]$p.CommandLine
   if([string]::IsNullOrWhiteSpace($cl)){return $false}
-  $subcommand=($cl -match '(?i)(?:hermes(?:\.exe)?|hermes_cli[\\/]main(?:\.py)?)\s+(?:serve|dashboard)')
+  $subcommand=($cl -match '(?i)(?:hermes(?:\.exe)?|hermes_cli(?:[\\/]|\.)main(?:\.py)?)\s+(?:serve|dashboard)')
   $ephemeral=($cl -match '(?i)(?:--port\s+0(?:\s|$)|--port=0(?:\s|$))')
   if(-not($subcommand -and $ephemeral)){return $false}
   return (Has-HermesElectronAncestor ([int]$p.ProcessId))
 }
 $candidates=@($all|Where-Object{Is-DesktopBackend $_})
 if($candidates.Count -eq 0){
-  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$true;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=0;stoppedPids=@()}) 44
+  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_NOT_FOUND';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=0;stoppedPids=@()}) 44
 }
-$oldPids=@($candidates|ForEach-Object{[int]$_.ProcessId})
-foreach($pidToStop in $oldPids){Stop-Process -Id $pidToStop -Force -ErrorAction Stop}
+if($candidates.Count -ne 1){
+  Emit ([ordered]@{ok=$false;classification='HERMES_DESKTOP_EPHEMERAL_BACKEND_AMBIGUOUS';host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider;desktopBackendCandidates=$candidates.Count;stoppedPids=@()}) 45
+}
+$oldPids=@([int]$candidates[0].ProcessId)
+Stop-Process -Id $oldPids[0] -Force -ErrorAction Stop
 Start-Sleep -Milliseconds 750
 $newPid=$null
 $deadline=(Get-Date).AddSeconds(25)
@@ -128,7 +131,7 @@ do{
     $new=@($scan|Where-Object{
       $cl=[string]$_.CommandLine
       $cl -and ([int]$_.ProcessId -notin $oldPids) -and
-      $cl -match '(?i)(?:hermes(?:\.exe)?|hermes_cli[\\/]main(?:\.py)?)\s+(?:serve|dashboard)' -and
+      $cl -match '(?i)(?:hermes(?:\.exe)?|hermes_cli(?:[\\/]|\.)main(?:\.py)?)\s+(?:serve|dashboard)' -and
       $cl -match '(?i)(?:--port\s+0(?:\s|$)|--port=0(?:\s|$))'
     }|Select-Object -First 1)
     if($new.Count -gt 0){$newPid=[int]$new[0].ProcessId;break}
@@ -138,7 +141,7 @@ $result=[ordered]@{
   ok=$true
   classification=$(if($newPid){'HERMES_DESKTOP_BACKEND_REFRESHED'}else{'HERMES_DESKTOP_BACKEND_RECYCLE_TRIGGERED'})
   host=$env:COMPUTERNAME;retryable=$false;providerConfigured=$true;selectedModel='qwen3.6:35b-a3b';modelProvider=$modelProvider
-  desktopBackendCandidates=$candidates.Count;stoppedPids=$oldPids;respawnedPid=$newPid
+  desktopBackendCandidates=1;stoppedPids=$oldPids;respawnedPid=$newPid
   electronUiTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false;finishedAt=(Get-Date -Format o)
 }
 $result|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $marker -Encoding UTF8
