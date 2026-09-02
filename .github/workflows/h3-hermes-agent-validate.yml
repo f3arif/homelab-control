@@ -6,10 +6,12 @@ on:
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
+      - 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-SessionRegistryRepair.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
       - 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json'
+      - 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json'
       - 'afz-openai-agent/requests/h3-hermes-gateway-reload.json'
       - '.github/workflows/h3-hermes-agent-validate.yml'
   workflow_dispatch:
@@ -43,13 +45,23 @@ jobs:
           $t=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json' -Raw | ConvertFrom-Json
           if($t.schema -ne 1 -or $t.status -ne 'ACTIVE'){throw 'telegram schema/status'}
           if($t.target -ne 'h3' -or $t.host -ne 'DESKTOP-H3R6CQN'){throw 'telegram target'}
-          if($t.action -notin @('audit-telegram-attachments','audit-and-reload-telegram-gateway')){throw 'telegram action'}
-          if($t.action -eq 'audit-and-reload-telegram-gateway'){
-            if($t.read_only -or -not $t.restart_gateway){throw 'telegram repair guard'}
+          if($t.action -notin @('audit-telegram-attachments','audit-and-reload-telegram-gateway','audit-and-repair-telegram-tool-dispatch')){throw 'telegram action'}
+          if($t.action -eq 'audit-and-repair-telegram-tool-dispatch'){
+            if($t.read_only -or -not $t.restart_gateway -or -not $t.repair_tool_dispatch -or -not $t.change_config){throw 'telegram tool-dispatch guard'}
+          }elseif($t.action -eq 'audit-and-reload-telegram-gateway'){
+            if($t.read_only -or -not $t.restart_gateway -or $t.change_config){throw 'telegram gateway repair guard'}
           }else{
-            if(-not $t.read_only -or $t.restart_gateway){throw 'telegram audit guard'}
+            if(-not $t.read_only -or $t.restart_gateway -or $t.change_config){throw 'telegram audit guard'}
           }
-          if($t.change_config -or $t.change_network){throw 'telegram forbidden mutation'}
+          if($t.change_network){throw 'telegram forbidden network mutation'}
+
+          $d=Get-Content 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json' -Raw | ConvertFrom-Json
+          if($d.schema -ne 1 -or $d.action -ne 'repair-local-tool-dispatch' -or $d.status -ne 'ACTIVE'){throw 'dispatch schema/action/status'}
+          if($d.target -ne 'h3' -or $d.host -ne 'DESKTOP-H3R6CQN'){throw 'dispatch target'}
+          if($d.provider -ne 'custom' -or $d.model -ne 'qwen3.6:35b-a3b'){throw 'dispatch provider/model'}
+          if($d.tool_use_enforcement -or $d.task_completion_guidance -or $d.parallel_tool_call_guidance){throw 'dispatch desired flags'}
+          if(-not $d.require_telegram_toolset_not_explicitly_empty -or -not $d.restart_gateway){throw 'dispatch guards'}
+          if($d.change_provider -or $d.mutate_ollama -or $d.change_network -or $d.run_model_generation){throw 'dispatch forbidden mutation'}
 
           $g=Get-Content 'afz-openai-agent/requests/h3-hermes-gateway-reload.json' -Raw | ConvertFrom-Json
           if($g.schema -ne 1 -or $g.action -ne 'reload-gateway-native' -or $g.status -ne 'ACTIVE'){throw 'gateway schema/action/status'}
@@ -66,6 +78,7 @@ jobs:
           $scripts=@(
             'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',
+            'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-SessionRegistryRepair.ps1'
           )
@@ -82,11 +95,16 @@ jobs:
           foreach($required in @('EMERGENCY_DIAGNOSTIC_ACK_ONLY','AFZ-H3-HERMES-DOCKER-LATEST.txt','127.0.0.1:11434/v1','qwen3.6:35b-a3b')){
             if(-not $install.Contains($required)){throw "Install runner missing: $required"}
           }
+          $dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw
+          foreach($required in @('agent.tool_use_enforcement','agent.task_completion_guidance','agent.parallel_tool_call_guidance','HERMES_LOCAL_TOOL_DISPATCH_REPAIR_VERIFIED','platform_toolsets','Invoke-H3-Hermes-GatewayReload.ps1')){
+            if(-not $dispatch.Contains($required)){throw "Dispatch helper missing: $required"}
+          }
           $reload=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1' -Raw
           foreach($required in @('require_empty_active_registry','use_native_restart','HERMES_GATEWAY_NATIVE_RELOAD_VERIFIED','active_sessions.json','gateway restart')){
             if(-not $reload.Contains($required)){throw "Reload helper missing: $required"}
           }
+          $all=$install+"`n"+$dispatch+"`n"+$reload
           foreach($forbidden in @('/api/generate','ollama pull','docker.sock')){
-            if(($install+"`n"+$reload).Contains($forbidden)){throw "Forbidden active runner content: $forbidden"}
+            if($all.Contains($forbidden)){throw "Forbidden active runner content: $forbidden"}
           }
           'RUNNERS=PASS'
