@@ -80,16 +80,37 @@ function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
   foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
   $out=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.out')
   $err=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.err')
+  $codeFile=$null
   try{
-    $p=Start-Process -FilePath $script:python -ArgumentList $PyArgs -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+    $effectiveArgs=@($PyArgs)
+    if($effectiveArgs.Count -ge 2 -and [string]$effectiveArgs[0] -eq '-c'){
+      $codeFile=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.py')
+      [IO.File]::WriteAllText($codeFile,[string]$effectiveArgs[1],(New-Object Text.UTF8Encoding($false)))
+      if($effectiveArgs.Count -gt 2){$effectiveArgs=@($codeFile)+@($effectiveArgs[2..($effectiveArgs.Count-1)])}else{$effectiveArgs=@($codeFile)}
+    }
+    $quoted=@()
+    foreach($a in $effectiveArgs){
+      $s=[string]$a
+      if($s.Contains('"')){throw 'Run-Python argument contains unsupported double quote after code staging.'}
+      if($s -match '\s'){
+        if($s.EndsWith('\')){throw 'Run-Python spaced argument cannot end with backslash.'}
+        $quoted+=('"'+$s+'"')
+      }else{$quoted+=$s}
+    }
+    $argLine=$quoted -join ' '
+    $p=Start-Process -FilePath $script:python -ArgumentList $argLine -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
     $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
     if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
     $stdout=$(if(Test-Path $out){[IO.File]::ReadAllText($out)}else{''})
     $stderr=$(if(Test-Path $err){[IO.File]::ReadAllText($err)}else{''})
     $stderrPreview=$stderr;if($stderrPreview.Length -gt 600){$stderrPreview=$stderrPreview.Substring(0,600)}
     return [pscustomobject]@{timedOut=$to;exit=$(if($to){$null}else{[int]$p.ExitCode});stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
-  }finally{Remove-Item $out,$err -Force -ErrorAction SilentlyContinue}
+  }finally{
+    Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+    if($codeFile){Remove-Item -LiteralPath $codeFile -Force -ErrorAction SilentlyContinue}
+  }
 }
+
 try{
   if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_RUNTIME_WRONG_HOST';mutation='NONE'}) 30}
   $repairMode=__REPAIR_MODE__
