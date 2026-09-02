@@ -29,6 +29,30 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 foreach($required in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $required -PathType Leaf)){throw "Required H3 SSH path missing: $required"}}
 
+# The persistent Push-Deploy-Watcher launches this runner on each active Hermes pass.
+# Use that existing execution path to repair the one exact observed corrupted session
+# registry fingerprint before provider verification. This avoids dependence on a
+# control-wrapper restart. The registry helper itself takes Hermes' lock, creates a
+# backup, only mutates the exact guarded fingerprint, and strict-validates the result.
+$registryRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-SessionRegistryRepair.ps1'
+$registryRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-session-registry-repair.json'
+try{
+  if((Test-Path -LiteralPath $registryRelay -PathType Leaf) -and (Test-Path -LiteralPath $registryRequest -PathType Leaf)){
+    $registryReq=Get-Content -LiteralPath $registryRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $registryId=([string]$registryReq.id).Trim()
+    $registryDone=$false
+    if($registryId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
+      $registryStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-session-registry' ($registryId+'.json')
+      if(Test-Path -LiteralPath $registryStatePath -PathType Leaf){
+        try{$registryState=Get-Content -LiteralPath $registryStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$registryDone=[bool]$registryState.ok}catch{}
+      }
+      if(-not $registryDone){
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $registryRelay -InstallRoot $InstallRoot -RequestPath $registryRequest *> $null
+      }
+    }
+  }
+}catch{}
+
 function Save-Result($result){
   $json=$result|ConvertTo-Json -Depth 20 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
