@@ -22,23 +22,29 @@ $action=([string]$req.action).Trim().ToLowerInvariant()
 if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
   throw 'Invalid Telegram attachment request identity.'
 }
-if($action -notin @('audit-telegram-attachments','audit-and-reload-telegram-gateway') -or [string]$req.status -ne 'ACTIVE'){
+if($action -notin @('audit-telegram-attachments','audit-and-reload-telegram-gateway','audit-and-repair-telegram-tool-dispatch') -or [string]$req.status -ne 'ACTIVE'){
   throw 'Telegram attachment request is not active.'
 }
 if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){
   throw 'Telegram attachment target mismatch.'
 }
 
-$repairMode=($action -eq 'audit-and-reload-telegram-gateway')
-if([bool]$req.change_config -or [bool]$req.change_network){
-  throw 'Telegram attachment request forbidden mutation flag.'
+$gatewayReloadMode=($action -eq 'audit-and-reload-telegram-gateway')
+$toolDispatchMode=($action -eq 'audit-and-repair-telegram-tool-dispatch')
+$repairMode=($gatewayReloadMode -or $toolDispatchMode)
+if([bool]$req.change_network){
+  throw 'Telegram attachment request forbidden network mutation flag.'
 }
-if($repairMode){
-  if(-not [bool]$req.restart_gateway -or [bool]$req.read_only){
+if($toolDispatchMode){
+  if(-not [bool]$req.restart_gateway -or [bool]$req.read_only -or -not [bool]$req.repair_tool_dispatch -or -not [bool]$req.change_config){
+    throw 'Telegram tool-dispatch repair mode guard mismatch.'
+  }
+}elseif($gatewayReloadMode){
+  if(-not [bool]$req.restart_gateway -or [bool]$req.read_only -or [bool]$req.change_config){
     throw 'Telegram gateway reload mode guard mismatch.'
   }
 }else{
-  if(-not [bool]$req.read_only -or [bool]$req.restart_gateway){
+  if(-not [bool]$req.read_only -or [bool]$req.restart_gateway -or [bool]$req.change_config){
     throw 'Telegram attachment audit safety flags mismatch.'
   }
 }
@@ -192,36 +198,61 @@ if(-not [bool]$result.ok -and [string]$result.classification -in @('HERMES_TELEG
   $result=Invoke-H3 -Target 'Faiz@192.168.50.185' -Transport 'lan-hostkey-alias' -Extra @('-o','HostKeyAlias=100.106.186.118')
 }
 
-$reloadResult=$null
+$repairResult=$null
+$gatewayReloadResult=$null
+$toolDispatchResult=$null
 if($repairMode -and [bool]$result.ok -and [string]$result.classification -eq 'HERMES_TELEGRAM_ATTACHMENT_HANDLER_PRESENT'){
-  $reloadHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-GatewayReload.ps1'
-  $reloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-gateway-reload.json'
-  if((Test-Path -LiteralPath $reloadHelper -PathType Leaf) -and (Test-Path -LiteralPath $reloadRequest -PathType Leaf)){
-    $rawReload=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $reloadHelper -InstallRoot $InstallRoot -RequestPath $reloadRequest 2>&1 | Out-String).Trim()
-    $reloadCode=$LASTEXITCODE
-    foreach($line in @($rawReload -split "`r?`n" | Where-Object { $_ })){
-      try{$reloadResult=$line | ConvertFrom-Json}catch{}
-    }
-    if($null -eq $reloadResult){
-      $reloadResult=[pscustomobject]@{ok=$false;classification='HERMES_GATEWAY_RELOAD_RESULT_UNPARSEABLE';exit=$reloadCode}
+  if($toolDispatchMode){
+    $repairHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-ToolDispatchRepair.ps1'
+    $repairRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-tool-dispatch-repair.json'
+    if((Test-Path -LiteralPath $repairHelper -PathType Leaf) -and (Test-Path -LiteralPath $repairRequest -PathType Leaf)){
+      $rawRepair=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $repairHelper -InstallRoot $InstallRoot -RequestPath $repairRequest 2>&1 | Out-String).Trim()
+      $repairCode=$LASTEXITCODE
+      foreach($line in @($rawRepair -split "`r?`n" | Where-Object { $_ })){
+        try{$toolDispatchResult=$line | ConvertFrom-Json}catch{}
+      }
+      if($null -eq $toolDispatchResult){
+        $toolDispatchResult=[pscustomobject]@{ok=$false;classification='HERMES_TOOL_DISPATCH_REPAIR_RESULT_UNPARSEABLE';exit=$repairCode}
+      }
+      $repairResult=$toolDispatchResult
+    }else{
+      $toolDispatchResult=[pscustomobject]@{ok=$false;classification='HERMES_TOOL_DISPATCH_REPAIR_HELPER_OR_REQUEST_MISSING'}
+      $repairResult=$toolDispatchResult
     }
   }else{
-    $reloadResult=[pscustomobject]@{ok=$false;classification='HERMES_GATEWAY_RELOAD_HELPER_OR_REQUEST_MISSING'}
+    $reloadHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-GatewayReload.ps1'
+    $reloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-gateway-reload.json'
+    if((Test-Path -LiteralPath $reloadHelper -PathType Leaf) -and (Test-Path -LiteralPath $reloadRequest -PathType Leaf)){
+      $rawReload=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $reloadHelper -InstallRoot $InstallRoot -RequestPath $reloadRequest 2>&1 | Out-String).Trim()
+      $reloadCode=$LASTEXITCODE
+      foreach($line in @($rawReload -split "`r?`n" | Where-Object { $_ })){
+        try{$gatewayReloadResult=$line | ConvertFrom-Json}catch{}
+      }
+      if($null -eq $gatewayReloadResult){
+        $gatewayReloadResult=[pscustomobject]@{ok=$false;classification='HERMES_GATEWAY_RELOAD_RESULT_UNPARSEABLE';exit=$reloadCode}
+      }
+      $repairResult=$gatewayReloadResult
+    }else{
+      $gatewayReloadResult=[pscustomobject]@{ok=$false;classification='HERMES_GATEWAY_RELOAD_HELPER_OR_REQUEST_MISSING'}
+      $repairResult=$gatewayReloadResult
+    }
   }
 }
 
 $combined=[ordered]@{
-  ok=([bool]$result.ok -and (-not $repairMode -or ($reloadResult -and [bool]$reloadResult.ok)))
-  classification=$(if($repairMode -and $reloadResult){[string]$reloadResult.classification}else{[string]$result.classification})
+  ok=([bool]$result.ok -and (-not $repairMode -or ($repairResult -and [bool]$repairResult.ok)))
+  classification=$(if($repairMode -and $repairResult){[string]$repairResult.classification}else{[string]$result.classification})
   audit=$result
-  gatewayReload=$reloadResult
+  toolDispatchRepair=$toolDispatchResult
+  gatewayReload=$gatewayReloadResult
   repairMode=$repairMode
+  toolDispatchMode=$toolDispatchMode
   observedAt=(Get-Date -Format o)
 }
-$json=$combined | ConvertTo-Json -Depth 20
+$json=$combined | ConvertTo-Json -Depth 30
 [IO.File]::WriteAllText($statePath,$json,$utf8)
 try{
   if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagPath,$json,$utf8)}
 }catch{}
-Write-Output ($combined | ConvertTo-Json -Depth 20 -Compress)
+Write-Output ($combined | ConvertTo-Json -Depth 30 -Compress)
 exit $(if([bool]$combined.ok){0}else{1})
