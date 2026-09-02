@@ -399,9 +399,9 @@ Use concise evidence and official-domain source URLs only. Never infer from dire
     $status = ([string](Get-ProspectProperty $audit 'status' 'inconclusive')).Trim().ToLowerInvariant()
     if ($status -notin @('excluded','clear','inconclusive')) { $status = 'inconclusive' }
     $evidence = ([string](Get-ProspectProperty $audit 'evidence' '')).Trim()
-    $host = Get-ProspectHost ([string]$lead.website)
+    $websiteHost = Get-ProspectHost ([string]$lead.website)
     $sources = @(ConvertTo-StringArray (Get-ProspectProperty $audit 'sourceUrls' @()) 8 | Where-Object {
-      (Test-ProspectUrl $_) -and (Get-ProspectHost $_) -eq $host
+      (Test-ProspectUrl $_) -and (Get-ProspectHost $_) -eq $websiteHost
     } | Select-Object -Unique)
     if ($status -in @('excluded','clear') -and ([string]::IsNullOrWhiteSpace($evidence) -or $sources.Count -eq 0)) {
       $status = 'inconclusive'
