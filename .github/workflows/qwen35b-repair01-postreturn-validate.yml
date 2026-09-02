@@ -1,0 +1,52 @@
+name: Qwen35B Repair01 PostReturn Safety
+
+on:
+  push:
+    paths:
+      - 'afz-openai-agent/tools/Continue-H3-Qwen35BA3B-WebsiteRepair01PostReturn.ps1'
+      - '.github/workflows/qwen35b-repair01-postreturn-validate.yml'
+  pull_request:
+    paths:
+      - 'afz-openai-agent/tools/Continue-H3-Qwen35BA3B-WebsiteRepair01PostReturn.ps1'
+      - '.github/workflows/qwen35b-repair01-postreturn-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and enforce saved-response-only contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='afz-openai-agent/tools/Continue-H3-Qwen35BA3B-WebsiteRepair01PostReturn.ps1'
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parse failed: $(@($errors).Count) error(s)"
+          }
+          $text=[IO.File]::ReadAllText($path)
+          $forbidden=@(
+            '/api/generate',
+            'curl.exe',
+            'ollama.exe',
+            'ollama run',
+            'ollama pull',
+            'ollama serve'
+          )
+          $hits=@($forbidden | Where-Object { $text.IndexOf($_,[StringComparison]::OrdinalIgnoreCase) -ge 0 })
+          if($hits.Count -gt 0){ throw ('Forbidden model primitive(s): '+($hits -join ', ')) }
+          foreach($needle in @(
+            'repair_model_call_attempted',
+            'repair_model_calls_used',
+            'curl_exit',
+            'Saved-response continuation refused',
+            'additional_model_call_issued=$false'
+          )){
+            if(-not $text.Contains($needle)){ throw "Required continuation guard missing: $needle" }
+          }
+          'POSTRETURN_SAFETY=PASS'
