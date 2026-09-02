@@ -1,4 +1,4 @@
 schema=1
-purpose=afz-blog-cutover-resume-readonly-health
+purpose=afz-blog-cutover-post-fallback-readonly-health
 mutation=none
-requested_at=2026-09-02T11:44:00-04:00
+requested_at=2026-09-02T11:54:00-04:00
