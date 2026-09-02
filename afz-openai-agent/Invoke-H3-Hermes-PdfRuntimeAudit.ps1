@@ -4,7 +4,6 @@ param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
   [string]$RequestPath=''
 )
-
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
@@ -16,7 +15,8 @@ $id=([string]$req.id).Trim()
 if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid H3 Hermes PDF request identity.'}
 if([string]$req.status -ne 'ACTIVE' -or [string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'H3 Hermes PDF request target/status mismatch.'}
 if(-not [bool]$req.inspect_latest_cached_pdf -or [bool]$req.return_document_text){throw 'H3 Hermes PDF content guard mismatch.'}
-if([int]$req.max_pages -lt 1 -or [int]$req.max_pages -gt 5){throw 'H3 Hermes PDF max_pages out of range.'}
+$maxPages=[int]$req.max_pages
+if($maxPages -lt 1 -or $maxPages -gt 5){throw 'H3 Hermes PDF max_pages out of range.'}
 if([bool]$req.change_config -or [bool]$req.restart_gateway -or [bool]$req.change_provider -or [bool]$req.mutate_ollama -or [bool]$req.change_network -or [bool]$req.run_model_generation){throw 'H3 Hermes PDF forbidden mutation requested.'}
 
 $repair=$false
@@ -63,11 +63,9 @@ function Invoke-RemoteScript([string]$Target,[string[]]$Extra,[string]$Script,[i
     if($timedOut){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
     $stdout=$(if(Test-Path $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
     $stderr=$(if(Test-Path $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
-    $parsed=$null
-    try{if($stdout){$parsed=$stdout|ConvertFrom-Json}}catch{}
+    $parsed=$null;try{if($stdout){$parsed=$stdout|ConvertFrom-Json}}catch{}
     if($parsed){$parsed|Add-Member transport $Transport -Force;return $parsed}
-    $preview=$stderr
-    if($preview.Length -gt 600){$preview=$preview.Substring(0,600)}
+    $preview=$stderr;if($preview.Length -gt 600){$preview=$preview.Substring(0,600)}
     return [pscustomobject]@{ok=$false;classification=$(if($timedOut){'HERMES_PDF_RUNTIME_REMOTE_TIMEOUT'}else{'HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT'});transport=$Transport;timedOut=$timedOut;exit=$(if($timedOut){$null}else{[int]$p.ExitCode});stdoutBytes=[Text.Encoding]::UTF8.GetByteCount($stdout);stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$preview}
   }finally{Remove-Item $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
 }
@@ -77,72 +75,81 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
 function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 30 -Compress;exit $code}
+function Run-Python([string[]]$Args,[int]$TimeoutSeconds){
+  $out=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.out')
+  $err=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.err')
+  try{
+    $p=Start-Process -FilePath $script:python -ArgumentList $Args -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+    $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
+    if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
+    $stdout=$(if(Test-Path $out){[IO.File]::ReadAllText($out)}else{''})
+    $stderr=$(if(Test-Path $err){[IO.File]::ReadAllText($err)}else{''})
+    return [pscustomobject]@{timedOut=$to;exit=$(if($to){$null}else{[int]$p.ExitCode});stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr)}
+  }finally{Remove-Item $out,$err -Force -ErrorAction SilentlyContinue}
+}
 try{
   if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_RUNTIME_WRONG_HOST';mutation='NONE'}) 30}
   $repairMode=__REPAIR_MODE__
+  $maxPages=__MAX_PAGES__
   $root=Join-Path $env:LOCALAPPDATA 'hermes'
   $source=Join-Path $root 'hermes-agent'
-  $python=Join-Path $source 'venv\Scripts\python.exe'
+  $script:python=Join-Path $source 'venv\Scripts\python.exe'
   $skill=Join-Path $source 'skills\productivity\pdf\SKILL.md'
   $pdfRead=Join-Path $source 'skills\productivity\pdf\scripts\pdf_read.py'
   $cache=Join-Path $root 'cache\documents'
-  if(-not(Test-Path -LiteralPath $python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PYTHON_RUNTIME_MISSING';mutation='NONE'}) 41}
+  if(-not(Test-Path -LiteralPath $script:python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_PYTHON_RUNTIME_MISSING';mutation='NONE'}) 41}
   if(-not(Test-Path -LiteralPath $skill -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_SKILL_MISSING';mutation='NONE'}) 42}
   if(-not(Test-Path -LiteralPath $pdfRead -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_HELPER_MISSING';mutation='NONE'}) 43}
-  if(-not(Test-Path -LiteralPath $cache -PathType Container)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_CACHE_PDF_NOT_FOUND';mutation='NONE';cachedPdfCount=0}) 44}
-  $pdfs=@(Get-ChildItem -LiteralPath $cache -File -Filter '*.pdf' -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending)
-  if($pdfs.Count -eq 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_CACHE_PDF_NOT_FOUND';mutation='NONE';cachedPdfCount=0}) 45}
+  $pdfs=@();if(Test-Path -LiteralPath $cache -PathType Container){$pdfs=@(Get-ChildItem -LiteralPath $cache -File -Filter '*.pdf' -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending)}
+  if($pdfs.Count -eq 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_CACHE_PDF_NOT_FOUND';mutation='NONE';cachedPdfCount=0}) 44}
   $pdf=$pdfs[0]
-  $skillText=[IO.File]::ReadAllText($skill)
-  $suspicious=($skillText -match '(?im)^\s*pdf\s+text\b')
+  $skillText=[IO.File]::ReadAllText($skill);$suspicious=($skillText -match '(?im)^\s*pdf\s+text\b')
 
   $depCode='import json,importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(json.dumps({m:(importlib.util.find_spec(m) is not None) for m in mods}))'
-  $priorEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
-  try{$depsRaw=(& $python -c $depCode 2>$null|Out-String).Trim();$depExit=$LASTEXITCODE}finally{$ErrorActionPreference=$priorEap}
-  if($depExit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonExit=$depExit}) 46}
-  try{$deps=$depsRaw|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';stdoutBytes=[Text.Encoding]::UTF8.GetByteCount($depsRaw)}) 47}
+  $dep=Run-Python @('-c',$depCode) 20
+  if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes}) 46}
+  try{$deps=$dep.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';stdoutBytes=[Text.Encoding]::UTF8.GetByteCount($dep.stdout)}) 47}
   $depsReady=([bool]$deps.pypdf -and [bool]$deps.reportlab -and [bool]$deps.pdfplumber)
-  $installed=$false;$preFreeze=$null;$pipExit=$null;$pipErrBytes=0
-
+  $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null
   if(-not $depsReady){
-    if(-not $repairMode){
-      Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 10
-    }
+    if(-not $repairMode){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 10}
     $stamp=Get-Date -Format 'yyyyMMdd-HHmmss';$preFreeze=Join-Path $root ('pdf-deps-pre-'+$stamp+'.txt')
-    try{(& $python -m pip freeze 2>$null|Out-String)|Set-Content -LiteralPath $preFreeze -Encoding UTF8}catch{}
-    $pipErr=Join-Path $env:TEMP ('afz-hermes-pip-'+[guid]::NewGuid().ToString('n')+'.err')
-    $priorEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
-    try{& $python -m pip install --disable-pip-version-check --no-input pypdf reportlab pdfplumber 2>$pipErr|Out-Null;$pipExit=$LASTEXITCODE}finally{$ErrorActionPreference=$priorEap}
-    if(Test-Path $pipErr){$pipErrBytes=[Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($pipErr));Remove-Item $pipErr -Force -ErrorAction SilentlyContinue}
-    if($pipExit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_INSTALL_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';pipExit=$pipExit;pipStderrBytes=$pipErrBytes;preFreeze=$preFreeze}) 51}
+    $freeze=Run-Python @('-m','pip','freeze') 30;if(-not $freeze.timedOut -and $freeze.exit -eq 0){[IO.File]::WriteAllText($preFreeze,$freeze.stdout,(New-Object Text.UTF8Encoding($false)))}
+    $pip=Run-Python @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') 150
+    $pipExit=$pip.exit;$pipErrBytes=$pip.stderrBytes
+    if($pip.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_INSTALL_TIMEOUT';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';preFreeze=$preFreeze}) 50}
+    if($pip.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_INSTALL_FAILED';mutation='HERMES_VENV_PDF_DEPENDENCIES_ONLY';pipExit=$pip.exit;pipStderrBytes=$pip.stderrBytes;preFreeze=$preFreeze}) 51}
     $installed=$true
   }
 
   $versionsCode='import json,pypdf,reportlab,pdfplumber;print(json.dumps({"pypdf":getattr(pypdf,"__version__",""),"reportlab":getattr(reportlab,"Version",getattr(reportlab,"__version__","")),"pdfplumber":getattr(pdfplumber,"__version__","")}))'
-  $priorEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
-  try{$versionsRaw=(& $python -c $versionsCode 2>$null|Out-String).Trim();$versionsExit=$LASTEXITCODE}finally{$ErrorActionPreference=$priorEap}
-  if($versionsExit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});pythonExit=$versionsExit;preFreeze=$preFreeze}) 52}
-  try{$versions=$versionsRaw|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});preFreeze=$preFreeze}) 52}
+  $vr=Run-Python @('-c',$versionsCode) 30
+  if($vr.timedOut -or $vr.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});pythonExit=$vr.exit;pythonTimedOut=$vr.timedOut;preFreeze=$preFreeze}) 52}
+  try{$versions=$vr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEP_IMPORT_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});preFreeze=$preFreeze}) 52}
 
-  $readErr=Join-Path $env:TEMP ('afz-hermes-pdf-read-'+[guid]::NewGuid().ToString('n')+'.err')
-  $priorEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
-  try{$raw=(& $python $pdfRead $pdf.FullName --text 2>$readErr|Out-String).Trim();$readExit=$LASTEXITCODE}finally{$ErrorActionPreference=$priorEap}
-  $readErrBytes=0;if(Test-Path $readErr){$readErrBytes=[Text.Encoding]::UTF8.GetByteCount([IO.File]::ReadAllText($readErr));Remove-Item $readErr -Force -ErrorAction SilentlyContinue}
-  if($readExit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readExit=$readExit;readStderrBytes=$readErrBytes;preFreeze=$preFreeze}) 54}
-  try{$obj=$raw|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_INVALID_JSON';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readStdoutBytes=[Text.Encoding]::UTF8.GetByteCount($raw);preFreeze=$preFreeze}) 55}
-  $pages=@($obj.pages);$chars=0;foreach($pageText in $pages){$chars+=([string]$pageText).Length}
-  $classification=$(if([int]$obj.page_count -gt 0 -and $chars -gt 0){'HERMES_PDF_DEPENDENCIES_AND_READ_VERIFIED'}else{'HERMES_PDF_LIKELY_SCANNED_OCR_REQUIRED'})
-  Emit ([ordered]@{ok=$true;classification=$classification;mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});readOnly=(-not $repairMode);packages=@('pypdf','reportlab','pdfplumber');versions=$versions;dependenciesInstalled=$installed;pipExit=$pipExit;pipStderrBytes=$pipErrBytes;preFreeze=$preFreeze;pageCount=[int]$obj.page_count;extractedChars=$chars;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;documentTextReturned=$false;configChanged=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 0
+  $subset=Join-Path $env:TEMP ('afz-hermes-pdf-subset-'+[guid]::NewGuid().ToString('n')+'.pdf')
+  try{
+    $subsetCode='import sys,json;from pypdf import PdfReader,PdfWriter;r=PdfReader(sys.argv[1]);w=PdfWriter();n=min(int(sys.argv[3]),len(r.pages));[w.add_page(r.pages[i]) for i in range(n)];f=open(sys.argv[2],"wb");w.write(f);f.close();print(json.dumps({"page_count":len(r.pages),"sample_pages":n}))'
+    $sr=Run-Python @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) 45
+    if($sr.timedOut -or $sr.exit -ne 0 -or -not(Test-Path -LiteralPath $subset -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_SAMPLE_BUILD_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});pythonExit=$sr.exit;pythonTimedOut=$sr.timedOut;pythonStderrBytes=$sr.stderrBytes;preFreeze=$preFreeze}) 53}
+    try{$sampleMeta=$sr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_SAMPLE_BUILD_INVALID_JSON';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});preFreeze=$preFreeze}) 53}
+    $rr=Run-Python @($pdfRead,$subset,'--text') 90
+    if($rr.timedOut){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_TIMEOUT';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;samplePages=[int]$sampleMeta.sample_pages;preFreeze=$preFreeze}) 54}
+    if($rr.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_FAILED';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readExit=$rr.exit;readStderrBytes=$rr.stderrBytes;samplePages=[int]$sampleMeta.sample_pages;preFreeze=$preFreeze}) 54}
+    try{$obj=$rr.stdout|ConvertFrom-Json}catch{Emit ([ordered]@{ok=$false;classification='HERMES_PDF_READ_VERIFY_INVALID_JSON';mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});versions=$versions;readStdoutBytes=[Text.Encoding]::UTF8.GetByteCount($rr.stdout);preFreeze=$preFreeze}) 55}
+    $pages=@($obj.pages);$chars=0;foreach($pageText in $pages){$chars+=([string]$pageText).Length}
+    $classification=$(if([int]$obj.page_count -gt 0 -and $chars -gt 0){'HERMES_PDF_DEPENDENCIES_AND_READ_VERIFIED'}else{'HERMES_PDF_LIKELY_SCANNED_OCR_REQUIRED'})
+    Emit ([ordered]@{ok=$true;classification=$classification;mutation=$(if($installed){'HERMES_VENV_PDF_DEPENDENCIES_ONLY'}else{'NONE'});readOnly=(-not $repairMode);packages=@('pypdf','reportlab','pdfplumber');versions=$versions;dependenciesInstalled=$installed;pipExit=$pipExit;pipStderrBytes=$pipErrBytes;preFreeze=$preFreeze;pageCount=[int]$sampleMeta.page_count;samplePages=[int]$sampleMeta.sample_pages;extractedChars=$chars;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;documentTextReturned=$false;configChanged=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 0
+  }finally{Remove-Item -LiteralPath $subset -Force -ErrorAction SilentlyContinue}
 }catch{
   $msg=[string]$_.Exception.Message;if($msg.Length -gt 500){$msg=$msg.Substring(0,500)}
-  Emit ([ordered]@{ok=$false;classification='HERMES_PDF_RUNTIME_REMOTE_EXCEPTION';mutation='NONE_OR_INCOMPLETE';errorType=$_.Exception.GetType().FullName;errorMessage=$msg;documentTextReturned=$false;gatewayRestarted=$false;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}) 60
+  Emit ([ordered]@{ok=$false;classification='HERMES_PDF_RUNTIME_REMOTE_EXCEPTION';mutation='NONE_OR_INCOMPLETE';errorType=$_.Exception.GetType().FullName;errorMessage=$msg;documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 60
 }
 '@
-
-$remote=$remoteTemplate.Replace('__REPAIR_MODE__',$(if($repair){'$true'}else{'$false'}))
-$routes=@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},[pscustomobject]@{target='Faiz@192.168.50.185';transport='lan-hostkey-alias';extra=@('-o','HostKeyAlias=100.106.186.118')})
+$remote=$remoteTemplate.Replace('__REPAIR_MODE__',$(if($repair){'$true'}else{'$false'})).Replace('__MAX_PAGES__',[string]$maxPages)
+$routes=if($repair){@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()})}else{@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},[pscustomobject]@{target='Faiz@192.168.50.185';transport='lan-hostkey-alias';extra=@('-o','HostKeyAlias=100.106.186.118')})}
 $result=$null
-foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 330000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
+foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 270000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
 if($null -eq $result){$result=[pscustomobject]@{ok=$false;classification='HERMES_PDF_RUNTIME_UNREACHABLE'}}
 Save-Result $result
 exit $(if([bool]$result.ok){0}else{1})
