@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -67,8 +68,6 @@ if not state.exists():
 
 try:
     with _FileLock(lock):
-        # Re-read only after acquiring the same lock Hermes uses. Never make a
-        # mutation decision from an unlocked snapshot.
         try:
             raw_locked = state.read_text(encoding="utf-8-sig")
         except Exception as exc:
@@ -81,21 +80,22 @@ try:
         try:
             parsed_locked = json.loads(raw_locked)
         except Exception as exc:
-            # Safe repair is intentionally narrow. These are empty registry
-            # objects missing only their final closing brace. They cannot encode
-            # an owner/session entry. Anything else fails closed.
-            truncated_empty = normalized in {
-                '{"sessions":[]',
-                '{"entries":[]',
-            }
-            if truncated_empty:
+            # Only repair malformed text that still unambiguously represents an
+            # empty registry: one entries/sessions key mapped to an empty array.
+            # This deliberately rejects any inner object, id, pid, lease, owner,
+            # session value, or other payload.
+            malformed_empty = bool(re.fullmatch(
+                r"\{?[\"']?(?:entries|sessions)[\"']?:\[\],?\}?,?",
+                normalized,
+            ))
+            if malformed_empty:
                 backup_and_write_empty(
                     state,
-                    "HERMES_SESSION_REGISTRY_TRUNCATED_EMPTY_REPAIRED",
-                    "TRUNCATED_EMPTY_TO_ENTRIES",
+                    "HERMES_SESSION_REGISTRY_MALFORMED_EMPTY_REPAIRED",
+                    "MALFORMED_EMPTY_TO_ENTRIES",
                     base,
                 )
-            emit({**base, "ok": False, "classification": "HERMES_SESSION_REGISTRY_INVALID_JSON", "mutation": "NONE", "sizeBytes": size_bytes, "sha256": digest, "errorType": type(exc).__name__}, 43)
+            emit({**base, "ok": False, "classification": f"HERMES_SESSION_REGISTRY_INVALID_JSON_{size_bytes}B_{digest[:12]}", "mutation": "NONE", "sizeBytes": size_bytes, "sha256": digest, "errorType": type(exc).__name__}, 43)
 
         try:
             entries = _read_entries(state, strict=True)
