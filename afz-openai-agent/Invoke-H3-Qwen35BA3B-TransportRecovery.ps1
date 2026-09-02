@@ -36,6 +36,7 @@ $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $repairMarkerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwen35b-repair01-trigger'
 $repairMarker=Join-Path $repairMarkerRoot ($repairJobId+'-activation-v1.json')
 $repairReconcileMarker=Join-Path $repairMarkerRoot ($repairJobId+'-reconcile-v1.json')
+$repairReconcile2Marker=Join-Path $repairMarkerRoot ($repairJobId+'-reconcile-v2.json')
 $utf8=New-Object Text.UTF8Encoding($false)
 
 if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){
@@ -88,9 +89,11 @@ if(Test-Path -LiteralPath $inspector -PathType Leaf){
 # A bootstrap-start marker is not proof that H3 received the request. If that
 # marker is at least 10 minutes old, its bootstrap PID is no longer alive, and
 # no reconcile marker exists, ONE transport-only reconcile may invoke the same
-# Windows repair launcher again. That launcher wakes H3 and first reads H3's
-# authoritative repair state; repair_model_call_attempted=true returns
-# QWEN35B_REPAIR_ALREADY_STARTED and prevents any duplicate Ollama call.
+# Windows repair launcher again. If that first reconcile itself becomes stale,
+# ONE final reconcile-v2 transport attempt is allowed. Both retries use the
+# same launcher, which wakes H3 and first reads H3's authoritative repair state;
+# repair_model_call_attempted=true returns QWEN35B_REPAIR_ALREADY_STARTED and
+# prevents any duplicate Ollama call.
 $repairActivation=[ordered]@{ok=$true;status='not-requested';jobId=$repairJobId;repairModelCallIssuedHere=$false}
 if(Test-Path -LiteralPath $repairTrigger -PathType Leaf){
   if($code -ne 0){
@@ -115,7 +118,32 @@ if(Test-Path -LiteralPath $repairTrigger -PathType Leaf){
         if(-not $existingActivation){
           $repairActivation=[ordered]@{ok=$true;status='already-activated-unreadable';jobId=$repairJobId;marker=$repairMarker;repairModelCallIssuedHere=$false}
         }elseif(Test-Path -LiteralPath $repairReconcileMarker -PathType Leaf){
-          try{$repairActivation=Get-Content -LiteralPath $repairReconcileMarker -Raw -Encoding UTF8|ConvertFrom-Json}catch{$repairActivation=[ordered]@{ok=$true;status='repair-reconcile-already-issued';jobId=$repairJobId;marker=$repairReconcileMarker;repairModelCallIssuedHere=$false}}
+          $existingReconcile=$null
+          try{$existingReconcile=Get-Content -LiteralPath $repairReconcileMarker -Raw -Encoding UTF8|ConvertFrom-Json}catch{}
+          if(Test-Path -LiteralPath $repairReconcile2Marker -PathType Leaf){
+            try{$repairActivation=Get-Content -LiteralPath $repairReconcile2Marker -Raw -Encoding UTF8|ConvertFrom-Json}catch{$repairActivation=[ordered]@{ok=$true;status='repair-reconcile2-already-issued';jobId=$repairJobId;marker=$repairReconcile2Marker;repairModelCallIssuedHere=$false}}
+          }elseif(-not $existingReconcile){
+            $repairActivation=[ordered]@{ok=$true;status='repair-reconcile-already-issued-unreadable';jobId=$repairJobId;marker=$repairReconcileMarker;repairModelCallIssuedHere=$false}
+          }else{
+            $reconcileAt=$null
+            try{$reconcileAt=[DateTimeOffset]::Parse([string]$existingReconcile.activatedAt)}catch{}
+            $reconcileAgeSeconds=$(if($reconcileAt){[math]::Floor(([DateTimeOffset]::Now-$reconcileAt).TotalSeconds)}else{-1})
+            $reconcileBootstrapAlive=$false
+            try{
+              $reconcilePidValue=0
+              if($existingReconcile.PSObject.Properties.Name -contains 'bootstrapPid'){$reconcilePidValue=[int]$existingReconcile.bootstrapPid}
+              if($reconcilePidValue -gt 0){$reconcileBootstrapAlive=[bool](Get-Process -Id $reconcilePidValue -ErrorAction SilentlyContinue)}
+            }catch{$reconcileBootstrapAlive=$false}
+
+            if([string]$existingReconcile.status -eq 'repair-bootstrap-reconcile-started' -and $reconcileAt -and $reconcileAgeSeconds -ge 600 -and -not $reconcileBootstrapAlive){
+              $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$repairLauncher`" -ExpectedSha `"$syncedSha`""
+              $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+              $repairActivation=[ordered]@{ok=$true;status='repair-bootstrap-reconcile2-started';jobId=$repairJobId;originalJobId=$jobId;model='qwen3.6:35b-a3b';context=16384;noThink=$true;maxRepairModelCalls=1;expectedSha=$syncedSha;bootstrapPid=$p.Id;priorReconcileAgeSeconds=$reconcileAgeSeconds;priorMarker=$repairReconcileMarker;marker=$repairReconcile2Marker;repairModelCallIssuedHere=$false;activatedAt=(Get-Date -Format o)}
+              [IO.File]::WriteAllText($repairReconcile2Marker,($repairActivation|ConvertTo-Json -Depth 15 -Compress),$utf8)
+            }else{
+              $repairActivation=[ordered]@{ok=$true;status='repair-reconcile-already-issued';jobId=$repairJobId;marker=$repairReconcileMarker;bootstrapAlive=$reconcileBootstrapAlive;activationAgeSeconds=$reconcileAgeSeconds;repairModelCallIssuedHere=$false}
+            }
+          }
         }else{
           $activatedAt=$null
           try{$activatedAt=[DateTimeOffset]::Parse([string]$existingActivation.activatedAt)}catch{}
