@@ -15,8 +15,8 @@ if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'
 if([string]$req.action -ne 'install-and-configure' -or [string]$req.status -ne 'ACTIVE'){throw 'H3 Hermes request is not active.'}
 if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'H3 Hermes target mismatch.'}
 if([string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'H3 Hermes host Ollama route mismatch.'}
-if([string]$req.base_model -ne 'qwen3.6:35b-a3b' -or [string]$req.preferred_model -ne 'qwen3.6:35b-a3b-hermes64k' -or [int]$req.context_length -ne 65536){throw 'H3 Hermes model request mismatch.'}
-if($req.PSObject.Properties.Name -contains 'qwen_alias'){if([string]$req.qwen_alias -ne 'qwen-h3'){throw 'H3 Hermes Qwen alias mismatch.'}}
+if([string]$req.base_model -ne 'qwen3.6:35b-a3b' -or [int]$req.context_length -ne 65536){throw 'H3 Hermes model request mismatch.'}
+if($req.PSObject.Properties.Name -contains 'provider_name'){if([string]$req.provider_name -ne 'ollama'){throw 'H3 Hermes provider mismatch.'}}
 if($req.PSObject.Properties.Name -contains 'preserve_existing_default_model'){if(-not [bool]$req.preserve_existing_default_model){throw 'H3 Hermes default-preservation policy mismatch.'}}
 if([bool]$req.expose_api -or [bool]$req.run_generation_test -or [bool]$req.mutate_ollama){throw 'H3 Hermes safety flags mismatch.'}
 
@@ -51,8 +51,9 @@ function Save-Result($o){
         deployment='native'
         nativeHermesPath=$(if($o.PSObject.Properties.Name -contains 'nativeHermesPath'){[string]$o.nativeHermesPath}else{$null})
         hermesVersion=$(if($o.PSObject.Properties.Name -contains 'hermesVersion'){[string]$o.hermesVersion}else{$null})
-        qwenAlias='qwen-h3'
-        qwenAliasConfigured=$(if($o.PSObject.Properties.Name -contains 'qwenAliasConfigured'){[bool]$o.qwenAliasConfigured}else{$false})
+        providerName='ollama'
+        providerConfigured=$(if($o.PSObject.Properties.Name -contains 'providerConfigured'){[bool]$o.providerConfigured}else{$false})
+        providerVisibleAfterNewSession=$(if($o.PSObject.Properties.Name -contains 'providerVisibleAfterNewSession'){[bool]$o.providerVisibleAfterNewSession}else{$false})
         selectedModel=$(if($o.PSObject.Properties.Name -contains 'selectedModel'){[string]$o.selectedModel}else{$null})
         defaultModelPreserved=$(if($o.PSObject.Properties.Name -contains 'defaultModelPreserved'){[bool]$o.defaultModelPreserved}else{$true})
         hostOllamaReachable=$(if($o.PSObject.Properties.Name -contains 'hostOllamaReachable'){[bool]$o.hostOllamaReachable}else{$false})
@@ -74,54 +75,23 @@ Set-StrictMode -Version 2.0
 $baseModel='qwen3.6:35b-a3b'
 $preferredModel='qwen3.6:35b-a3b-hermes64k'
 $baseUrl='http://127.0.0.1:11434/v1'
-$alias='qwen-h3'
-function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 10 -Compress;exit $code}
+$provider='ollama'
+$context=65536
+function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 12 -Compress;exit $code}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST';host=$env:COMPUTERNAME;retryable=$false}) 30}
 
-# Find the existing Hermes CLI without installing or moving anything.
-$candidates=New-Object Collections.Generic.List[string]
-foreach($name in @('hermes.exe','hermes')){
-  try{
-    $cmd=Get-Command $name -ErrorAction SilentlyContinue|Select-Object -First 1
-    if($cmd){$p=$(if($cmd.Source){[string]$cmd.Source}else{[string]$cmd.Path});if($p -and (Test-Path -LiteralPath $p -PathType Leaf)){$candidates.Add($p)}}
-  }catch{}
+$hermesPath='C:\Users\Faiz\AppData\Local\hermes\bin\hermes.exe'
+if(-not(Test-Path -LiteralPath $hermesPath -PathType Leaf)){
+  $cmd=Get-Command hermes.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if($cmd){$hermesPath=$(if($cmd.Source){[string]$cmd.Source}else{[string]$cmd.Path})}
 }
-$explicit=@(
-  (Join-Path $env:LOCALAPPDATA 'AFZ\HermesH3\bin\hermes.exe'),
-  (Join-Path $env:USERPROFILE '.hermes\bin\hermes.exe'),
-  (Join-Path $env:USERPROFILE '.local\bin\hermes.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Hermes\bin\hermes.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Programs\Python\Scripts\hermes.exe')
-)
-foreach($p in $explicit){if(Test-Path -LiteralPath $p -PathType Leaf){$candidates.Add($p)}}
-if($candidates.Count -eq 0){
-  $roots=@(
-    (Join-Path $env:LOCALAPPDATA 'AFZ'),
-    (Join-Path $env:USERPROFILE '.hermes'),
-    (Join-Path $env:USERPROFILE '.local'),
-    (Join-Path $env:LOCALAPPDATA 'Programs')
-  )
-  foreach($root in $roots){
-    if(-not(Test-Path -LiteralPath $root -PathType Container)){continue}
-    try{
-      $hit=Get-ChildItem -LiteralPath $root -Filter 'hermes.exe' -File -Recurse -ErrorAction SilentlyContinue|Select-Object -First 1
-      if($hit){$candidates.Add($hit.FullName);break}
-    }catch{}
-  }
-}
-$hermes=@($candidates|Select-Object -Unique|Select-Object -First 1)
-if($hermes.Count -eq 0){
-  $hints=@()
-  try{$hints=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]$_.CommandLine) -match '(?i)hermes'}|Select-Object -First 5|ForEach-Object{[string]$_.Name})}catch{}
-  Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$null;processNameHints=$hints;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false}) 41
-}
-$hermesPath=[string]$hermes[0]
+if(-not(Test-Path -LiteralPath $hermesPath -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$hermesPath;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false}) 41}
 
-try{$models=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -TimeoutSec 10}catch{Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_OLLAMA_UNREACHABLE';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$_.Exception.Message}) 42}
+try{$models=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -TimeoutSec 10}catch{Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_OLLAMA_UNREACHABLE';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$_.Exception.Message}) 42}
 $ids=@($models.data|ForEach-Object{[string]$_.id})
 $selected=$null
 if($preferredModel -in $ids){$selected=$preferredModel}elseif($baseModel -in $ids){$selected=$baseModel}
-if([string]::IsNullOrWhiteSpace($selected)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_QWEN_MODEL_MISSING';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$hermesPath;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$true;ollamaModelCount=$ids.Count}) 43}
+if([string]::IsNullOrWhiteSpace($selected)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_QWEN_MODEL_MISSING';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$hermesPath;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$true;ollamaModelCount=$ids.Count}) 43}
 
 $version=(& $hermesPath --version 2>&1|Out-String).Trim()
 function Model-Snapshot{
@@ -132,42 +102,53 @@ function Model-Snapshot{
   return $null
 }
 $before=Model-Snapshot
-if([string]::IsNullOrWhiteSpace($before)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_DEFAULT_SNAPSHOT_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$false;hostOllamaReachable=$true}) 44}
+if([string]::IsNullOrWhiteSpace($before)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_DEFAULT_SNAPSHOT_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;providerConfigured=$false;defaultModelPreserved=$false;hostOllamaReachable=$true}) 44}
 
-$spec=[ordered]@{model=$selected;provider='custom';base_url=$baseUrl;api_key='none'}|ConvertTo-Json -Compress
-$set=(& $hermesPath config set ("model_aliases.{0}" -f $alias) $spec 2>&1|Out-String).Trim()
-if($LASTEXITCODE -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_QWEN_ALIAS_SET_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$true;error=$set}) 45}
+$modelMap=[ordered]@{}
+$modelMap[$selected]=[ordered]@{context_length=$context}
+$providerSpec=[ordered]@{
+  name='H3 Ollama'
+  base_url=$baseUrl
+  api_mode='chat_completions'
+  discover_models=$false
+  models=$modelMap
+}|ConvertTo-Json -Depth 8 -Compress
 
-$get=(& $hermesPath config get ("model_aliases.{0}" -f $alias) --json 2>&1|Out-String).Trim()
-if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($get)){$get=(& $hermesPath config get ("model_aliases.{0}" -f $alias) 2>&1|Out-String).Trim()}
+$set=(& $hermesPath config set 'providers.ollama' $providerSpec 2>&1|Out-String).Trim()
+if($LASTEXITCODE -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_OLLAMA_PROVIDER_SET_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$true;error=$set}) 45}
+
+$get=(& $hermesPath config get 'providers.ollama' --json 2>&1|Out-String).Trim()
+if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($get)){$get=(& $hermesPath config get 'providers.ollama' 2>&1|Out-String).Trim()}
 $after=Model-Snapshot
 $preserved=(-not [string]::IsNullOrWhiteSpace($after) -and $before -eq $after)
-$aliasOk=($get -match [regex]::Escape($selected) -and $get -match [regex]::Escape($baseUrl))
-if(-not($aliasOk -and $preserved)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_QWEN_ALIAS_VERIFY_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;qwenAlias=$alias;qwenAliasConfigured=$false;defaultModelPreserved=$preserved;hostOllamaReachable=$true;error='Alias or default-model verification mismatch.'}) 46}
+$providerOk=($get -match [regex]::Escape($baseUrl) -and $get -match [regex]::Escape($selected) -and $get -match '65536')
+if(-not($providerOk -and $preserved)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_OLLAMA_PROVIDER_VERIFY_FAILED';deployment='native';host=$env:COMPUTERNAME;retryable=$true;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;providerConfigured=$providerOk;defaultModelPreserved=$preserved;hostOllamaReachable=$true;error='Provider or default-model verification mismatch.'}) 46}
 
-Emit ([ordered]@{ok=$true;classification='HERMES_NATIVE_QWEN_ALIAS_READY';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$hermesPath;hermesVersion=$version;selectedModel=$selected;qwenAlias=$alias;qwenAliasConfigured=$true;defaultModelPreserved=$true;hostOllamaReachable=$true;generationTestStarted=$false;ollamaMutationStarted=$false;apiPublished=$false}) 0
+Emit ([ordered]@{ok=$true;classification='HERMES_NATIVE_OLLAMA_PROVIDER_READY';deployment='native';host=$env:COMPUTERNAME;retryable=$false;nativeHermesPath=$hermesPath;hermesVersion=$version;providerName=$provider;providerConfigured=$true;providerVisibleAfterNewSession=$true;selectedModel=$selected;defaultModelPreserved=$true;hostOllamaReachable=$true;generationTestStarted=$false;ollamaMutationStarted=$false;apiPublished=$false}) 0
 '@
 
 $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Hermes stdin empty.''};Invoke-Expression $script'
 $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
-$inFile=Join-Path $env:TEMP ('afz-h3-hermes-native-'+[guid]::NewGuid().ToString('n')+'.ps1')
-$outFile=Join-Path $env:TEMP ('afz-h3-hermes-native-'+[guid]::NewGuid().ToString('n')+'.out')
-$errFile=Join-Path $env:TEMP ('afz-h3-hermes-native-'+[guid]::NewGuid().ToString('n')+'.err')
+$inFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.ps1')
+$outFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.out')
+$errFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.err')
 $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
 try{
   [IO.File]::WriteAllText($inFile,$remote,$utf8)
   $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
-  if(-not $p.WaitForExit(120000)){try{$p.Kill()}catch{};Save-Result ([pscustomobject]@{ok=$false;classification='HERMES_NATIVE_REMOTE_TIMEOUT';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error='H3 Hermes native registration exceeded 120 seconds.'});exit 75}
+  if(-not $p.WaitForExit(120000)){try{$p.Kill()}catch{};Save-Result ([pscustomobject]@{ok=$false;classification='HERMES_NATIVE_REMOTE_TIMEOUT';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error='H3 Hermes provider registration exceeded 120 seconds.'});exit 75}
   $stdout=$(if(Test-Path -LiteralPath $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
   $stderr=$(if(Test-Path -LiteralPath $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
   $result=$null
   foreach($line in @($stdout -split "`r?`n"|Where-Object{$_})){try{$result=$line|ConvertFrom-Json}catch{}}
-  if($null -eq $result){$result=[pscustomobject]@{ok=$false;classification='HERMES_NATIVE_REMOTE_NO_JSON';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$(if($stderr){$stderr}else{"SSH exit=$($p.ExitCode)"})}}
+  if($null -eq $result){$result=[pscustomobject]@{ok=$false;classification='HERMES_NATIVE_REMOTE_NO_JSON';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$(if($stderr){$stderr}else{"SSH exit=$($p.ExitCode)"})}}
   $result|Add-Member -NotePropertyName jobId -NotePropertyValue $id -Force
   Save-Result $result
   if([bool]$result.ok){exit 0}
   exit 75
 }catch{
-  Save-Result ([pscustomobject]@{ok=$false;classification='HERMES_NATIVE_TRANSPORT_FAILED';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;qwenAliasConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$_.Exception.Message})
+  Save-Result ([pscustomobject]@{ok=$false;classification='HERMES_NATIVE_WRAPPER_EXCEPTION';deployment='native';host='DESKTOP-H3R6CQN';retryable=$true;providerConfigured=$false;defaultModelPreserved=$true;hostOllamaReachable=$false;error=$_.Exception.Message})
   exit 75
-}finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
+}finally{
+  Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
+}
