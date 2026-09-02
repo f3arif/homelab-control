@@ -1,0 +1,65 @@
+name: AFZ Windows-main reachability
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/afz-windows-main-reachability-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-windows-main-reachability
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Windows-main without mutation
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "timestamp=$(date -u +%FT%TZ)"
+            echo '--- tailscale status ---'
+            tailscale status
+            echo '--- tailscale ping windows-main ---'
+            timeout 15s tailscale ping --timeout=5s 100.70.25.8
+            echo "tailscale_ping_exit=$?"
+            echo '--- tcp 8797 ---'
+            timeout 5s bash -c '</dev/tcp/100.70.25.8/8797' 2>&1
+            echo "tcp_8797_exit=$?"
+            echo '--- control health 8797 ---'
+            curl --silent --show-error --connect-timeout 3 --max-time 8 http://100.70.25.8:8797/health
+            echo
+            echo "curl_8797_exit=$?"
+            echo '--- tcp 8796 ---'
+            timeout 5s bash -c '</dev/tcp/100.70.25.8/8796' 2>&1
+            echo "tcp_8796_exit=$?"
+            echo '--- agent health 8796 ---'
+            curl --silent --show-error --connect-timeout 3 --max-time 8 http://100.70.25.8:8796/health
+            echo
+            echo "curl_8796_exit=$?"
+          } | tee windows-main-reachability.txt
+          exit 0
+
+      - name: Upload reachability proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-main-reachability
+          path: windows-main-reachability.txt
+          if-no-files-found: error
+          retention-days: 3
