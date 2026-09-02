@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "id": "h3-hermes-telegram-attachment-audit-20260902-r5",
-  "action": "audit-and-repair-telegram-tool-dispatch",
+  "id": "h3-hermes-telegram-attachment-audit-20260902-r6",
+  "action": "audit-telegram-attachments",
   "status": "ACTIVE",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
-  "read_only": false,
-  "restart_gateway": true,
-  "repair_tool_dispatch": true,
-  "change_config": true,
+  "read_only": true,
+  "restart_gateway": false,
+  "repair_tool_dispatch": false,
+  "change_config": false,
   "change_network": false
 }
