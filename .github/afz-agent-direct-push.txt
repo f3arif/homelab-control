@@ -1,9 +1,10 @@
 AFZ direct agent source recovery
-reason=hermes-desktop-backend-provider-refresh
+reason=h3-hermes-ollama-provider-schema-repair-r18
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-hermes-desktop-backend-refresh
+operation=source-sync-and-h3-hermes-provider-repair
 provider_switch=false
 model_generation=false
 ollama_mutation=false
-requested_at=2026-09-01T21:22:00-04:00
+network_change=false
+request=h3-hermes-ollama-provider-schema-repair-20260901-r18
