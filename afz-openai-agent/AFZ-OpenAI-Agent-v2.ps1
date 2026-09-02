@@ -355,12 +355,22 @@ function Throw-OpenAIBoundedError {
 
 function Invoke-OpenAIResponse {
   param($Body)
-  $headers = @{Authorization="Bearer $OpenAIKey";'Content-Type'='application/json'}
+  $headers = @{Authorization="Bearer $OpenAIKey"}
   $json = $Body | ConvertTo-Json -Depth 40 -Compress
+  try {
+    $null = $json | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    Throw-OpenAIBoundedError 'openai_local_json_invalid' 'The server could not serialize a valid OpenAI request. No remote request was sent.' 0
+  }
+  # Windows PowerShell 5.1 can encode a string request body inconsistently when
+  # researched website text contains smart punctuation or other non-ASCII text.
+  # Send explicit no-BOM UTF-8 bytes so Content-Length and JSON bytes agree.
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  $jsonBytes = $utf8.GetBytes($json)
   $maxAttempts = 3
   for ($attempt=1; $attempt -le $maxAttempts; $attempt++) {
     try {
-      return Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/responses' -Headers $headers -Body $json -TimeoutSec 180
+      return Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/responses' -Headers $headers -ContentType 'application/json; charset=utf-8' -Body $jsonBytes -TimeoutSec 180
     } catch {
       $failure = Get-OpenAIRequestFailure $_
       if ($failure.status -eq 400) {
