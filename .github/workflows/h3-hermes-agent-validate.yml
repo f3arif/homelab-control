@@ -66,11 +66,18 @@ jobs:
           if($d.change_provider -or $d.mutate_ollama -or $d.change_network -or $d.run_model_generation){throw 'dispatch forbidden mutation'}
 
           $p=Get-Content 'afz-openai-agent/requests/h3-hermes-pdf-runtime-audit.json' -Raw | ConvertFrom-Json
-          if($p.schema -ne 1 -or $p.action -ne 'audit-pdf-runtime' -or $p.status -ne 'ACTIVE'){throw 'pdf audit schema/action/status'}
-          if($p.target -ne 'h3' -or $p.host -ne 'DESKTOP-H3R6CQN'){throw 'pdf audit target'}
-          if(-not $p.read_only -or -not $p.inspect_latest_cached_pdf -or $p.return_document_text){throw 'pdf audit read/content guards'}
-          if($p.max_pages -lt 1 -or $p.max_pages -gt 5){throw 'pdf audit max_pages'}
-          if($p.install_dependencies -or $p.change_config -or $p.restart_gateway -or $p.change_provider -or $p.mutate_ollama -or $p.change_network -or $p.run_model_generation){throw 'pdf audit forbidden mutation'}
+          if($p.schema -ne 1 -or $p.status -ne 'ACTIVE'){throw 'pdf schema/status'}
+          if($p.action -notin @('audit-pdf-runtime','audit-and-repair-pdf-runtime')){throw 'pdf action'}
+          if($p.target -ne 'h3' -or $p.host -ne 'DESKTOP-H3R6CQN'){throw 'pdf target'}
+          if(-not $p.inspect_latest_cached_pdf -or $p.return_document_text){throw 'pdf content guards'}
+          if($p.max_pages -lt 1 -or $p.max_pages -gt 5){throw 'pdf max_pages'}
+          if($p.change_config -or $p.restart_gateway -or $p.change_provider -or $p.mutate_ollama -or $p.change_network -or $p.run_model_generation){throw 'pdf forbidden mutation'}
+          if($p.action -eq 'audit-and-repair-pdf-runtime'){
+            if($p.read_only -or -not $p.install_dependencies){throw 'pdf repair guard'}
+            if((@($p.packages | ForEach-Object{([string]$_).ToLowerInvariant()}) -join ',') -ne 'pypdf,reportlab,pdfplumber'){throw 'pdf package allowlist'}
+          }else{
+            if(-not $p.read_only -or $p.install_dependencies){throw 'pdf audit guard'}
+          }
 
           $g=Get-Content 'afz-openai-agent/requests/h3-hermes-gateway-reload.json' -Raw | ConvertFrom-Json
           if($g.schema -ne 1 -or $g.action -ne 'reload-gateway-native' -or $g.status -ne 'ACTIVE'){throw 'gateway schema/action/status'}
@@ -110,10 +117,10 @@ jobs:
             if(-not $dispatch.Contains($required)){throw "Dispatch helper missing: $required"}
           }
           $pdf=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1' -Raw
-          foreach($required in @('AFZ-H3-HERMES-PDF-RUNTIME-LATEST.txt','HERMES_PDF_TEXT_EXTRACTION_READY','HERMES_PDF_SKILL_MISSING','HERMES_PDF_DEPENDENCY_MISSING','latestCachedPdfSha256','documentTextReturned','$remoteTemplate','__PY_B64__')){
-            if(-not $pdf.Contains($required)){throw "PDF audit helper missing: $required"}
+          foreach($required in @('AFZ-H3-HERMES-PDF-RUNTIME-LATEST.txt','HERMES_PDF_DEPENDENCIES_AND_READ_VERIFIED','HERMES_PDF_SKILL_MISSING','HERMES_PDF_DEPENDENCY_MISSING','latestCachedPdfSha256','documentTextReturned','$remoteTemplate','__REPAIR_MODE__','pypdf','reportlab','pdfplumber')){
+            if(-not $pdf.Contains($required)){throw "PDF runtime helper missing: $required"}
           }
-          if($pdf -match '\}\)\s+\$\(if\('){throw 'PDF audit contains unsafe interpolated remote exit subexpression'}
+          if($pdf -match '\}\)\s+\$\(if\('){throw 'PDF helper contains unsafe interpolated remote exit subexpression'}
           $reload=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1' -Raw
           foreach($required in @('require_empty_active_registry','use_native_restart','HERMES_GATEWAY_NATIVE_RELOAD_VERIFIED','active_sessions.json','gateway restart')){
             if(-not $reload.Contains($required)){throw "Reload helper missing: $required"}
