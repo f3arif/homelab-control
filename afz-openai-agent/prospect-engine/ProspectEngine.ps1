@@ -385,7 +385,8 @@ function Invoke-ProspectExclusionAuditBatch {
       priorEvidence=[string](Get-ProspectProperty $audit 'evidence' '')
     }
   }) | ConvertTo-Json -Depth 5 -Compress
-  $prompt = $(if($mode -eq 'resolve-inconclusive'){@"
+  if ($mode -eq 'resolve-inconclusive') {
+    $prompt = @"
 Perform a second-pass territory resolution for each exact business below. Inspect only its official website using live web search.
 Audit location: Brampton, Ontario.
 Businesses: $targets
@@ -397,7 +398,9 @@ For each business, search its official domain for Brampton and inspect its home,
 - inconclusive: the official site has no reliable territory statement, its pages cannot be verified, or the evidence conflicts.
 
 Return exactly one result for every supplied id. Explain the exact official coverage statement used. Use official-domain source URLs only; never use directories, map listings, social media, cached snippets, or third-party profiles. Never infer a clear result from silence. When uncertain, return inconclusive.
-"@}else{@"
+"@
+  } else {
+    $prompt = @"
 Perform a territory audit for each exact business below. Inspect only its official website using live web search.
 Audit location: Brampton, Ontario.
 Businesses: $targets
@@ -409,7 +412,8 @@ Return exactly one result for every supplied id.
 - inconclusive: the official website does not provide enough service-area evidence to prove either result. Generic Ontario/GTA wording without specific coverage should be inconclusive, not guessed.
 
 Use concise evidence and official-domain source URLs only. Never infer from directories, map listings, social media, or third-party profiles.
-"@})
+"@
+  }
   $response = Invoke-OpenAIResponse ([ordered]@{
     model=$modelConfig.model
     instructions=$(if($mode -eq 'resolve-inconclusive'){
