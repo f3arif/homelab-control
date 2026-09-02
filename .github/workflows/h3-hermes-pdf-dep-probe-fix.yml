@@ -22,8 +22,39 @@ jobs:
       - name: Patch PDF stage diagnostics and outer timeout
         shell: python
         run: |
-          import base64
-          exec(base64.b64decode('CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKcCA9IFBhdGgoJ2Fmei1vcGVuYWktYWdlbnQvSW52b2tlLUgzLUhlcm1lcy1QZGZSdW50aW1lQXVkaXQucHMxJykKdGV4dCA9IHAucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCgpvbGRfdGltZW91dCA9ICItVGltZW91dE1zIDQyMDAwMCIKaWYgb2xkX3RpbWVvdCBub3QgaW4gdGV4dDoKICAgIGlmICItVGltZW91dE1zIDYwMDAwMCIgbm90IGluIHRleHQ6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiT3V0ZXIgdGltZW91dCBhbmNob3Igbm90IGZvdW5kIikKZWxzZToKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkX3RpbWVvdXQsICItVGltZW91dE1zIDYwMDAwMCIsIDEpCgplbWl0X2FuY2hvciA9ICJmdW5jdGlvbiBFbWl0KCRvLFtpbnRdJGNvZGUpeyRvfENvbnZlcnRUby1Kc29uIC1EZXB0aCAzMCAtQ29tcHJlc3M7ZXhpdCAkY29kZX1cbiIKc3RhZ2VfZGVmID0gZW1pdF9hbmNob3IgKyAiZnVuY3Rpb24gU3RhZ2UoW3N0cmluZ10kbmFtZSl7W0NvbnNvbGVdOjpFcnJvci5Xcml0ZUxpbmUoKCdBRlpQREZfU1RBR0U9JyskaGFtZSkpfVxuIgppZiAiZnVuY3Rpb24gU3RhZ2UoW3N0cmluZ10kbmFtZSkiIG5vdCBpbiB0ZXh0OgogICAgaWYgZW1pdF9hbmNob3Igbm90IGluIHRleHQ6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiRW1pdCBhbmNob3IgbWlzc2luZyIpCiAgICB0ZXh0ID0gdGV4dC5yZXBsYWNlKGVtaXRfYW5jaG9yLCBzdGFnZV9kZWYsIDEpCgpyZXBscyA9IFsKICAgICgiICAkZGVwPVJ1bi1QeXRob24gLVB5QXJncyBAKCctYycsJGRlcENvZGUpIC1UaW1lb3V0U2Vjb25kcyAyMFxuIiwKICAgICAiICBTdGFnZSAnZGVwLXByb2JlJ1xuICAkZGVwPVJ1bi1QeXRob24gLVB5QXJncyBAKCctYycsJGRlcENvZGUpIC1UaW1lb3V0U2Vjb25kcyAyMFxuIiksCiAgICAoIiAgICAkcGlwUHJvYmU9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnLS12ZXJzaW9uJykgLVRpbWVvdXRTZWNvbmRzIDIwXG4iLAogICAgICIgICAgU3RhZ2UgJ3BpcC1wcm9iZSdcbiAgICAkcGlwUHJvYmU9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnLS12ZXJzaW9uJykgLVRpbWVvdXRTZWNvbmRzIDIwXG4iKSwKICAgICgiICAgICAgJGVuc3VyZT1SdW4tUHl0aG9uIC1QeUFyZ3MgQCgnLW0nLCdlbnN1cmVwaXAnLCctLXVwZ3JhZGUnKSAtVGltZW91dFNlY29uZHMgMTIwXG4iLAogICAgICIgICAgICBTdGFnZSAnZW5zdXJlcGlwJ1xuICAgICAgJGVuc3VyZT1SdW4tUHl0aG9uIC1QeUFyZ3MgQCgnLW0nLCdlbnN1cmVwaXAnLCctLXVwZ3JhZGUnKSAtVGltZW91dFNlY29uZHMgMTIwXG4iKSwKICAgICgiICAgICAgJHBpcFByb2JlPVJ1bi1QeXRob24gLVB5QXJncyBAKCctbScsJ3BpcCcsJy0tdmVyc2lvbicpIC1UaW1lb3V0U2Vjb25kcyAyMFxuIiwKICAgICAiICAgICAgU3RhZ2UgJ3BpcC12ZXJpZnknXG4gICAgICAkcGlwUHJvYmU9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnLS12ZXJzaW9uJykgLVRpbWVvdXRTZWNvbmRzIDIwXG4iKSwKICAgICgiICAgICRmcmVlemU9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnZnJlZXplJykgLVRpbWVvdXRTZWNvbmRzIDMwOyIsCiAgICAgIiAgICBTdGFnZSAncGlwLWZyZWV6ZSdcbiAgICAkZnJlZXplPVJ1bi1QeXRob24gLVB5QXJncyBAKCctbScsJ3BpcCcsJ2ZyZWV6ZScpIC1UaW1lb3V0U2Vjb25kcyAzMDsiKSwKICAgICgiICAgICRwaXA9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnaW5zdGFsbCcsJy0tZGlzYWJsZS1waXAtdmVyc2lvbi1jaGVjaycsJy0tbm8taW5wdXQnLCdweXBkZicsJ3JlcG9ydGxhYicsJ3BkZnBsdW1iZXInKSAtVGltZW91dFNlY29uZHMgMTUwXG4iLAogICAgICIgICAgU3RhZ2UgJ3BpcC1pbnN0YWxsJ1xuICAgICRwaXA9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1tJywncGlwJywnaW5zdGFsbCcsJy0tZGlzYWJsZS1waXAtdmVyc2lvbi1jaGVjaycsJy0tbm8taW5wdXQnLCdweXBkZicsJ3JlcG9ydGxhYicsJ3BkZnBsdW1iZXInKSAtVGltZW91dFNlY29uZHMgMTUwXG4iKSwKICAgICgiICAkdnI9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1jJywkdmVyc2lvbnNDb2RlKSAtVGltZW91dFNlY29uZHMgMzBcbiIsCiAgICAgIiAgU3RhZ2UgJ2ltcG9ydC12ZXJpZnknXG4gICR2cj1SdW4tUHl0aG9uIC1QeUFyZ3MgQCgnLWMnLCR2ZXJzaW9uc0NvZGUpIC1UaW1lb3V0U2Vjb25kcyAzMFxuIiksCiAgICAoIiAgICAkc3I9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJy1jJywkc3Vic2V0Q29kZSwkcGRmLkZ1bGxOYW1lLCRzdWJzZXQsW3N0cmluZ10kbWF4UGFnZXMpIC1UaW1lb3V0U2Vjb25kcyA0NVxuIiwKICAgICAiICAgIFN0YWdlICdzYW1wbGUtYnVpbGQnXG4gICAgJHNyPVJ1bi1QeXRob24gLVB5QXJncyBAKCctYycsJHN1YnNldENvZGUsJHBkZi5GdWxsTmFtZSwkc3Vic2V0LFtzdHJpbmddJG1heFBhZ2VzKSAtVGltZW91dFNlY29uZHMgNDVcbiIpLAogICAgKCIgICAgJHJyPVJ1bi1QeXRob24gLVB5QXJncyBAKCRwZGZSZWFkLCRzdWJzZXQsJy0tdGV4dCcpIC1UaW1lb3V0U2Vjb25kcyA5MFxuIiwKICAgICAiICAgIFN0YWdlICdwZGYtcmVhZCdcb iAgICAkcnI9UnVuLVB5dGhvbiAtUHlBcmdzIEAoJHBkZlJlYWQsJHN1YnNldCwnLS10ZXh0JykgLVRpbWVvdXRTZWNvbmRzIDkwXG4iKSwKXQpmb3Igb2xkLG5ldyBpbiByZXBsczoKICAgIGlmIG5ldyBpbiB0ZXh0OgogICAgICAgIGNvbnRpbnVlCiAgICBpZiBvbGQgbm90IGluIHRleHQ6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiTWlzc2luZyBzdGFnZSBhbmNob3I6ICIgKyBvbGRbOjgwXSkKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkLG5ldywxKQoKcmVxdWlyZWQgPSBbCiAgICAiLVRpbWVvdXRNcyA2MDAwMDAiLAogICAgImZ1bmN0aW9uIFN0YWdlKFtzdHJpbmddJG5hbWUpIiwKICAgICJTdGFnZSAnZGVwLXByb2JlJyIsCiAgICAiU3RhZ2UgJ3BpcC1wcm9iZSciLAogICAgIlN0YWdlICdlbnN1cmVwaXAnIiwKICAgICJTdGFnZSAncGlwLXZlcmlmeSciLAogICAgIlN0YWdlICdwaXAtZnJlZXplJyIsCiAgICAiU3RhZ2UgJ3BpcC1pbnN0YWxsJyIsCiAgICAiU3RhZ2UgJ2ltcG9ydC12ZXJpZnknIiwKICAgICJTdGFnZSAnc2FtcGxlLWJ1aWxkJyIsCiAgICAiU3RhZ2UgJ3BkZi1yZWFkJyIsCiAgICAiJ3B5cGRmJywncmVwb3J0bGFiJywncGRmcGx1bWJlciciLAogICAgImRvY3VtZW50VGV4dFJldHVybmVkPSRmYWxzZSIsCiAgICAicHJvdmlkZXJUb3VjaGVkPSRmYWxzZSIsCiAgICAib2xsYW1hTXV0YXRpb25TdGFydGVkPSRmYWxzZSIsCiAgICAibmV0d29ya0NoYW5nZWQ9JGZhbHNlIiwKICAgICJtb2RlbEdlbmVyYXRpb25TdGFydGVkPSRmYWxzZSIsCl0KZm9yIG1hcmtlciBpbiByZXF1aXJlZDoKICAgIGlmIG1hcmtlciBub3QgaW4gdGV4dDoKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KCJNaXNzaW5nIGludmFyaWFudDogIiArIG1hcmtlcikKCnAud3JpdGVfdGV4dCh0ZXh0LCBlbmNvZGluZz0ndXRmLTgnLCBuZXdsaW5lPSdcbicpCg=='))
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
+          text=p.read_text(encoding='utf-8')
+          if '-TimeoutMs 420000' in text:
+              text=text.replace('-TimeoutMs 420000','-TimeoutMs 600000',1)
+          elif '-TimeoutMs 600000' not in text:
+              raise SystemExit('outer timeout anchor missing')
+
+          emit="function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 30 -Compress;exit $code}\n"
+          stage=emit+"function Stage([string]$name){[Console]::Error.WriteLine(('AFZPDF_STAGE='+$name))}\n"
+          if "function Stage([string]$name)" not in text:
+              if emit not in text: raise SystemExit('emit anchor missing')
+              text=text.replace(emit,stage,1)
+
+          pairs=[
+            ("  $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20\n","  Stage 'dep-probe'\n  $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20\n"),
+            ("    $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n","    Stage 'pip-probe'\n    $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n"),
+            ("      $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120\n","      Stage 'ensurepip'\n      $ensure=Run-Python -PyArgs @('-m','ensurepip','--upgrade') -TimeoutSeconds 120\n"),
+            ("      $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n","      Stage 'pip-verify'\n      $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20\n"),
+            ("    $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;","    Stage 'pip-freeze'\n    $freeze=Run-Python -PyArgs @('-m','pip','freeze') -TimeoutSeconds 30;"),
+            ("    $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150\n","    Stage 'pip-install'\n    $pip=Run-Python -PyArgs @('-m','pip','install','--disable-pip-version-check','--no-input','pypdf','reportlab','pdfplumber') -TimeoutSeconds 150\n"),
+            ("  $vr=Run-Python -PyArgs @('-c',$versionsCode) -TimeoutSeconds 30\n","  Stage 'import-verify'\n  $vr=Run-Python -PyArgs @('-c',$versionsCode) -TimeoutSeconds 30\n"),
+            ("    $sr=Run-Python -PyArgs @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) -TimeoutSeconds 45\n","    Stage 'sample-build'\n    $sr=Run-Python -PyArgs @('-c',$subsetCode,$pdf.FullName,$subset,[string]$maxPages) -TimeoutSeconds 45\n"),
+            ("    $rr=Run-Python -PyArgs @($pdfRead,$subset,'--text') -TimeoutSeconds 90\n","    Stage 'pdf-read'\n    $rr=Run-Python -PyArgs @($pdfRead,$subset,'--text') -TimeoutSeconds 90\n"),
+          ]
+          for old,new in pairs:
+              if new in text: continue
+              if old not in text: raise SystemExit('stage anchor missing: '+old[:60])
+              text=text.replace(old,new,1)
+
+          for marker in ['-TimeoutMs 600000','AFZPDF_STAGE=',"Stage 'ensurepip'","Stage 'pip-install'","Stage 'pdf-read'","'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false']:
+              if marker not in text: raise SystemExit('missing invariant: '+marker)
+          p.write_text(text,encoding='utf-8',newline='\n')
 
       - name: Validate helper under Windows PowerShell 5.1
         shell: powershell
@@ -34,19 +65,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
           $c=Get-Content $p -Raw
-          foreach($required in @(
-            '-TimeoutMs 600000',
-            'AFZPDF_STAGE=',
-            "Stage 'ensurepip'",
-            "Stage 'pip-install'",
-            "Stage 'pdf-read'",
-            "'pypdf','reportlab','pdfplumber'",
-            'documentTextReturned=$false',
-            'providerTouched=$false',
-            'ollamaMutationStarted=$false',
-            'networkChanged=$false',
-            'modelGenerationStarted=$false'
-          )){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          foreach($required in @('-TimeoutMs 600000','AFZPDF_STAGE=',"Stage 'ensurepip'","Stage 'pip-install'","Stage 'pdf-read'","'pypdf','reportlab','pdfplumber'",'documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
           'H3_HERMES_PDF_STAGE_TIMEOUT_PATCH=PASS'
 
       - name: Commit helper patch
