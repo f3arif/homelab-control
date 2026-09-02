@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-telegram-attachment-audit-20260902-r1",
+  "action": "audit-telegram-attachments",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "read_only": true,
+  "restart_gateway": false,
+  "change_config": false,
+  "change_network": false
+}
