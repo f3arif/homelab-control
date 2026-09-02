@@ -1,0 +1,43 @@
+name: H3 Hermes Desktop Direct Refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-hermes-direct-refresh.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-hermes-desktop-direct-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify H3 tailnet reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.106.186.118
+
+      - name: Run guarded H3 Hermes Desktop refresh
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/H3-Hermes-DesktopBackend-DirectRefresh.ps1"
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
+          timeout 70s tailscale ssh Faiz@100.106.186.118 "$remote"
