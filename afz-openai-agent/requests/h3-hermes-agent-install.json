@@ -1,11 +1,12 @@
 {
   "schema": 1,
-  "id": "h3-hermes-desktop-backend-refresh-20260901-r17",
-  "action": "completed",
-  "status": "COMPLETED",
+  "id": "h3-hermes-ollama-provider-schema-repair-20260901-r18",
+  "action": "install-and-configure",
+  "status": "ACTIVE",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "provider_name": "ollama",
+  "provider_identity": "custom:ollama",
   "base_url": "http://127.0.0.1:11434/v1",
   "base_model": "qwen3.6:35b-a3b",
   "context_length": 65536,
@@ -16,6 +17,5 @@
   "run_generation_test": false,
   "expose_api": false,
   "publish_result": true,
-  "emergency_diagnostic_ack": true,
-  "result": "desktop-not-running-process-audit-complete"
+  "emergency_diagnostic_ack": true
 }
