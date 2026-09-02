@@ -1,1 +1,1 @@
-h3-hermes-docker-live-20260831-r1
+h3-hermes-docker-live-20260902-qwen35b-repair-check
