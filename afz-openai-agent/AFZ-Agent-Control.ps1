@@ -16,8 +16,13 @@ $h3RegistryRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-s
 $h3RegistryStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-session-registry'
 $h3RegistryMarker=Join-Path $h3RegistryStateRoot 'wrapper-request.json'
 $h3RegistryAttempt=Join-Path $h3RegistryStateRoot 'wrapper-attempt.json'
+$h3TelegramAuditHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
+$h3TelegramAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-attachment-audit.json'
+$h3TelegramAuditStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-attachment-audit'
+$h3TelegramAuditMarker=Join-Path $h3TelegramAuditStateRoot 'wrapper-request.json'
+$h3TelegramAuditAttempt=Join-Path $h3TelegramAuditStateRoot 'wrapper-attempt.json'
 $log='C:\ProgramData\AFZ\OpenAIAgent\logs\control-wrapper.log'
-New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,(Split-Path $log -Parent)|Out-Null
+New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,(Split-Path $log -Parent)|Out-Null
 function WLog([string]$m){try{Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) $m" -Encoding UTF8}catch{}}
 
 # Existing AFZ Blog migration one-shot binding.
@@ -37,9 +42,7 @@ try{
   }
 }catch{WLog "blog migration wrapper error=$($_.Exception.Message)"}
 
-# Guarded one-shot H3 Hermes session-registry repair. The relay itself fails closed:
-# it only converts an exact empty legacy {sessions:[]} registry, backs it up first,
-# and does not stop the gateway or touch provider/model/Ollama/network settings.
+# Guarded one-shot H3 Hermes session-registry repair.
 try{
   if((Test-Path -LiteralPath $h3RegistryRequest -PathType Leaf) -and (Test-Path -LiteralPath $h3RegistryHelper -PathType Leaf)){
     $r=Get-Content -LiteralPath $h3RegistryRequest -Raw -Encoding UTF8|ConvertFrom-Json
@@ -57,6 +60,26 @@ try{
     }
   }
 }catch{WLog "h3 hermes registry wrapper error=$($_.Exception.Message)"}
+
+# Read-only one-shot Telegram attachment audit. It reports only feature flags,
+# handler hashes, cache counts, process IDs, and sanitized error counts.
+try{
+  if((Test-Path -LiteralPath $h3TelegramAuditRequest -PathType Leaf) -and (Test-Path -LiteralPath $h3TelegramAuditHelper -PathType Leaf)){
+    $r=Get-Content -LiteralPath $h3TelegramAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=[string]$r.id;$status=([string]$r.status).Trim().ToUpperInvariant();$action=([string]$r.action).Trim().ToLowerInvariant()
+    $already=$false
+    if(Test-Path -LiteralPath $h3TelegramAuditMarker -PathType Leaf){try{$m=Get-Content -LiteralPath $h3TelegramAuditMarker -Raw|ConvertFrom-Json;$already=([string]$m.id -eq $id -and [int]$m.exitCode -eq 0)}catch{}}
+    if($status -eq 'ACTIVE' -and $action -eq 'audit-telegram-attachments' -and $id -match '^h3-hermes-telegram-attachment-audit-[A-Za-z0-9._-]+$' -and -not $already){
+      WLog "h3 hermes telegram attachment audit start id=$id"
+      $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3TelegramAuditHelper -InstallRoot $InstallRoot -RequestPath $h3TelegramAuditRequest 2>&1|Out-String).Trim()
+      $code=$LASTEXITCODE
+      $attempt=[ordered]@{id=$id;attemptedAt=(Get-Date -Format o);exitCode=$code;output=$raw}
+      $attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3TelegramAuditAttempt -Encoding UTF8
+      if($code -eq 0){$attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3TelegramAuditMarker -Encoding UTF8}
+      WLog "h3 hermes telegram attachment audit finish id=$id exit=$code"
+    }
+  }
+}catch{WLog "h3 hermes telegram attachment audit wrapper error=$($_.Exception.Message)"}
 
 if(-not(Test-Path -LiteralPath $core -PathType Leaf)){throw "Preserved AFZ control core missing: $core"}
 WLog 'launching preserved AFZ control core'
