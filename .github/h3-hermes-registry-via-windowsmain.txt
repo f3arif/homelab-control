@@ -1,0 +1,5 @@
+request=h3-hermes-session-registry-repair-20260902-r1
+target=windows-main->h3
+control=http://100.70.25.8:8797/api/push-deploy
+backup_before_mutation=true
+only_exact_empty_legacy_schema=true
