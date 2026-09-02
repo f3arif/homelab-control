@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "afz-blog-github-cutover-20260902T1040",
+  "project": "afz-blog",
+  "action": "cutover-github-source",
+  "status": "ACTIVE",
+  "expectedBlogSha": "a37e71aa0e0c9fad41ecdc9652a7024c485666f4",
+  "h3Workspace": "C:\\AFZ\\Workspaces\\AFZ-Blog\\blog-manager",
+  "productionRoot": "C:\\docker\\afz-blog-manager",
+  "allowProductionGitAttach": true,
+  "allowRestart": false,
+  "allowPublish": false
+}
