@@ -1,0 +1,49 @@
+name: Windows-main Hermes Quiesce Exact Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windows-main-quiesce-sync.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windows-main-hermes-quiesce-exact-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify windows-main reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.70.25.8
+
+      - name: Probe windows-main SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 35s tailscale ssh Faiz@100.70.25.8 'hostname'
+
+      - name: Exact-SHA source sync
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmd="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\AFZ\\homelab-control\\afz-openai-agent\\Update-AFZ-OpenAI-Agent.ps1 -InstallRoot C:\\AFZ\\homelab-control -ExpectedSha ${AFZ_SHA}"
+          timeout 120s tailscale ssh Faiz@100.70.25.8 "$cmd"
