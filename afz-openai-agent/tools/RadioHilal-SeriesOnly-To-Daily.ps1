@@ -2,10 +2,14 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
+trap {
+  Write-Output ('STATUS=FAIL|error='+$_.Exception.Message)
+  exit 1
+}
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot=Join-Path 'C:\AFZ\MediaCatalog\Backups' ('RadioHilalSeriesOnlyDaily-'+$stamp)
 $actionNeedle='AFZ-RADIOHILAL-SERIES-AWARE-INTAKE-LATEST.ps1'
-Write-Output 'AFZ_RADIOHILAL_SERIESONLY_TO_DAILY_V1'
+Write-Output 'AFZ_RADIOHILAL_SERIESONLY_TO_DAILY_V2'
 Write-Output ('TIME='+(Get-Date -Format o))
 Write-Output 'SCOPE=exact RadioHilal SeriesOnly scheduled task only'
 Write-Output 'INTAKE_SCRIPT=UNCHANGED'
@@ -13,22 +17,22 @@ Write-Output 'RESOURCE_REVIEW_WHISPER_GATES=UNCHANGED'
 Write-Output 'MULTIPLE_INSTANCES_POLICY=UNCHANGED'
 Write-Output 'RUNNING_PROCESSES=UNCHANGED'
 
-$matches=New-Object System.Collections.Generic.List[object]
-foreach($task in @(Get-ScheduledTask -ErrorAction Stop)){
-  $actionText=(($task.Actions|ForEach-Object{([string]$_.Execute+' '+[string]$_.Arguments).Trim()}) -join ' || ')
+$taskMatches=New-Object System.Collections.Generic.List[object]
+foreach($taskCandidate in @(Get-ScheduledTask -ErrorAction Stop)){
+  $actionText=(($taskCandidate.Actions|ForEach-Object{([string]$_.Execute+' '+[string]$_.Arguments).Trim()}) -join ' || ')
   if($actionText -like ('*'+$actionNeedle+'*') -and $actionText -match '(?i)(?:^|\s)-SeriesOnly(?:\s|$)'){
-    $matches.Add([pscustomobject]@{Task=$task;Action=$actionText})
+    [void]$taskMatches.Add([pscustomobject]@{Task=$taskCandidate;Action=$actionText})
   }
 }
-Write-Output ('MATCH_COUNT='+$matches.Count)
-if($matches.Count -ne 1){Write-Output ('STATUS=SAFE_STOP|reason=SERIESONLY_TASK_MATCH_COUNT_'+$matches.Count);exit 2}
-$task=$matches[0].Task
+Write-Output ('MATCH_COUNT='+$taskMatches.Count)
+if($taskMatches.Count -ne 1){Write-Output ('STATUS=SAFE_STOP|reason=SERIESONLY_TASK_MATCH_COUNT_'+$taskMatches.Count);exit 2}
+$task=$taskMatches[0].Task
 Write-Output ('TASK_NAME='+$task.TaskName)
 Write-Output ('TASK_PATH='+$task.TaskPath)
 Write-Output ('TASK_STATE='+$task.State)
 Write-Output ('TASK_USER='+[string]$task.Principal.UserId)
 Write-Output ('TASK_RUNLEVEL='+[string]$task.Principal.RunLevel)
-Write-Output ('TASK_ACTION='+$matches[0].Action)
+Write-Output ('TASK_ACTION='+$taskMatches[0].Action)
 try{Write-Output ('TASK_MULTIPLE_INSTANCES='+[string]$task.Settings.MultipleInstances)}catch{}
 $trigs=@($task.Triggers)
 if($trigs.Count -ne 1){Write-Output ('STATUS=SAFE_STOP|reason=TRIGGER_COUNT_'+$trigs.Count);exit 2}
@@ -74,3 +78,4 @@ Write-Output ('ACTION_AFTER='+$actionAfter)
 try{Write-Output ('MULTIPLE_INSTANCES_AFTER='+[string]$v.Settings.MultipleInstances)}catch{}
 Write-Output 'CHANGED_COUNT=1'
 Write-Output 'STATUS=PASS'
+exit 0
