@@ -1,0 +1,45 @@
+name: Qwen35B Preview Verify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/qwen35b-preview-verify.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: qwen35b-preview-verify
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify private H3 preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://desktop-h3r6cqn.tailc9bb62.ts.net:8443'
+          for route in / /services /projects /about /contact; do
+            body="$(mktemp)"
+            code=$(curl --silent --show-error --fail-with-body --connect-timeout 5 --max-time 20 -o "$body" -w '%{http_code}' "$base$route")
+            bytes=$(wc -c < "$body")
+            echo "ROUTE=$route HTTP=$code BYTES=$bytes"
+            test "$code" = '200'
+            if [ "$route" = '/' ]; then
+              grep -qi 'AFZ Engineering' "$body"
+            fi
+          done
+          echo 'RESULT=PASS'
