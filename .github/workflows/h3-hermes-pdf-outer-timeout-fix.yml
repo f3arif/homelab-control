@@ -1,0 +1,83 @@
+name: H3 Hermes PDF Outer Timeout Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-pdf-outer-timeout-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extend only PDF remote supervision envelope
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
+          text = p.read_text(encoding='utf-8')
+          old = '-TimeoutMs 270000 -Transport $r.transport'
+          new = '-TimeoutMs 420000 -Transport $r.transport'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one PDF outer timeout marker, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          required = [
+              "'pypdf','reportlab','pdfplumber'",
+              "-TimeoutSeconds 20",
+              "-TimeoutSeconds 30",
+              "-TimeoutSeconds 150",
+              "-TimeoutSeconds 45",
+              "-TimeoutSeconds 90",
+              "transport='tailscale'",
+              "documentTextReturned=$false",
+              "providerTouched=$false",
+              "ollamaMutationStarted=$false",
+              "networkChanged=$false",
+              "modelGenerationStarted=$false",
+              '-TimeoutMs 420000',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'Missing PDF safety/timing invariant: {marker}')
+          if '-TimeoutMs 270000' in text:
+              raise SystemExit('Old PDF outer timeout still present')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Parse and enforce bounded PDF repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('-TimeoutMs 420000','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          if($c.Contains('-TimeoutMs 270000')){throw 'Old outer timeout still present'}
+          'H3_HERMES_PDF_OUTER_TIMEOUT_FIX=PASS'
+
+      - name: Commit safely on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
+          if git diff --cached --quiet; then
+            echo 'No change required'
+            exit 0
+          fi
+          git commit -m 'Extend bounded H3 Hermes PDF supervision timeout'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
