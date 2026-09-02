@@ -249,6 +249,33 @@ function Handle-H3DockerDesktopPreflight{
   }catch{Log "H3_DOCKER_PREFLIGHT_ERROR $($_.Exception.Message)"}
 }
 
+function Test-H3HermesPdfAuxPending{
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
+  $stateRootPdf=Join-Path $stateRoot 'jobs\h3-hermes-pdf-runtime-audit'
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return $false}
+  try{
+    $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+    $rid=([string]$r.id).Trim()
+    if([int]$r.schema -ne 1 -or [string]$r.status -ne 'ACTIVE' -or [string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){return $false}
+    if($rid -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return $false}
+    $action=([string]$r.action).Trim()
+    if($action -eq 'audit-pdf-runtime'){
+      if(-not [bool]$r.read_only -or [bool]$r.install_dependencies){return $false}
+    }elseif($action -eq 'audit-and-repair-pdf-runtime'){
+      if([bool]$r.read_only -or -not [bool]$r.install_dependencies){return $false}
+      $packages=@($r.packages|ForEach-Object{([string]$_).Trim().ToLowerInvariant()})
+      if(($packages -join ',') -ne 'pypdf,reportlab,pdfplumber'){return $false}
+    }else{return $false}
+    if([bool]$r.return_document_text -or [bool]$r.change_config -or [bool]$r.restart_gateway -or [bool]$r.change_provider -or [bool]$r.mutate_ollama -or [bool]$r.change_network -or [bool]$r.run_model_generation){return $false}
+    $statePathPdf=Join-Path $stateRootPdf ($rid+'.json')
+    if(-not(Test-Path -LiteralPath $statePathPdf -PathType Leaf)){return $true}
+    try{
+      $s=Get-Content -LiteralPath $statePathPdf -Raw -Encoding UTF8|ConvertFrom-Json
+      return (-not [bool]$s.ok)
+    }catch{return $true}
+  }catch{return $false}
+}
+
 function Handle-H3HermesRequest{
   if(-not(Test-Path -LiteralPath $h3HermesRunner -PathType Leaf)){return}
   if(-not(Test-Path -LiteralPath $h3HermesRequest -PathType Leaf)){return}
@@ -258,14 +285,16 @@ function Handle-H3HermesRequest{
     if([int]$req.schema -ne 1 -or [string]$req.action -ne 'install-and-configure' -or [string]$req.target -ne 'h3'){return}
     if([string]$req.host -ne 'DESKTOP-H3R6CQN' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){return}
     if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $pdfAuxPending=Test-H3HermesPdfAuxPending
     $statePath=Join-Path $h3HermesStateRoot ($id+'.json')
     if(Test-Path -LiteralPath $statePath -PathType Leaf){
       try{
         $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
-        if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K'){return}
-        if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED'){return}
+        if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K' -and -not $pdfAuxPending){return}
+        if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED' -and -not $pdfAuxPending){return}
       }catch{}
     }
+    if($pdfAuxPending){Log "H3_HERMES_PDF_AUX_PENDING source=$(Current-Sha)"}
     $now=Get-Date
     if(($now-$script:h3HermesLastAttempt).TotalSeconds -lt 60){return}
     $script:h3HermesLastAttempt=$now
