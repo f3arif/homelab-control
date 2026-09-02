@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "id": "h3-hermes-desktop-backend-refresh-20260901-r14",
-  "action": "refresh-desktop-backend",
+  "id": "h3-hermes-desktop-backend-refresh-20260901-r15",
+  "action": "install-and-configure",
   "status": "ACTIVE",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
