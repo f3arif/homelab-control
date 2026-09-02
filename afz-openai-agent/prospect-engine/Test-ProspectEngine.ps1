@@ -31,6 +31,7 @@ try{
   Assert-True (-not (Test-OutlookDevicePollWaiting $unparsed400 $invalidBody)) 'a parsed terminal OAuth error must not be hidden as waiting'
   $candidate=[pscustomobject]@{
     id='lead-1';company='Example Design';category='BCIN designers';city='Toronto'
+    serviceAreas=@('Toronto','Markham')
     website='https://example.com';publicEmail='projects@example.com'
     contactPage='https://example.com/contact';contactEvidenceUrl='https://example.com/contact'
     recipientRole='Design team';websiteSummary='Residential addition design and permit coordination.'
@@ -42,6 +43,10 @@ try{
   $lead=New-NormalizedProspect $candidate 'batch-1'
   Assert-True ($null -ne $lead) 'valid official-domain lead should normalize'
   Assert-True ($lead.fitScore -eq 82) 'fit score should be preserved'
+  Assert-True (-not (Test-ProspectExcludedLocation $lead @('Brampton'))) 'eligible Toronto prospect should not match the Brampton exclusion'
+  $lead.serviceAreas=@('Toronto','Brampton')
+  Assert-True (Test-ProspectExcludedLocation $lead @('Brampton')) 'explicit Brampton service must trigger the hard exclusion'
+  $lead.serviceAreas=@('Toronto','Markham')
   $store=New-ProspectStore;$store.leads=@($lead);Write-ProspectStore $store
   $loaded=Read-ProspectStore
   Assert-True (@($loaded.leads).Count -eq 1) 'lead should persist server-side'
@@ -50,6 +55,9 @@ try{
   $loaded.leads[0].compliance.identityIncluded=$true
   $loaded.leads[0].compliance.unsubscribeIncluded=$true
   Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'complete preflight should open draft gate'
+  $loaded.leads[0].websiteSummary='Residential design serving Toronto and Brampton.'
+  Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'Brampton-serving lead must remain blocked from Outlook drafts'
+  $loaded.leads[0].websiteSummary='Residential addition design and permit coordination.'
   $candidate.sourceUrls=@('https://example.com/services','https://different.example/projects')
   Assert-True ($null -eq (New-NormalizedProspect $candidate 'batch-2')) 'cross-domain evidence must be rejected'
   $request=[pscustomobject]@{Headers=@{Origin='https://attacker.example'};Url=[Uri]'http://127.0.0.1:8796/api/prospects/update'}

@@ -94,6 +94,25 @@ function Resolve-ProspectResearchModel {
   }
 }
 
+function Test-ProspectExcludedLocation {
+  param($Lead,$Locations=@('Brampton'))
+  if (-not $Lead) { return $false }
+  $texts = @(
+    [string](Get-ProspectProperty $Lead 'city' ''),
+    [string](Get-ProspectProperty $Lead 'websiteSummary' '')
+  )
+  $texts += @(ConvertTo-StringArray (Get-ProspectProperty $Lead 'serviceAreas' @()) 30)
+  $texts += @(ConvertTo-StringArray (Get-ProspectProperty $Lead 'projectEvidence' @()) 20)
+  $texts += @(ConvertTo-StringArray (Get-ProspectProperty $Lead 'fitReasons' @()) 20)
+  foreach ($location in @(ConvertTo-StringArray $Locations 20)) {
+    $name = ([string]$location).Trim()
+    if (-not $name) { continue }
+    $pattern = '(?i)(?<![A-Za-z0-9])' + [regex]::Escape($name) + '(?![A-Za-z0-9])'
+    foreach ($text in $texts) { if ([string]$text -match $pattern) { return $true } }
+  }
+  return $false
+}
+
 function New-ProspectSchema {
   $stringArray = [ordered]@{type='array';items=[ordered]@{type='string'}}
   $leadProperties = [ordered]@{
@@ -101,6 +120,7 @@ function New-ProspectSchema {
     company=[ordered]@{type='string'}
     category=[ordered]@{type='string'}
     city=[ordered]@{type='string'}
+    serviceAreas=$stringArray
     website=[ordered]@{type='string'}
     publicEmail=[ordered]@{type='string'}
     contactPage=[ordered]@{type='string'}
@@ -170,6 +190,7 @@ function New-NormalizedProspect {
     company=([string](Get-ProspectProperty $Lead 'company' '')).Trim()
     category=([string](Get-ProspectProperty $Lead 'category' '')).Trim()
     city=([string](Get-ProspectProperty $Lead 'city' '')).Trim()
+    serviceAreas=ConvertTo-StringArray (Get-ProspectProperty $Lead 'serviceAreas' @()) 30
     website=$website;publicEmail=$email
     contactPage=([string](Get-ProspectProperty $Lead 'contactPage' '')).Trim()
     contactEvidenceUrl=([string](Get-ProspectProperty $Lead 'contactEvidenceUrl' '')).Trim()
@@ -201,6 +222,8 @@ function Invoke-ProspectResearch {
   if ($region.Length -gt 120) { $region = $region.Substring(0,120) }
   $focus = ([string](Get-ProspectProperty $Request 'focus' '')).Trim()
   if ($focus.Length -gt 500) { $focus = $focus.Substring(0,500) }
+  $requestedExcludedLocations = @(ConvertTo-StringArray (Get-ProspectProperty $Request 'excludedLocations' @()) 19)
+  $excludedLocations = @((@('Brampton') + $requestedExcludedLocations) | Select-Object -Unique)
   $limit = [math]::Max(1,[math]::Min(20,[int](Get-ProspectProperty $Request 'limit' 10)))
   $minimum = [math]::Max(50,[math]::Min(95,[int](Get-ProspectProperty $Request 'minimumScore' 65)))
   $modelConfig = Resolve-ProspectResearchModel $Request
@@ -213,6 +236,7 @@ function Invoke-ProspectResearch {
 Find up to $limit qualified AFZ Engineering referral or project-partner prospects in $region.
 Target business types: $($targets -join ', ').
 Extra focus: $focus
+Hard-excluded locations: $($excludedLocations -join ', '). Reject any firm based in, maintaining an office in, showing projects in, or explicitly advertising service to any excluded location. Populate serviceAreas only from explicit official-website evidence. Never return an excluded firm.
 
 AFZ services to match: residential HVAC design and inspection; building-permit drawings; renovation and addition design. Strong evidence includes additions, major renovations, legal basements, secondary suites, multiplex conversions, garden or laneway suites, custom homes, permit coordination, and mechanical or HVAC coordination.
 
@@ -238,6 +262,7 @@ Each retained lead must have an official website and at least two distinct sourc
   foreach ($candidate in @($parsed.leads)) {
     $lead = New-NormalizedProspect $candidate $batchId
     if ($null -eq $lead -or $lead.fitScore -lt $minimum) { continue }
+    if (Test-ProspectExcludedLocation $lead $excludedLocations) { continue }
     $domain = Get-ProspectHost $lead.website
     if ($existingHosts -contains $domain -or $seen.ContainsKey($domain)) { continue }
     $seen[$domain] = $true
@@ -246,7 +271,7 @@ Each retained lead must have an official website and at least two distinct sourc
   }
   if ($accepted.Count -eq 0) { throw 'No prospects passed the official-site evidence, duplicate, and fit-score gates.' }
   $batch = [ordered]@{
-    id=$batchId;query=([string]$parsed.batch.query);region=$region;targets=$targets
+    id=$batchId;query=([string]$parsed.batch.query);region=$region;targets=$targets;excludedLocations=$excludedLocations
     searchedAt=(Get-Date -Format o);minimumScore=$minimum;accepted=$accepted.Count
     modelChoice=$modelConfig.key;model=$modelConfig.model
   }
@@ -266,6 +291,7 @@ function Get-LeadById {
 function Test-LeadReadyForOutlook {
   param($Lead)
   if (-not $Lead) { return $false }
+  if (Test-ProspectExcludedLocation $Lead @('Brampton')) { return $false }
   $c = Get-ProspectProperty $Lead 'compliance' $null
   return (Test-ProspectEmail ([string]$Lead.publicEmail)) -and
     (Test-ProspectUrl ([string]$Lead.contactEvidenceUrl)) -and
