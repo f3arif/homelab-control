@@ -1,8 +1,9 @@
 AFZ direct agent source recovery
-reason=prospect-model-selector-health-recovery
+reason=hermes-desktop-backend-provider-refresh
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-prospect-health-canary
+operation=source-sync-and-hermes-desktop-backend-refresh
 provider_switch=false
 model_generation=false
-requested_at=2026-09-01T15:45:00-04:00
+ollama_mutation=false
+requested_at=2026-09-01T21:22:00-04:00
