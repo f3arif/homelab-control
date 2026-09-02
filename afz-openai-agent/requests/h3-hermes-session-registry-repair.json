@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-session-registry-repair-20260902-r1",
+  "enabled": true,
+  "action": "repair-exact-empty-legacy-registry",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "backup_before_mutation": true,
+  "only_exact_empty_legacy_schema": true,
+  "stop_gateway": false,
+  "change_provider": false,
+  "run_model_generation": false,
+  "mutate_ollama": false,
+  "change_network": false
+}
