@@ -152,7 +152,7 @@ try{
 $remote=$remoteTemplate.Replace('__REPAIR_MODE__',$(if($repair){'$true'}else{'$false'})).Replace('__MAX_PAGES__',[string]$maxPages)
 $routes=if($repair){@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()})}else{@([pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},[pscustomobject]@{target='Faiz@192.168.50.185';transport='lan-hostkey-alias';extra=@('-o','HostKeyAlias=100.106.186.118')})}
 $result=$null
-foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 270000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
+foreach($r in $routes){$candidate=Invoke-RemoteScript -Target $r.target -Extra $r.extra -Script $remote -TimeoutMs 420000 -Transport $r.transport;$result=$candidate;if([string]$candidate.classification -notin @('HERMES_PDF_RUNTIME_REMOTE_TIMEOUT','HERMES_PDF_RUNTIME_INVALID_REMOTE_RESULT')){break}}
 if($null -eq $result){$result=[pscustomobject]@{ok=$false;classification='HERMES_PDF_RUNTIME_UNREACHABLE'}}
 Save-Result $result
 exit $(if([bool]$result.ok){0}else{1})
