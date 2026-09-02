@@ -58,6 +58,10 @@ try{
   Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
   Assert-True ((Get-ProspectExclusionAuditStatus $loaded.leads[0]) -eq 'clear') 'clear territory audit should be persisted on the lead'
   Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'complete preflight should open draft gate'
+  Set-ProspectExclusionAudit $loaded.leads[0] 'inconclusive' 'No finite official service area was published.' @('https://example.com/services') $sol 'deep'
+  Assert-True ([string]$loaded.leads[0].exclusionAudit.resolutionPass -eq 'deep') 'deep territory resolution should be recorded on the lead'
+  Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'deep-pass inconclusive lead must remain blocked from Outlook drafts'
+  Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
   $loaded.leads[0].websiteSummary='Residential design serving Toronto and Brampton.'
   Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'Brampton-serving lead must remain blocked from Outlook drafts'
   $loaded.leads[0].websiteSummary='Residential addition design and permit coordination.'
@@ -72,6 +76,8 @@ try{
   Assert-True (-not (Test-ProspectRequestOrigin $context)) 'cross-origin writes must be rejected'
   $request.Headers.Origin='http://127.0.0.1:8796'
   Assert-True (Test-ProspectRequestOrigin $context) 'same-origin writes should be accepted'
+  $invalidAuditModeRejected=$false;try{Invoke-ProspectExclusionAuditBatch ([pscustomobject]@{model='sol';mode='unsafe-mode'})|Out-Null}catch{$invalidAuditModeRejected=$true}
+  Assert-True $invalidAuditModeRejected 'unsupported territory-audit modes must be rejected'
   Write-Host 'AFZ Prospect Engine tests: PASS'
 }finally{
   Remove-Item -LiteralPath $StateRoot -Recurse -Force -ErrorAction SilentlyContinue

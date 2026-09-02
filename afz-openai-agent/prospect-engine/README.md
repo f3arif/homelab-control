@@ -7,7 +7,7 @@ The Prospect Engine is served by the existing AFZ OpenAI Agent at `/prospects`.
 - Audit log: `C:\ProgramData\AFZ\ProspectEngine\audit.ndjson`
 - Runtime transport: local/Tailscale HTTP on the existing allowlist
 - Research: OpenAI Responses API with hosted `web_search` and strict JSON schema
-- Territory audit: incremental official-site revalidation of saved leads; Brampton matches are quarantined and inconclusive results remain draft-blocked
+- Territory audit: incremental official-site revalidation plus an automatic Sol second pass for inconclusive leads; explicit Brampton and official GTA/Peel/Southern Ontario or broader coverage is quarantined, while unresolved results remain draft-blocked
 - Outlook: delegated Microsoft Graph `Mail.ReadWrite`; draft creation only
 
 No OneDrive or SharePoint path is used for search, lead state, review state, or draft creation.
