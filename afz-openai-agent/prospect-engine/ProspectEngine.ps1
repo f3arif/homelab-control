@@ -308,7 +308,7 @@ Each retained lead must have an official website and at least two distinct sourc
     model=$modelConfig.model
     instructions='You are the AFZ Engineering Prospect Researcher. Perform read-only public-business web research. Return only schema-valid results with verified official-site evidence. Do not send or submit anything.'
     input=$prompt
-    tools=@([ordered]@{type='web_search';search_context_size=$modelConfig.searchContextSize})
+    tools=@([ordered]@{type='web_search_preview';search_context_size=$modelConfig.searchContextSize})
     text=[ordered]@{format=[ordered]@{type='json_schema';name='afz_prospect_batch';strict=$true;schema=(New-ProspectSchema)}}
   })
   $raw = Get-ProspectResponseText $response
@@ -422,7 +422,7 @@ Use concise evidence and official-domain source URLs only. Never infer from dire
       'You are the AFZ Prospect Territory Auditor. Perform read-only official-website research. Return every requested id exactly once. Never guess service coverage.'
     })
     input=$prompt
-    tools=@([ordered]@{type='web_search';search_context_size=$modelConfig.searchContextSize})
+    tools=@([ordered]@{type='web_search_preview';search_context_size=$modelConfig.searchContextSize})
     text=[ordered]@{format=[ordered]@{type='json_schema';name='afz_prospect_exclusion_audit';strict=$true;schema=(New-ProspectExclusionAuditSchema)}}
   })
   $raw = Get-ProspectResponseText $response
@@ -771,6 +771,8 @@ function Invoke-ProspectEngineRoute {
             ok=$false;code=$code;error=$_.Exception.Message
             retryable=($code -eq 'openai_rate_limit');retryAfterSeconds=$retryAfter
           })
+        } elseif ($code -eq 'openai_bad_request') {
+          Send-Json $Context 400 @{ok=$false;code=$code;error=$_.Exception.Message;retryable=$false}
         } else {
           Send-Json $Context 502 @{ok=$false;code='research_failed';error=$_.Exception.Message;retryable=$false}
         }
@@ -799,6 +801,8 @@ function Invoke-ProspectEngineRoute {
             ok=$false;code=$code;error=$_.Exception.Message
             retryable=($code -eq 'openai_rate_limit');retryAfterSeconds=$retryAfter
           })
+        } elseif ($code -eq 'openai_bad_request') {
+          Send-Json $Context 400 @{ok=$false;code=$code;error=$_.Exception.Message;retryable=$false}
         } else {
           Send-Json $Context 502 @{ok=$false;code='territory_audit_failed';error=$_.Exception.Message;retryable=$false}
         }
