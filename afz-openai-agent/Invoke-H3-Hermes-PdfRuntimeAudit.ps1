@@ -161,11 +161,10 @@ try{
     Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT';mutation='NONE';missingMarkers=$missingDepMarkers;stdoutPreview=$preview}) 47
   }
   $depsReady=([bool]$deps['pypdf'] -and [bool]$deps['reportlab'] -and [bool]$deps['pdfplumber'])
-  $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null
+  $installed=$false;$pipBootstrapped=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null
   if(-not $depsReady){
     if(-not $repairMode){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_MISSING';mutation='NONE';readOnly=$true;dependencies=$deps;skillFound=$true;requiredHelperMissing=$false;suspiciousLiteralPdfTextCommand=$suspicious;cachedPdfCount=$pdfs.Count;latestCachedPdfName=$pdf.Name;latestCachedPdfSizeBytes=[int64]$pdf.Length;latestCachedPdfSha256=(Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash.ToLowerInvariant();documentTextReturned=$false;observedAt=(Get-Date -Format o)}) 10}
     $stamp=Get-Date -Format 'yyyyMMdd-HHmmss';$preFreeze=Join-Path $root ('pdf-deps-pre-'+$stamp+'.txt')
-    $pipBootstrapped=$false
     Stage 'pip-probe'
     $pipProbe=Run-Python -PyArgs @('-m','pip','--version') -TimeoutSeconds 20
     if($pipProbe.timedOut -or $pipProbe.exit -ne 0){
