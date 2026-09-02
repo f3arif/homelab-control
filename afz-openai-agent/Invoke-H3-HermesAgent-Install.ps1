@@ -29,11 +29,7 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 foreach($required in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $required -PathType Leaf)){throw "Required H3 SSH path missing: $required"}}
 
-# The persistent Push-Deploy-Watcher launches this runner on each active Hermes pass.
-# Use that existing execution path to repair the one exact observed corrupted session
-# registry fingerprint before provider verification. This avoids dependence on a
-# control-wrapper restart. The registry helper itself takes Hermes' lock, creates a
-# backup, only mutates the exact guarded fingerprint, and strict-validates the result.
+# Guarded session-registry repair preflight.
 $registryRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-SessionRegistryRepair.ps1'
 $registryRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-session-registry-repair.json'
 try{
@@ -43,12 +39,26 @@ try{
     $registryDone=$false
     if($registryId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
       $registryStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-session-registry' ($registryId+'.json')
-      if(Test-Path -LiteralPath $registryStatePath -PathType Leaf){
-        try{$registryState=Get-Content -LiteralPath $registryStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$registryDone=[bool]$registryState.ok}catch{}
-      }
-      if(-not $registryDone){
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $registryRelay -InstallRoot $InstallRoot -RequestPath $registryRequest *> $null
-      }
+      if(Test-Path -LiteralPath $registryStatePath -PathType Leaf){try{$registryState=Get-Content -LiteralPath $registryStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$registryDone=[bool]$registryState.ok}catch{}}
+      if(-not $registryDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $registryRelay -InstallRoot $InstallRoot -RequestPath $registryRequest *> $null}
+    }
+  }
+}catch{}
+
+# Read-only Telegram attachment audit preflight. The audit never returns tokens,
+# message bodies, attachment contents, or filenames; it publishes only safe feature
+# flags, code hashes, cache counts, process IDs, and aggregate error signals.
+$telegramAuditRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
+$telegramAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-attachment-audit.json'
+try{
+  if((Test-Path -LiteralPath $telegramAuditRelay -PathType Leaf) -and (Test-Path -LiteralPath $telegramAuditRequest -PathType Leaf)){
+    $auditReq=Get-Content -LiteralPath $telegramAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $auditId=([string]$auditReq.id).Trim()
+    $auditDone=$false
+    if($auditId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
+      $auditStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-attachment-audit' ($auditId+'.json')
+      if(Test-Path -LiteralPath $auditStatePath -PathType Leaf){try{$auditState=Get-Content -LiteralPath $auditStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$auditDone=[bool]$auditState.ok}catch{}}
+      if(-not $auditDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $telegramAuditRelay -InstallRoot $InstallRoot -RequestPath $telegramAuditRequest *> $null}
     }
   }
 }catch{}
