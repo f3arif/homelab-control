@@ -54,10 +54,17 @@ try{
   $loaded.leads[0].compliance.lawfulBasisConfirmed=$true
   $loaded.leads[0].compliance.identityIncluded=$true
   $loaded.leads[0].compliance.unsubscribeIncluded=$true
+  Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'legacy lead must remain draft-blocked until its territory audit is clear'
+  Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
+  Assert-True ((Get-ProspectExclusionAuditStatus $loaded.leads[0]) -eq 'clear') 'clear territory audit should be persisted on the lead'
   Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'complete preflight should open draft gate'
   $loaded.leads[0].websiteSummary='Residential design serving Toronto and Brampton.'
   Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'Brampton-serving lead must remain blocked from Outlook drafts'
   $loaded.leads[0].websiteSummary='Residential addition design and permit coordination.'
+  Set-ProspectExclusionAudit $loaded.leads[0] 'excluded' 'Official service area includes Brampton.' @('https://example.com/services') $luna
+  Assert-True (Test-ProspectExcludedLocation $loaded.leads[0] @('Brampton')) 'excluded territory audit must quarantine the lead'
+  Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'excluded territory audit must block Outlook drafts'
+  Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
   $candidate.sourceUrls=@('https://example.com/services','https://different.example/projects')
   Assert-True ($null -eq (New-NormalizedProspect $candidate 'batch-2')) 'cross-domain evidence must be rejected'
   $request=[pscustomobject]@{Headers=@{Origin='https://attacker.example'};Url=[Uri]'http://127.0.0.1:8796/api/prospects/update'}

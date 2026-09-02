@@ -7,6 +7,7 @@ The Prospect Engine is served by the existing AFZ OpenAI Agent at `/prospects`.
 - Audit log: `C:\ProgramData\AFZ\ProspectEngine\audit.ndjson`
 - Runtime transport: local/Tailscale HTTP on the existing allowlist
 - Research: OpenAI Responses API with hosted `web_search` and strict JSON schema
+- Territory audit: incremental official-site revalidation of saved leads; Brampton matches are quarantined and inconclusive results remain draft-blocked
 - Outlook: delegated Microsoft Graph `Mail.ReadWrite`; draft creation only
 
 No OneDrive or SharePoint path is used for search, lead state, review state, or draft creation.
@@ -22,3 +23,4 @@ Create a Microsoft Entra app registration for the AFZ tenant, enable public-clie
 Paste the application (client) ID and tenant ID/domain into the Outlook setup panel, then use **Connect Outlook**. The refresh token is encrypted with Windows DPAPI `LocalMachine`; no client secret is used.
 
 The service exposes no Microsoft Graph send route. A lead must have a verified public business email, contact evidence URL, completed compliance checklist, and explicit review before the Draft button is enabled.
+It must also have a `clear` Brampton territory-audit result. Existing, excluded, pending, and inconclusive territory records cannot create Outlook drafts.
