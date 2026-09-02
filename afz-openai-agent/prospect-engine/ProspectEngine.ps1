@@ -771,7 +771,7 @@ function Invoke-ProspectEngineRoute {
             ok=$false;code=$code;error=$_.Exception.Message
             retryable=($code -eq 'openai_rate_limit');retryAfterSeconds=$retryAfter
           })
-        } elseif ($code -eq 'openai_bad_request') {
+        } elseif ($code -in @('openai_bad_request','openai_local_json_invalid')) {
           Send-Json $Context 400 @{ok=$false;code=$code;error=$_.Exception.Message;retryable=$false}
         } else {
           Send-Json $Context 502 @{ok=$false;code='research_failed';error=$_.Exception.Message;retryable=$false}
@@ -801,7 +801,7 @@ function Invoke-ProspectEngineRoute {
             ok=$false;code=$code;error=$_.Exception.Message
             retryable=($code -eq 'openai_rate_limit');retryAfterSeconds=$retryAfter
           })
-        } elseif ($code -eq 'openai_bad_request') {
+        } elseif ($code -in @('openai_bad_request','openai_local_json_invalid')) {
           Send-Json $Context 400 @{ok=$false;code=$code;error=$_.Exception.Message;retryable=$false}
         } else {
           Send-Json $Context 502 @{ok=$false;code='territory_audit_failed';error=$_.Exception.Message;retryable=$false}
