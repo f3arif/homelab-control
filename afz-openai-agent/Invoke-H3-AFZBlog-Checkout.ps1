@@ -9,7 +9,8 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
 $expectedWindowsHost='DESKTOP-10SKF0M'
-$key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
+$systemKey='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
+$userKey='C:\Users\Faiz\.ssh\afz_h3_worker'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
 $target='Faiz@100.106.186.118'
@@ -21,6 +22,8 @@ $statePath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $mirrorPath=Join-Path $mirrorRoot 'AFZ-H3-AFZ-BLOG-CHECKOUT-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
+$key=$null
+$relayIdentity=$null
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 
 function Save-State($o){
@@ -51,9 +54,15 @@ try{
   if($RequestId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid RequestId'}
   if($ExpectedBlogSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedBlogSha must be 40 hex characters'}
   $ExpectedBlogSha=$ExpectedBlogSha.ToLowerInvariant()
-  foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required relay path missing: $p"}}
   $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-  if([string]$identity.User.Value -ne 'S-1-5-18'){throw "SYSTEM execution required. Actual: $($identity.Name)"}
+  if([string]$identity.User.Value -eq 'S-1-5-18'){
+    $key=$systemKey;$relayIdentity='SYSTEM'
+  }elseif([string]$identity.Name -ieq ($expectedWindowsHost+'\Faiz')){
+    $key=$userKey;$relayIdentity='Faiz'
+  }else{
+    throw "Relay identity is not allowlisted. Actual: $($identity.Name)"
+  }
+  foreach($p in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Required relay path missing: $p"}}
 
   $remoteTemplate=@'
 $ErrorActionPreference='Stop'
@@ -133,7 +142,7 @@ if($before.workspaceExists){
 }
 $after=Snapshot
 if(-not $after.gitRepo -or [string]$after.head -ne $expectedSha -or [string]$after.branch -ne 'main' -or [int]$after.dirtyCount -ne 0){Emit $false 'H3_AFZ_BLOG_VERIFY_FAILED' @{gitCredentialAvailable=$cred;before=$before;after=$after} 37}
-if(Test-Path -LiteralPath (Join-Path $workspace '.env') -PathType Leaf -or Test-Path -LiteralPath (Join-Path $workspace '.env.local') -PathType Leaf){Emit $false 'H3_AFZ_BLOG_SECRET_FILE_PRESENT' @{gitCredentialAvailable=$cred;before=$before;after=$after} 38}
+if((Test-Path -LiteralPath (Join-Path $workspace '.env') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $workspace '.env.local') -PathType Leaf)){Emit $false 'H3_AFZ_BLOG_SECRET_FILE_PRESENT' @{gitCredentialAvailable=$cred;before=$before;after=$after} 38}
 Emit $true 'H3_AFZ_BLOG_CHECKOUT_READY' @{gitCredentialAvailable=$cred;before=$before;after=$after} 0
 '@
   $remote=$remoteTemplate.Replace('__ACTION__',$Action).Replace('__EXPECTED_SHA__',$ExpectedBlogSha)
@@ -142,11 +151,11 @@ Emit $true 'H3_AFZ_BLOG_CHECKOUT_READY' @{gitCredentialAvailable=$cred;before=$b
   if(-not $jsonLine){throw "H3 checkout returned no JSON. exit=$($r.exit) stderr=$($r.stderr)"}
   $payload=$jsonLine|ConvertFrom-Json -ErrorAction Stop
   if([string]$payload.host -ne $expectedH3){throw "Unexpected remote host: $($payload.host)"}
-  $safe=[ordered]@{schema=1;ok=[bool]$payload.ok;classification=[string]$payload.classification;requestId=$RequestId;relayHost=$env:COMPUTERNAME;target='h3';host=[string]$payload.host;action=$Action;repository=[string]$payload.repository;workspace=[string]$payload.workspace;expectedSha=$ExpectedBlogSha;gitCredentialAvailable=[bool]$payload.gitCredentialAvailable;remoteMutationStarted=[bool]$payload.remoteMutationStarted;credentialsEmitted=$false;before=$payload.before;after=$payload.after;sshExit=[int]$r.exit;time=(Get-Date -Format o)}
+  $safe=[ordered]@{schema=1;ok=[bool]$payload.ok;classification=[string]$payload.classification;requestId=$RequestId;relayHost=$env:COMPUTERNAME;relayIdentity=$relayIdentity;target='h3';host=[string]$payload.host;action=$Action;repository=[string]$payload.repository;workspace=[string]$payload.workspace;expectedSha=$ExpectedBlogSha;gitCredentialAvailable=[bool]$payload.gitCredentialAvailable;remoteMutationStarted=[bool]$payload.remoteMutationStarted;credentialsEmitted=$false;before=$payload.before;after=$payload.after;sshExit=[int]$r.exit;time=(Get-Date -Format o)}
   Save-State $safe
   if(-not $safe.ok){exit 42}
   exit 0
 }catch{
-  Save-State ([ordered]@{schema=1;ok=$false;classification='H3_AFZ_BLOG_RELAY_FAILED';requestId=$RequestId;relayHost=$env:COMPUTERNAME;target='h3';action=$Action;expectedSha=$ExpectedBlogSha;credentialsEmitted=$false;error=$_.Exception.Message;time=(Get-Date -Format o)})
+  Save-State ([ordered]@{schema=1;ok=$false;classification='H3_AFZ_BLOG_RELAY_FAILED';requestId=$RequestId;relayHost=$env:COMPUTERNAME;relayIdentity=$relayIdentity;target='h3';action=$Action;expectedSha=$ExpectedBlogSha;credentialsEmitted=$false;error=$_.Exception.Message;time=(Get-Date -Format o)})
   exit 43
 }
