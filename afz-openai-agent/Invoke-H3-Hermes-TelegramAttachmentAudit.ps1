@@ -28,171 +28,81 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 foreach($required in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $required -PathType Leaf)){throw "Required H3 audit path missing: $required"}}
 
+# Static-only remote inspection. No Python imports, no recursive source/log scan,
+# no config contents, no tokens, and no process mutation.
 $remote=@'
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
-function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 20 -Compress;exit $code}
+function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 12 -Compress;exit $code}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_AUDIT_WRONG_HOST';host=$env:COMPUTERNAME}) 30}
 $root=Join-Path $env:LOCALAPPDATA 'hermes'
 $source=Join-Path $root 'hermes-agent'
-$python=Join-Path $source 'venv\Scripts\python.exe'
-if(-not(Test-Path -LiteralPath $python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_AUDIT_PYTHON_MISSING'}) 41}
-$tmp=Join-Path $env:TEMP ('afz-hermes-telegram-audit-'+[guid]::NewGuid().ToString('n')+'.py')
-$py=@"
-from __future__ import annotations
-import hashlib, importlib.metadata as md, inspect, json, os, subprocess, sys
-from pathlib import Path
-
-root=Path(os.environ.get('LOCALAPPDATA',''))/'hermes'
-source=root/'hermes-agent'
-out={
- 'ok':True,'classification':'HERMES_TELEGRAM_ATTACHMENT_AUDIT_OK','host':'DESKTOP-H3R6CQN',
- 'readOnly':True,'gatewayRestarted':False,'configChanged':False,'networkChanged':False,
+$candidates=@(
+  (Join-Path $source 'plugins\platforms\telegram\adapter.py'),
+  (Join-Path $source 'gateway\platforms\telegram.py'),
+  (Join-Path $source 'venv\Lib\site-packages\plugins\platforms\telegram\adapter.py')
+)
+$adapter=$candidates|Where-Object{Test-Path -LiteralPath $_ -PathType Leaf}|Select-Object -First 1
+if(-not $adapter){
+  Emit ([ordered]@{ok=$true;classification='HERMES_TELEGRAM_ADAPTER_NOT_FOUND';host=$env:COMPUTERNAME;readOnly=$true;sourceRoot=$source;candidateCount=$candidates.Count}) 0
 }
-
-# Installed package/source identity, without exposing config or tokens.
-versions={}
-for name in ('hermes-agent','hermes_agent','hermes','hermes-cli'):
-    try: versions[name]=md.version(name)
-    except Exception: pass
-out['packageVersions']=versions
-try:
-    if (source/'.git').exists():
-        out['gitHead']=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True,stderr=subprocess.DEVNULL,timeout=5).strip()
-        dirty=subprocess.check_output(['git','-C',str(source),'status','--porcelain'],text=True,stderr=subprocess.DEVNULL,timeout=5)
-        out['gitDirtyFileCount']=len([x for x in dirty.splitlines() if x.strip()])
-except Exception as e:
-    out['gitProbeError']=type(e).__name__
-
-adapter_path=None
-adapter_text=''
-import_error=None
-try:
-    from plugins.platforms.telegram.adapter import TelegramAdapter
-    adapter_path=Path(inspect.getsourcefile(TelegramAdapter) or '')
-except Exception as e:
-    import_error=type(e).__name__+': '+str(e)[:180]
-
-if not adapter_path or not adapter_path.exists():
-    candidates=[
-      source/'plugins'/'platforms'/'telegram'/'adapter.py',
-      source/'gateway'/'platforms'/'telegram.py',
-      source/'venv'/'Lib'/'site-packages'/'plugins'/'platforms'/'telegram'/'adapter.py',
-    ]
-    adapter_path=next((p for p in candidates if p.exists()),None)
-if adapter_path and adapter_path.exists():
-    adapter_text=adapter_path.read_text(encoding='utf-8',errors='replace')
-    b=adapter_text.encode('utf-8')
-    out['adapterPath']=str(adapter_path)
-    out['adapterSha256']=hashlib.sha256(b).hexdigest()
-    out['adapterSizeBytes']=len(b)
-    checks={
-      'hasMediaHandler':'_handle_media_message' in adapter_text,
-      'handlesDocument':('MessageType.DOCUMENT' in adapter_text and '.document' in adapter_text),
-      'downloadsTelegramFile':('download_as_bytearray' in adapter_text or 'download_to_drive' in adapter_text),
-      'injectsTextDocumentContent':'[Content of ' in adapter_text,
-      'hasDownloadFailureNotice':("Couldn't download" in adapter_text or 'could not be downloaded' in adapter_text),
-      'usesDocumentCache':('DOCUMENT_CACHE_DIR' in adapter_text or 'cache_document' in adapter_text),
-      'handlesPhoto':('.photo' in adapter_text),
-      'handlesVideo':('.video' in adapter_text),
-      'handlesAudio':('.audio' in adapter_text or '.voice' in adapter_text),
-    }
-    out['features']=checks
-else:
-    out['adapterPath']=None
-    out['features']={}
-if import_error: out['adapterImportError']=import_error
-
-# Resolve Hermes cache directories through its own constants when possible.
-cache={}
-try:
-    from gateway.platforms import base as gb
-    for attr in ('DOCUMENT_CACHE_DIR','VIDEO_CACHE_DIR','AUDIO_CACHE_DIR','IMAGE_CACHE_DIR'):
-        p=getattr(gb,attr,None)
-        if p is None: continue
-        pp=Path(p)
-        files=[]
-        try: files=[x for x in pp.iterdir() if x.is_file()] if pp.exists() else []
-        except Exception: files=[]
-        cache[attr]={'path':str(pp),'exists':pp.exists(),'fileCount':len(files),'latestMtime':max((x.stat().st_mtime for x in files),default=None)}
-except Exception as e:
-    cache['probeError']=type(e).__name__
-out['cache']=cache
-
-# Gateway process count only; no command arguments beyond boolean identification.
-try:
-    import subprocess as sp
-    ps="Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python|hermes' -and $_.CommandLine -match 'gateway run' } | Select-Object -ExpandProperty ProcessId"
-    raw=sp.check_output(['powershell.exe','-NoProfile','-Command',ps],text=True,stderr=sp.DEVNULL,timeout=5)
-    pids=[x.strip() for x in raw.splitlines() if x.strip().isdigit()]
-    out['gatewayProcessCount']=len(pids)
-    out['gatewayPids']=[int(x) for x in pids]
-except Exception as e:
-    out['gatewayProcessProbeError']=type(e).__name__
-
-# Sanitized recent-log signal counts only. Never return lines, filenames, chat text, or tokens.
-patterns={
- 'document':('document','attachment'),
- 'downloadFailure':("couldn't download",'could not be downloaded','download failed','cdn'),
- 'telegramError':('telegram','error'),
- 'media':('media','cache'),
+$text=[IO.File]::ReadAllText($adapter)
+$hash=(Get-FileHash -LiteralPath $adapter -Algorithm SHA256).Hash.ToLowerInvariant()
+$item=Get-Item -LiteralPath $adapter
+$features=[ordered]@{
+  hasMediaHandler=($text -match '_handle_media_message')
+  handlesDocument=(($text -match 'MessageType[.]DOCUMENT') -and ($text -match '[.]document'))
+  registersDocumentOrAttachmentFilter=($text -match 'filters[.](Document|DOCUMENT|ATTACHMENT)')
+  downloadsTelegramFile=($text -match 'download_as_bytearray|download_to_drive|get_file')
+  injectsTextDocumentContent=($text -match [regex]::Escape('[Content of '))
+  hasDownloadFailureNotice=($text -match "Couldn't download|could not be downloaded|download failed")
+  referencesDocumentCache=($text -match 'DOCUMENT_CACHE_DIR|cache_document')
+  handlesPhoto=($text -match '[.]photo')
+  handlesVideo=($text -match '[.]video')
+  handlesAudioOrVoice=($text -match '[.](audio|voice)')
 }
-counts={k:0 for k in patterns}
-log_files=0
-cutoff=0
-try:
-    import time
-    cutoff=time.time()-48*3600
-    for base in (root/'logs',root/'runtime'):
-        if not base.exists(): continue
-        for p in base.rglob('*'):
-            try:
-                if not p.is_file() or p.stat().st_mtime < cutoff or p.stat().st_size > 8_000_000: continue
-                if p.suffix.lower() not in ('.log','.txt','.json','.jsonl'): continue
-                log_files+=1
-                data=p.read_text(encoding='utf-8',errors='ignore')[-500000:].lower()
-                for k,terms in patterns.items():
-                    if k=='telegramError':
-                        counts[k]+=sum(1 for line in data.splitlines() if 'telegram' in line and ('error' in line or 'exception' in line or 'failed' in line))
-                    else:
-                        counts[k]+=sum(data.count(t) for t in terms)
-            except Exception: pass
-except Exception: pass
-out['recentLogFilesScanned']=log_files
-out['recentLogSignalCounts']=counts
-
-# Safe config booleans only; never emit token/value text.
-try:
-    cfg=(root/'config.yaml').read_text(encoding='utf-8',errors='ignore')
-    low=cfg.lower()
-    out['configSignals']={
-      'telegramMentioned':'telegram' in low,
-      'tokenFieldMentioned':('token:' in low or 'bot_token' in low),
-      'messagingMentioned':'messaging' in low or 'platforms' in low,
-    }
-except Exception as e:
-    out['configProbeError']=type(e).__name__
-
-# Classify the most actionable condition.
-f=out.get('features') or {}
-if not out.get('adapterPath'):
-    out['classification']='HERMES_TELEGRAM_ADAPTER_NOT_FOUND'
-elif not f.get('handlesDocument'):
-    out['classification']='HERMES_TELEGRAM_INSTALLED_HANDLER_LACKS_DOCUMENT_SUPPORT'
-elif not f.get('downloadsTelegramFile'):
-    out['classification']='HERMES_TELEGRAM_INSTALLED_HANDLER_LACKS_FILE_DOWNLOAD'
-elif not f.get('hasDownloadFailureNotice'):
-    out['classification']='HERMES_TELEGRAM_HANDLER_PRE_FAILURE_NOTICE_GENERATION'
-elif (out.get('cache',{}).get('DOCUMENT_CACHE_DIR') or {}).get('fileCount',0)==0:
-    out['classification']='HERMES_TELEGRAM_DOCUMENT_HANDLER_PRESENT_CACHE_EMPTY'
-print(json.dumps(out,separators=(',',':')))
-"@
-[IO.File]::WriteAllText($tmp,$py,(New-Object Text.UTF8Encoding($false)))
-try{$raw=(& $python $tmp 2>&1|Out-String).Trim();$code=$LASTEXITCODE}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
-if([string]::IsNullOrWhiteSpace($raw)){Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_AUDIT_NO_OUTPUT'}) 42}
-Write-Output $raw
-exit $code
+$gitHead=$null
+try{
+  $headPath=Join-Path $source '.git\HEAD'
+  if(Test-Path -LiteralPath $headPath -PathType Leaf){
+    $head=([IO.File]::ReadAllText($headPath)).Trim()
+    if($head -match '^ref:\s+(.+)$'){
+      $refPath=Join-Path (Join-Path $source '.git') $Matches[1].Replace('/','\')
+      if(Test-Path -LiteralPath $refPath -PathType Leaf){$gitHead=([IO.File]::ReadAllText($refPath)).Trim()}
+    }elseif($head -match '^[0-9a-fA-F]{40}$'){$gitHead=$head.ToLowerInvariant()}
+  }
+}catch{}
+$runPath=Join-Path $source 'gateway\run.py'
+$runSignals=$null
+if(Test-Path -LiteralPath $runPath -PathType Leaf){
+  $rt=[IO.File]::ReadAllText($runPath)
+  $runSignals=[ordered]@{
+    handlesDocument=($rt -match 'MessageType[.]DOCUMENT')
+    referencesMediaUrls=($rt -match 'media_urls')
+    referencesLocalPath=($rt -match 'local.*path|file.*path|path.*document')
+    sha256=(Get-FileHash -LiteralPath $runPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+}
+$configPath=Join-Path $root 'config.yaml'
+$configSignals=[ordered]@{exists=(Test-Path -LiteralPath $configPath -PathType Leaf);telegramMentioned=$false}
+if($configSignals.exists){
+  # Boolean only; never return config text or token values.
+  $cfg=[IO.File]::ReadAllText($configPath)
+  $configSignals.telegramMentioned=($cfg -match '(?i)telegram')
+}
+$classification='HERMES_TELEGRAM_ATTACHMENT_HANDLER_PRESENT'
+if(-not $features.handlesDocument){$classification='HERMES_TELEGRAM_INSTALLED_HANDLER_LACKS_DOCUMENT_SUPPORT'}
+elseif(-not $features.downloadsTelegramFile){$classification='HERMES_TELEGRAM_INSTALLED_HANDLER_LACKS_FILE_DOWNLOAD'}
+elseif(-not $features.hasDownloadFailureNotice){$classification='HERMES_TELEGRAM_HANDLER_PRE_FAILURE_NOTICE_GENERATION'}
+elseif($runSignals -and -not $runSignals.handlesDocument){$classification='HERMES_GATEWAY_RUN_LACKS_DOCUMENT_CONTEXT_ROUTE'}
+Emit ([ordered]@{
+  ok=$true;classification=$classification;host=$env:COMPUTERNAME;readOnly=$true
+  sourceRoot=$source;gitHead=$gitHead;adapterPath=$adapter;adapterSha256=$hash
+  adapterSizeBytes=[int64]$item.Length;adapterLastWriteTime=$item.LastWriteTime.ToString('o')
+  features=$features;gatewayRun=$runSignals;configSignals=$configSignals
+  gatewayRestarted=$false;configChanged=$false;networkChanged=$false
+}) 0
 '@
 
 $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Telegram audit stdin empty.''};Invoke-Expression $script'
@@ -201,13 +111,13 @@ function Invoke-H3([string]$target,[string]$transport,[string[]]$extra){
   $in=Join-Path $env:TEMP ('h3-tg-audit-'+[guid]::NewGuid().ToString('n')+'.ps1')
   $out=Join-Path $env:TEMP ('h3-tg-audit-'+[guid]::NewGuid().ToString('n')+'.out')
   $err=Join-Path $env:TEMP ('h3-tg-audit-'+[guid]::NewGuid().ToString('n')+'.err')
-  $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known))
+  $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=6','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known))
   if($extra){$args+=@($extra)}
   $args+=@($target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
   try{
     [IO.File]::WriteAllText($in,$remote,$utf8)
     $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $in -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
-    if(-not $p.WaitForExit(60000)){try{$p.Kill()}catch{};return [pscustomobject]@{ok=$false;classification='HERMES_TELEGRAM_AUDIT_REMOTE_TIMEOUT';transport=$transport}}
+    if(-not $p.WaitForExit(25000)){try{$p.Kill()}catch{};return [pscustomobject]@{ok=$false;classification='HERMES_TELEGRAM_AUDIT_REMOTE_TIMEOUT';transport=$transport}}
     $stdout=$(if(Test-Path $out){[IO.File]::ReadAllText($out).Trim()}else{''})
     $stderr=$(if(Test-Path $err){[IO.File]::ReadAllText($err).Trim()}else{''})
     $parsed=$null
