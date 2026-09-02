@@ -16,8 +16,15 @@ $ExpectedComputer='DESKTOP-10SKF0M'
 
 function Invoke-Captured {
   param([string]$File,[string[]]$Arguments,[switch]$AllowFailure)
-  $output=@(& $File @Arguments 2>&1 | ForEach-Object {[string]$_})
-  $code=$LASTEXITCODE
+  $oldEap=$ErrorActionPreference
+  try{
+    # Windows PowerShell 5.1 can promote harmless native STDERR (for example Git's
+    # LF/CRLF warning) to a terminating NativeCommandError while EAP=Stop. Capture
+    # native output under Continue and decide success only from the process exit code.
+    $ErrorActionPreference='Continue'
+    $output=@(& $File @Arguments 2>&1 | ForEach-Object {[string]$_})
+    $code=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$oldEap}
   if(-not $AllowFailure -and $code -ne 0){throw "$File failed exit=$code"}
   return [pscustomobject]@{ExitCode=$code;Lines=$output;Text=($output -join "`n")}
 }
@@ -25,11 +32,34 @@ function Write-Text([string]$Path,[string]$Text){
   $parent=Split-Path $Path -Parent;if($parent){New-Item -ItemType Directory -Force -Path $parent|Out-Null}
   [IO.File]::WriteAllText($Path,[string]$Text,(New-Object Text.UTF8Encoding($false)))
 }
-function Find-Gh {
-  $c=Get-Command gh.exe -ErrorAction SilentlyContinue|Select-Object -First 1
-  if($c){return [string]$c.Source}
-  foreach($p in @('C:\Program Files\GitHub CLI\gh.exe','C:\Program Files (x86)\GitHub CLI\gh.exe')){if(Test-Path -LiteralPath $p -PathType Leaf){return $p}}
-  return $null
+function Get-GitHubCredential {
+  $oldEap=$ErrorActionPreference
+  try{
+    $ErrorActionPreference='Continue'
+    $inputText="protocol=https`nhost=github.com`n`n"
+    $lines=@($inputText | & git credential fill 2>$null | ForEach-Object {[string]$_})
+    $code=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$oldEap}
+  if($code -ne 0){return $null}
+  $u='';$p=''
+  foreach($line in $lines){
+    if($line -match '^username=(.*)$'){$u=$Matches[1]}
+    elseif($line -match '^password=(.*)$'){$p=$Matches[1]}
+  }
+  if([string]::IsNullOrWhiteSpace($u) -or [string]::IsNullOrWhiteSpace($p)){return $null}
+  return [pscustomobject]@{Username=$u;Password=$p}
+}
+function Invoke-GitHubApi {
+  param([string]$Method,[string]$Uri,$Body,$Credential)
+  if(-not $Credential){throw 'GitHub credential is unavailable from Git Credential Manager'}
+  $headers=@{
+    Authorization=('Bearer '+[string]$Credential.Password)
+    Accept='application/vnd.github+json'
+    'X-GitHub-Api-Version'='2022-11-28'
+    'User-Agent'='AFZ-Blog-GitMigration'
+  }
+  if($null -eq $Body){return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -TimeoutSec 30}
+  return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -ContentType 'application/json' -Body ($Body|ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 30
 }
 function Get-SafeGitSummary {
   if(-not(Test-Path -LiteralPath (Join-Path $SourceRoot '.git'))){return [ordered]@{isGitRepo=$false;head=$null;branch=$null;remoteNames=@();dirtyCount=$null}}
@@ -134,26 +164,27 @@ function Initialize-ExportGit {
   Invoke-Captured git @('-C',$ExportRoot,'commit','-m','Initial AFZ Blog production source baseline')|Out-Null
   return (Invoke-Captured git @('-C',$ExportRoot,'rev-parse','HEAD')).Text.Trim()
 }
-function Publish-Repo([string]$Gh){
-  $auth=Invoke-Captured $Gh @('auth','status','--hostname','github.com') -AllowFailure
-  if($auth.ExitCode -ne 0){throw 'GitHub CLI is installed but not authenticated for github.com'}
-  $view=Invoke-Captured $Gh @('repo','view',$DesiredRepo,'--json','nameWithOwner,visibility,defaultBranchRef,url') -AllowFailure
-  if($view.ExitCode -eq 0){
-    $meta=$view.Text|ConvertFrom-Json
-    if(([string]$meta.visibility).ToUpperInvariant() -ne 'PRIVATE'){throw 'Existing AFZ-Blog repository is not private; refusing publication'}
-    $remote=Invoke-Captured git @('-C',$ExportRoot,'remote') -AllowFailure
-    if(-not($remote.Lines -contains 'origin')){Invoke-Captured git @('-C',$ExportRoot,'remote','add','origin','https://github.com/f3arif/AFZ-Blog.git')|Out-Null}
-    $push=Invoke-Captured git @('-C',$ExportRoot,'push','-u','origin','main') -AllowFailure
-    if($push.ExitCode -ne 0){throw 'AFZ-Blog already exists and baseline push was not a fast-forward; manual comparison required'}
-  } else {
-    $create=Invoke-Captured $Gh @('repo','create',$DesiredRepo,'--private','--source',$ExportRoot,'--remote','origin','--push') -AllowFailure
-    if($create.ExitCode -ne 0){throw 'GitHub repository creation/push failed'}
+function Publish-Repo($Credential){
+  $meta=$null
+  try{$meta=Invoke-GitHubApi 'GET' 'https://api.github.com/repos/f3arif/AFZ-Blog' $null $Credential}catch{
+    $status=0;try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+    if($status -ne 404){throw}
   }
-  $verified=Invoke-Captured $Gh @('repo','view',$DesiredRepo,'--json','nameWithOwner,visibility,defaultBranchRef,url')
-  $m=$verified.Text|ConvertFrom-Json
-  if(([string]$m.nameWithOwner) -ne $DesiredRepo -or ([string]$m.visibility).ToUpperInvariant() -ne 'PRIVATE'){throw 'GitHub repository verification failed'}
+  if($meta){
+    if([string]$meta.full_name -ne $DesiredRepo -or -not [bool]$meta.private){throw 'Existing AFZ-Blog repository is not the required private repository'}
+  }else{
+    $meta=Invoke-GitHubApi 'POST' 'https://api.github.com/user/repos' ([ordered]@{name='AFZ-Blog';private=$true;auto_init=$false;description='AFZ Automation Blog Manager canonical source'}) $Credential
+    if([string]$meta.full_name -ne $DesiredRepo -or -not [bool]$meta.private){throw 'Private AFZ-Blog repository creation verification failed'}
+  }
+  $remote=Invoke-Captured git @('-C',$ExportRoot,'remote') -AllowFailure
+  if(-not($remote.Lines -contains 'origin')){Invoke-Captured git @('-C',$ExportRoot,'remote','add','origin','https://github.com/f3arif/AFZ-Blog.git')|Out-Null}
+  $push=Invoke-Captured git @('-C',$ExportRoot,'push','-u','origin','main') -AllowFailure
+  if($push.ExitCode -ne 0){throw 'Private AFZ-Blog exists, but Git push failed; no production files were modified'}
+  Invoke-Captured git @('-C',$ExportRoot,'fetch','origin','main')|Out-Null
   $remoteSha=(Invoke-Captured git @('-C',$ExportRoot,'rev-parse','origin/main')).Text.Trim()
-  return [ordered]@{nameWithOwner=[string]$m.nameWithOwner;visibility=[string]$m.visibility;url=[string]$m.url;remoteSha=$remoteSha}
+  $verify=Invoke-GitHubApi 'GET' 'https://api.github.com/repos/f3arif/AFZ-Blog' $null $Credential
+  if([string]$verify.full_name -ne $DesiredRepo -or -not [bool]$verify.private){throw 'GitHub repository post-push verification failed'}
+  return [ordered]@{nameWithOwner=$DesiredRepo;visibility='PRIVATE';url=[string]$verify.html_url;remoteSha=$remoteSha}
 }
 function Save-Result($Result){
   New-Item -ItemType Directory -Force -Path $StateRoot|Out-Null
@@ -169,8 +200,9 @@ try{
   if($env:COMPUTERNAME -ne $ExpectedComputer){throw "wrong host: $($env:COMPUTERNAME)"}
   if(-not(Test-Path -LiteralPath $SourceRoot -PathType Container)){throw "source root missing: $SourceRoot"}
   $result.productionGitBefore=Get-SafeGitSummary
-  $gh=Find-Gh;$result.ghInstalled=[bool]$gh
-  if($gh){$a=Invoke-Captured $gh @('auth','status','--hostname','github.com') -AllowFailure;$result.ghAuthenticated=($a.ExitCode -eq 0)}else{$result.ghAuthenticated=$false}
+  $credential=Get-GitHubCredential
+  $result.gitCredentialAvailable=[bool]$credential
+  $result.repositoryTransport='git-credential-manager+github-rest'
   if($Action -eq 'audit'){$result.ok=$true;$result.state='AUDIT_COMPLETE';$result.finishedAt=(Get-Date -Format o);Save-Result $result;exit 0}
 
   $backup=Join-Path $BackupRoot $stamp
@@ -180,8 +212,9 @@ try{
   Assert-NoSecrets
   $baseline=Initialize-ExportGit
   $result.localBaselineSha=$baseline
-  if(-not $gh){throw 'GitHub CLI not installed on windows-main; sanitized baseline is prepared locally but remote was not created'}
-  $repo=Publish-Repo $gh
+  if(-not $credential){throw 'No GitHub credential is available from Git Credential Manager; sanitized local baseline is preserved and production remains untouched'}
+  $repo=Publish-Repo $credential
+  $credential=$null
   $result.repo=$repo
   $result.ok=$true
   $result.state='GITHUB_BASELINE_PUBLISHED'
@@ -190,6 +223,7 @@ try{
   Save-Result $result
   exit 0
 }catch{
+  $credential=$null
   $result.ok=$false;$result.state='BLOCKED_SAFE';$result.error=$_.Exception.Message;$result.finishedAt=(Get-Date -Format o)
   Save-Result $result
   exit 1
