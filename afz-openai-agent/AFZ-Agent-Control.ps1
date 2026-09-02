@@ -21,8 +21,13 @@ $h3TelegramAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-her
 $h3TelegramAuditStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-attachment-audit'
 $h3TelegramAuditMarker=Join-Path $h3TelegramAuditStateRoot 'wrapper-request.json'
 $h3TelegramAuditAttempt=Join-Path $h3TelegramAuditStateRoot 'wrapper-attempt.json'
+$h3GatewayReloadHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-GatewayReload.ps1'
+$h3GatewayReloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-gateway-reload.json'
+$h3GatewayReloadStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-gateway-reload'
+$h3GatewayReloadMarker=Join-Path $h3GatewayReloadStateRoot 'wrapper-request.json'
+$h3GatewayReloadAttempt=Join-Path $h3GatewayReloadStateRoot 'wrapper-attempt.json'
 $log='C:\ProgramData\AFZ\OpenAIAgent\logs\control-wrapper.log'
-New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,(Split-Path $log -Parent)|Out-Null
+New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,$h3GatewayReloadStateRoot,(Split-Path $log -Parent)|Out-Null
 function WLog([string]$m){try{Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) $m" -Encoding UTF8}catch{}}
 
 # Existing AFZ Blog migration one-shot binding.
@@ -61,8 +66,7 @@ try{
   }
 }catch{WLog "h3 hermes registry wrapper error=$($_.Exception.Message)"}
 
-# Read-only one-shot Telegram attachment audit. It reports only feature flags,
-# handler hashes, cache counts, process IDs, and sanitized error counts.
+# Read-only one-shot Telegram attachment audit.
 try{
   if((Test-Path -LiteralPath $h3TelegramAuditRequest -PathType Leaf) -and (Test-Path -LiteralPath $h3TelegramAuditHelper -PathType Leaf)){
     $r=Get-Content -LiteralPath $h3TelegramAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
@@ -80,6 +84,27 @@ try{
     }
   }
 }catch{WLog "h3 hermes telegram attachment audit wrapper error=$($_.Exception.Message)"}
+
+# Guarded one-shot native Hermes gateway reload. The helper itself refuses to
+# restart unless Hermes strict-validates an empty active-session registry, and it
+# uses only the upstream/native `hermes gateway restart` lifecycle command.
+try{
+  if((Test-Path -LiteralPath $h3GatewayReloadRequest -PathType Leaf) -and (Test-Path -LiteralPath $h3GatewayReloadHelper -PathType Leaf)){
+    $r=Get-Content -LiteralPath $h3GatewayReloadRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=[string]$r.id;$status=([string]$r.status).Trim().ToUpperInvariant();$action=([string]$r.action).Trim().ToLowerInvariant()
+    $already=$false
+    if(Test-Path -LiteralPath $h3GatewayReloadMarker -PathType Leaf){try{$m=Get-Content -LiteralPath $h3GatewayReloadMarker -Raw|ConvertFrom-Json;$already=([string]$m.id -eq $id -and [int]$m.exitCode -eq 0)}catch{}}
+    if($status -eq 'ACTIVE' -and $action -eq 'reload-gateway-native' -and $id -match '^h3-hermes-gateway-reload-[A-Za-z0-9._-]+$' -and -not $already){
+      WLog "h3 hermes native gateway reload start id=$id"
+      $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3GatewayReloadHelper -InstallRoot $InstallRoot -RequestPath $h3GatewayReloadRequest 2>&1|Out-String).Trim()
+      $code=$LASTEXITCODE
+      $attempt=[ordered]@{id=$id;attemptedAt=(Get-Date -Format o);exitCode=$code;output=$raw}
+      $attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3GatewayReloadAttempt -Encoding UTF8
+      if($code -eq 0){$attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3GatewayReloadMarker -Encoding UTF8}
+      WLog "h3 hermes native gateway reload finish id=$id exit=$code"
+    }
+  }
+}catch{WLog "h3 hermes native gateway reload wrapper error=$($_.Exception.Message)"}
 
 if(-not(Test-Path -LiteralPath $core -PathType Leaf)){throw "Preserved AFZ control core missing: $core"}
 WLog 'launching preserved AFZ control core'
