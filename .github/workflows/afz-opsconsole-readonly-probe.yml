@@ -1,0 +1,41 @@
+name: AFZ Ops Console Readonly Probe
+
+on:
+  push:
+    paths:
+      - '.github/afz-opsconsole-readonly-probe.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe Ops Console read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='http://100.70.25.8:8790'
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$base/api/health" > /tmp/health.json
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$base/api/status" > /tmp/status.json
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$base/api/live-control" > /tmp/live.json
+          echo '=== HEALTH ==='
+          jq '{ok,consoleVersion,cacheAgeSeconds,tailscaleDirectPort,stateGeneration,liveControlEndpoint}' /tmp/health.json
+          echo '=== QUICK ACTIONS ==='
+          jq -c '.quickActions // [] | .[] | {id,project,action}' /tmp/status.json
+          echo '=== SCHEDULED TASKS ==='
+          jq -c '.. | objects | select(has("taskName") or has("name")) | select(((.taskName // .name // "")|ascii_downcase|contains("afz"))) | {taskName:(.taskName // .name),state,lastRun,lastResult,action}' /tmp/status.json | head -80 || true
+          echo '=== WINDOWS / WORKERS ==='
+          jq '{computer,workers,nodes,queue,ramGuard}' /tmp/status.json
+          echo '=== LIVE CONTROL ==='
+          jq '{available,consoleVersion,stateGeneration,snapshotGeneration,capturedAtUtc,freshness}' /tmp/live.json
