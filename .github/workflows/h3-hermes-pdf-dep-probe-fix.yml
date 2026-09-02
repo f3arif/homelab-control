@@ -1,0 +1,108 @@
+name: H3 Hermes PDF Dependency Probe Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-pdf-dep-probe-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace fragile PDF dependency JSON probe
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
+          text = p.read_text(encoding='utf-8')
+          start_marker = "  $depCode='import json,importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(json.dumps({m:(importlib.util.find_spec(m) is not None) for m in mods}))'"
+          end_marker = "  $installed=$false;$pipExit=$null;$pipErrBytes=0;$preFreeze=$null"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('Could not locate existing PDF dependency probe block')
+          old_block = text[start:end]
+          if old_block.count("ConvertFrom-Json") != 1 or old_block.count("$deps.pypdf") != 1:
+              raise SystemExit('Unexpected dependency probe shape')
+
+          new_block = r'''  $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
+          $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20
+          if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes;pythonStderrPreview=$dep.stderrPreview}) 46}
+          $depLine=([string]$dep.stdout).Trim()
+          $deps=[ordered]@{pypdf=$false;reportlab=$false;pdfplumber=$false}
+          $seen=@{}
+          foreach($part in @($depLine -split ';')){
+            $kv=@($part -split '=',2)
+            if($kv.Count -ne 2){continue}
+            $name=([string]$kv[0]).Trim().ToLowerInvariant();$value=([string]$kv[1]).Trim()
+            if($deps.Contains($name) -and $value -in @('0','1')){$deps[$name]=($value -eq '1');$seen[$name]=$true}
+          }
+          $requiredDepNames=@('pypdf','reportlab','pdfplumber')
+          $missingDepMarkers=@($requiredDepNames|Where-Object{-not $seen.ContainsKey($_)})
+          if($missingDepMarkers.Count -gt 0){
+            $preview=$depLine;if($preview.Length -gt 300){$preview=$preview.Substring(0,300)}
+            Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT';mutation='NONE';missingMarkers=$missingDepMarkers;stdoutPreview=$preview}) 47
+          }
+          $depsReady=([bool]$deps['pypdf'] -and [bool]$deps['reportlab'] -and [bool]$deps['pdfplumber'])
+'''
+          text = text[:start] + new_block + text[end:]
+
+          required = [
+              "pypdf=$false;reportlab=$false;pdfplumber=$false",
+              "HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT",
+              "$deps['pypdf']",
+              "$deps['reportlab']",
+              "$deps['pdfplumber']",
+              '-TimeoutMs 420000',
+              "'pypdf','reportlab','pdfplumber'",
+              "documentTextReturned=$false",
+              "providerTouched=$false",
+              "ollamaMutationStarted=$false",
+              "networkChanged=$false",
+              "modelGenerationStarted=$false",
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'Missing PDF invariant after probe repair: {marker}')
+          if '$deps.pypdf' in text:
+              raise SystemExit('Fragile dependency property access still present')
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Parse and enforce PDF safety invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          if($c.Contains('$deps.pypdf')){throw 'Fragile property access remains'}
+          'H3_HERMES_PDF_DEP_PROBE_FIX=PASS'
+
+      - name: Commit safely on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
+          if git diff --cached --quiet; then
+            echo 'No change required'
+            exit 0
+          fi
+          git commit -m 'Harden H3 Hermes PDF dependency probe'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
