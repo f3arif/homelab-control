@@ -7,6 +7,7 @@
   "context": 16384,
   "no_think": true,
   "max_repair_model_calls": 1,
+  "transport_reconcile_generation": 2,
   "purpose": "Qwen-authored minimum build repair; preserve original r1 benchmark",
   "transport_reconcile_requested_at": "2026-09-02T11:07:32-04:00",
   "transport_reconcile_reason": "resume-after-pi-wake-service-unreachable"
