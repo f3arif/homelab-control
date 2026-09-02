@@ -1,4 +1,4 @@
-name: H3 Hermes PDF Python Exit Canary
+name: H3 Hermes PDF Python Process Fix
 
 on:
   push:
@@ -7,22 +7,105 @@ on:
     paths:
       - .github/workflows/h3-hermes-pdf-dep-probe-fix.yml
 
+permissions:
+  contents: write
+
 jobs:
-  canary:
+  fix:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Build exact Run-Python canary
+      - name: Replace Run-Python process primitive
         shell: python
         run: |
           from pathlib import Path
-          text = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1').read_text(encoding='utf-8')
+
+          path = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
+          text = path.read_text(encoding='utf-8')
           start = text.index('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
           end = text.index('\ntry{\n  if($env:COMPUTERNAME', start)
-          fn = text[start:end]
+          old = text[start:end]
+          if 'Start-Process -FilePath $script:python' not in old:
+              raise SystemExit('Expected Start-Process Run-Python implementation not found')
+
+          new = r'''function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
+            if($null -eq $PyArgs -or $PyArgs.Count -eq 0){throw 'Run-Python received empty argument list.'}
+            foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
+            $codeFile=$null
+            $p=$null
+            try{
+              $effectiveArgs=@($PyArgs)
+              if($effectiveArgs.Count -ge 2 -and [string]$effectiveArgs[0] -eq '-c'){
+                $codeFile=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.py')
+                [IO.File]::WriteAllText($codeFile,[string]$effectiveArgs[1],(New-Object Text.UTF8Encoding($false)))
+                if($effectiveArgs.Count -gt 2){$effectiveArgs=@($codeFile)+@($effectiveArgs[2..($effectiveArgs.Count-1)])}else{$effectiveArgs=@($codeFile)}
+              }
+              $quoted=@()
+              foreach($a in $effectiveArgs){
+                $s=[string]$a
+                if($s.Contains('"')){throw 'Run-Python argument contains unsupported double quote after code staging.'}
+                if($s -match '\s'){
+                  if($s.EndsWith('\')){throw 'Run-Python spaced argument cannot end with backslash.'}
+                  $quoted+=('"'+$s+'"')
+                }else{$quoted+=$s}
+              }
+              $argLine=$quoted -join ' '
+              $psi=New-Object System.Diagnostics.ProcessStartInfo
+              $psi.FileName=$script:python
+              $psi.Arguments=$argLine
+              $psi.UseShellExecute=$false
+              $psi.CreateNoWindow=$true
+              $psi.RedirectStandardOutput=$true
+              $psi.RedirectStandardError=$true
+              $p=New-Object System.Diagnostics.Process
+              $p.StartInfo=$psi
+              if(-not $p.Start()){throw 'Run-Python process failed to start.'}
+              $stdoutTask=$p.StandardOutput.ReadToEndAsync()
+              $stderrTask=$p.StandardError.ReadToEndAsync()
+              $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
+              if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}else{try{$p.WaitForExit()}catch{}}
+              try{$stdout=$stdoutTask.GetAwaiter().GetResult()}catch{$stdout=''}
+              try{$stderr=$stderrTask.GetAwaiter().GetResult()}catch{$stderr=''}
+              $stderrPreview=$stderr;if($stderrPreview.Length -gt 600){$stderrPreview=$stderrPreview.Substring(0,600)}
+              $exit=$(if($to){$null}else{[int]$p.ExitCode})
+              return [pscustomobject]@{timedOut=$to;exit=$exit;stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
+            }finally{
+              if($p){try{$p.Dispose()}catch{}}
+              if($codeFile){Remove-Item -LiteralPath $codeFile -Force -ErrorAction SilentlyContinue}
+            }
+          }
+          '''
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+          text = text[:start] + new + text[end:]
+
+          required = [
+              'System.Diagnostics.ProcessStartInfo',
+              'ReadToEndAsync()',
+              '$p.ExitCode',
+              '-TimeoutMs 420000',
+              'HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT',
+              "'pypdf','reportlab','pdfplumber'",
+              'documentTextReturned=$false',
+              'providerTouched=$false',
+              'ollamaMutationStarted=$false',
+              'networkChanged=$false',
+              'modelGenerationStarted=$false',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit('Missing invariant after process fix: ' + marker)
+          if 'Start-Process -FilePath $script:python' in text[start:start+5000]:
+              raise SystemExit('Old Start-Process primitive remains in Run-Python')
+          path.write_text(text, encoding='utf-8', newline='\n')
+
+          start2 = text.index('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
+          end2 = text.index('\ntry{\n  if($env:COMPUTERNAME', start2)
+          fn = text[start2:end2]
           canary = fn + r'''
           $ErrorActionPreference='Stop'
           $script:python=(Get-Command python.exe -ErrorAction Stop).Source
@@ -38,13 +121,33 @@ jobs:
 
           "SUCCESS_EXIT=$($ok.exit)"
           "FAILURE_EXIT=$($bad.exit)"
-          'H3_HERMES_PDF_RUN_PYTHON_EXIT_CANARY=PASS'
+          'H3_HERMES_PDF_RUN_PYTHON_PROCESS_CANARY=PASS'
           '''
-          Path('run-python-exit-canary.ps1').write_text(canary, encoding='utf-8', newline='\n')
+          Path('run-python-process-canary.ps1').write_text(canary, encoding='utf-8', newline='\n')
 
-      - name: Run under Windows PowerShell 5.1
+      - name: Validate under Windows PowerShell 5.1
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\run-python-exit-canary.ps1
-          if($LASTEXITCODE -ne 0){throw "exit canary process failed: $LASTEXITCODE"}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\run-python-process-canary.ps1
+          if($LASTEXITCODE -ne 0){throw "process canary exit=$LASTEXITCODE"}
+          $p='afz-openai-agent\Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper outer parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('System.Diagnostics.ProcessStartInfo','ReadToEndAsync()','-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          'H3_HERMES_PDF_PYTHON_PROCESS_FIX=PASS'
+
+      - name: Commit helper patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix H3 Hermes PDF Python exit-code capture'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
