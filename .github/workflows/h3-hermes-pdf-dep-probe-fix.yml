@@ -1,4 +1,4 @@
-name: H3 Hermes PDF Python Process Fix
+name: H3 Hermes PDF Carrier Gate Fix
 
 on:
   push:
@@ -20,134 +20,124 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Replace Run-Python process primitive
+      - name: Patch Hermes carrier ready gate
         shell: python
         run: |
           from pathlib import Path
 
-          path = Path('afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1')
-          text = path.read_text(encoding='utf-8')
-          start = text.index('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
-          end = text.index('\ntry{\n  if($env:COMPUTERNAME', start)
-          old = text[start:end]
-          if 'Start-Process -FilePath $script:python' not in old:
-              raise SystemExit('Expected Start-Process Run-Python implementation not found')
-
-          new = r'''function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){
-            if($null -eq $PyArgs -or $PyArgs.Count -eq 0){throw 'Run-Python received empty argument list.'}
-            foreach($a in $PyArgs){if($null -eq $a){throw 'Run-Python received null argument.'}}
-            $codeFile=$null
-            $p=$null
+          p = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          text = p.read_text(encoding='utf-8')
+          old = r'''    $statePath=Join-Path $h3HermesStateRoot ($id+'.json')
+          if(Test-Path -LiteralPath $statePath -PathType Leaf){
             try{
-              $effectiveArgs=@($PyArgs)
-              if($effectiveArgs.Count -ge 2 -and [string]$effectiveArgs[0] -eq '-c'){
-                $codeFile=Join-Path $env:TEMP ('afz-pdf-py-'+[guid]::NewGuid().ToString('n')+'.py')
-                [IO.File]::WriteAllText($codeFile,[string]$effectiveArgs[1],(New-Object Text.UTF8Encoding($false)))
-                if($effectiveArgs.Count -gt 2){$effectiveArgs=@($codeFile)+@($effectiveArgs[2..($effectiveArgs.Count-1)])}else{$effectiveArgs=@($codeFile)}
-              }
-              $quoted=@()
-              foreach($a in $effectiveArgs){
-                $s=[string]$a
-                if($s.Contains('"')){throw 'Run-Python argument contains unsupported double quote after code staging.'}
-                if($s -match '\s'){
-                  if($s.EndsWith('\')){throw 'Run-Python spaced argument cannot end with backslash.'}
-                  $quoted+=('"'+$s+'"')
-                }else{$quoted+=$s}
-              }
-              $argLine=$quoted -join ' '
-              $psi=New-Object System.Diagnostics.ProcessStartInfo
-              $psi.FileName=$script:python
-              $psi.Arguments=$argLine
-              $psi.UseShellExecute=$false
-              $psi.CreateNoWindow=$true
-              $psi.RedirectStandardOutput=$true
-              $psi.RedirectStandardError=$true
-              $p=New-Object System.Diagnostics.Process
-              $p.StartInfo=$psi
-              if(-not $p.Start()){throw 'Run-Python process failed to start.'}
-              $stdoutTask=$p.StandardOutput.ReadToEndAsync()
-              $stderrTask=$p.StandardError.ReadToEndAsync()
-              $to=(-not $p.WaitForExit($TimeoutSeconds*1000))
-              if($to){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}else{try{$p.WaitForExit()}catch{}}
-              try{$stdout=$stdoutTask.GetAwaiter().GetResult()}catch{$stdout=''}
-              try{$stderr=$stderrTask.GetAwaiter().GetResult()}catch{$stderr=''}
-              $stderrPreview=$stderr;if($stderrPreview.Length -gt 600){$stderrPreview=$stderrPreview.Substring(0,600)}
-              $exit=$(if($to){$null}else{[int]$p.ExitCode})
-              return [pscustomobject]@{timedOut=$to;exit=$exit;stdout=$stdout;stderrBytes=[Text.Encoding]::UTF8.GetByteCount($stderr);stderrPreview=$stderrPreview}
-            }finally{
-              if($p){try{$p.Dispose()}catch{}}
-              if($codeFile){Remove-Item -LiteralPath $codeFile -Force -ErrorAction SilentlyContinue}
-            }
+              $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+              if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K'){return}
+              if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED'){return}
+            }catch{}
           }
-          '''
+          $now=Get-Date
+'''
+          new = r'''    # A successful primary Hermes state must not suppress newer typed auxiliary
+          # preflights. Keep the existing Hermes carrier as the sole execution path; only
+          # bypass the primary-ready short-circuit while a safe PDF request lacks ok state.
+          $pdfAuxPending=$false
+          $pdfAuxRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
+          $pdfAuxStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-pdf-runtime-audit'
+          if(Test-Path -LiteralPath $pdfAuxRequest -PathType Leaf){
+            try{
+              $pdfReq=Get-Content -LiteralPath $pdfAuxRequest -Raw -Encoding UTF8|ConvertFrom-Json
+              $pdfId=([string]$pdfReq.id).Trim()
+              $pdfTypedSafe=(
+                [int]$pdfReq.schema -eq 1 -and
+                [string]$pdfReq.status -eq 'ACTIVE' -and
+                [string]$pdfReq.target -eq 'h3' -and
+                [string]$pdfReq.host -eq 'DESKTOP-H3R6CQN' -and
+                [string]$pdfReq.action -in @('audit-pdf-runtime','audit-and-repair-pdf-runtime') -and
+                $pdfId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$' -and
+                -not [bool]$pdfReq.return_document_text -and
+                -not [bool]$pdfReq.change_config -and
+                -not [bool]$pdfReq.restart_gateway -and
+                -not [bool]$pdfReq.change_provider -and
+                -not [bool]$pdfReq.mutate_ollama -and
+                -not [bool]$pdfReq.change_network -and
+                -not [bool]$pdfReq.run_model_generation
+              )
+              if($pdfTypedSafe){
+                $pdfStatePath=Join-Path $pdfAuxStateRoot ($pdfId+'.json')
+                if(-not(Test-Path -LiteralPath $pdfStatePath -PathType Leaf)){
+                  $pdfAuxPending=$true
+                }else{
+                  try{
+                    $pdfState=Get-Content -LiteralPath $pdfStatePath -Raw -Encoding UTF8|ConvertFrom-Json
+                    $pdfAuxPending=(-not [bool]$pdfState.ok)
+                  }catch{$pdfAuxPending=$true}
+                }
+              }
+            }catch{}
+          }
+
+          $statePath=Join-Path $h3HermesStateRoot ($id+'.json')
+          if(Test-Path -LiteralPath $statePath -PathType Leaf){
+            try{
+              $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+              if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K' -and -not $pdfAuxPending){return}
+              if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED' -and -not $pdfAuxPending){return}
+            }catch{}
+          }
+          if($pdfAuxPending){Log "H3_HERMES_PDF_AUX_PENDING request=$pdfId source=$(Current-Sha)"}
+          $now=Get-Date
+'''
+          # Remove Python source indentation only.
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
           new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
-          text = text[:start] + new + text[end:]
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one Hermes primary-ready gate block, found {text.count(old)}')
+          text = text.replace(old, new, 1)
 
           required = [
-              'System.Diagnostics.ProcessStartInfo',
-              'ReadToEndAsync()',
-              '$p.ExitCode',
-              '-TimeoutMs 420000',
-              'HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT',
-              "'pypdf','reportlab','pdfplumber'",
-              'documentTextReturned=$false',
-              'providerTouched=$false',
-              'ollamaMutationStarted=$false',
-              'networkChanged=$false',
-              'modelGenerationStarted=$false',
+              '$pdfAuxPending=$false',
+              'h3-hermes-pdf-runtime-audit.json',
+              'jobs\\h3-hermes-pdf-runtime-audit',
+              "@('audit-pdf-runtime','audit-and-repair-pdf-runtime')",
+              '-not [bool]$pdfReq.return_document_text',
+              '-not [bool]$pdfReq.change_provider',
+              '-not [bool]$pdfReq.mutate_ollama',
+              '-not [bool]$pdfReq.change_network',
+              '-not [bool]$pdfReq.run_model_generation',
+              "HERMES_READY_LOCAL_OLLAMA_64K' -and -not $pdfAuxPending",
+              'H3_HERMES_PDF_AUX_PENDING',
+              'if(($now-$script:h3HermesLastAttempt).TotalSeconds -lt 60){return}',
+              '$h3HermesRunner',
           ]
           for marker in required:
               if marker not in text:
-                  raise SystemExit('Missing invariant after process fix: ' + marker)
-          if 'Start-Process -FilePath $script:python' in text[start:start+5000]:
-              raise SystemExit('Old Start-Process primitive remains in Run-Python')
-          path.write_text(text, encoding='utf-8', newline='\n')
+                  raise SystemExit('Missing carrier invariant after patch: ' + marker)
+          p.write_text(text, encoding='utf-8', newline='\n')
 
-          start2 = text.index('function Run-Python([string[]]$PyArgs,[int]$TimeoutSeconds){')
-          end2 = text.index('\ntry{\n  if($env:COMPUTERNAME', start2)
-          fn = text[start2:end2]
-          canary = fn + r'''
-          $ErrorActionPreference='Stop'
-          $script:python=(Get-Command python.exe -ErrorAction Stop).Source
-
-          $ok=Run-Python -PyArgs @('-c','import sys;print("AFZ_OK:"+sys.argv[1])','argument with spaces') -TimeoutSeconds 15
-          if($ok.timedOut -or $ok.exit -ne 0){throw "success canary exit=$($ok.exit) stderr=$($ok.stderrPreview)"}
-          if(([string]$ok.stdout).Trim() -ne 'AFZ_OK:argument with spaces'){throw "success stdout mismatch: $($ok.stdout)"}
-
-          $bad=Run-Python -PyArgs @('-c','raise RuntimeError("AFZ_EXPECTED_FAILURE")') -TimeoutSeconds 15
-          if($bad.timedOut){throw 'failure canary timed out'}
-          if($bad.exit -eq 0){throw "failure exit incorrectly reported zero; stderr=$($bad.stderrPreview)"}
-          if(([string]$bad.stderrPreview) -notmatch 'AFZ_EXPECTED_FAILURE'){throw "failure stderr missing expected marker: $($bad.stderrPreview)"}
-
-          "SUCCESS_EXIT=$($ok.exit)"
-          "FAILURE_EXIT=$($bad.exit)"
-          'H3_HERMES_PDF_RUN_PYTHON_PROCESS_CANARY=PASS'
-          '''
-          Path('run-python-process-canary.ps1').write_text(canary, encoding='utf-8', newline='\n')
-
-      - name: Validate under Windows PowerShell 5.1
+      - name: Validate watcher under Windows PowerShell 5.1
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\run-python-process-canary.ps1
-          if($LASTEXITCODE -ne 0){throw "process canary exit=$LASTEXITCODE"}
-          $p='afz-openai-agent\Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
+          $p='afz-openai-agent\Push-Deploy-Watcher.ps1'
           $tokens=$null;$errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'PDF helper outer parse failed'}
+          if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw 'Push watcher parse failed'}
           $c=Get-Content $p -Raw
-          foreach($required in @('System.Diagnostics.ProcessStartInfo','ReadToEndAsync()','-TimeoutMs 420000','HERMES_PDF_DEPENDENCY_PROBE_INVALID_OUTPUT','pypdf','reportlab','pdfplumber','documentTextReturned=$false','providerTouched=$false','ollamaMutationStarted=$false','networkChanged=$false','modelGenerationStarted=$false')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
-          'H3_HERMES_PDF_PYTHON_PROCESS_FIX=PASS'
+          foreach($required in @('$pdfAuxPending=$false','h3-hermes-pdf-runtime-audit.json','H3_HERMES_PDF_AUX_PENDING','HERMES_READY_LOCAL_OLLAMA_64K','if(($now-$script:h3HermesLastAttempt).TotalSeconds -lt 60){return}')){if(-not $c.Contains($required)){throw "Missing carrier invariant: $required"}}
+          if(-not $c.Contains('-not [bool]$pdfReq.return_document_text')){throw 'PDF content-return guard missing'}
+          if(-not $c.Contains('-not [bool]$pdfReq.mutate_ollama')){throw 'PDF Ollama guard missing'}
+          if(-not $c.Contains('-not [bool]$pdfReq.change_network')){throw 'PDF network guard missing'}
+          'H3_HERMES_PDF_CARRIER_GATE_FIX=PASS'
 
-      - name: Commit helper patch
+      - name: Commit watcher patch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1
           git diff --cached --quiet && exit 0
-          git commit -m 'Fix H3 Hermes PDF Python exit-code capture'
+          git commit -m 'Allow pending H3 PDF preflight through Hermes ready gate'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
