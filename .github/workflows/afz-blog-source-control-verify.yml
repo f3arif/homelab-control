@@ -21,19 +21,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve current main source before tailnet DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          echo "AFZ_SHA=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
+
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
-
-      - name: Resolve current main source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          echo "AFZ_SHA=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
 
       - name: Trigger exact source sync on Windows-main
         shell: bash
