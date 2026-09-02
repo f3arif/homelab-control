@@ -1,10 +1,13 @@
 AFZ direct agent source recovery
-reason=h3-hermes-ollama-provider-schema-repair-r18
+reason=afz-blog-git-baseline-migration-r1
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-h3-hermes-provider-repair
-provider_switch=false
-model_generation=false
-ollama_mutation=false
-network_change=false
-request=h3-hermes-ollama-provider-schema-repair-20260901-r18
+operation=source-sync-and-afz-blog-git-baseline-migration
+project=afz-blog
+production_source=C:\docker\afz-blog-manager
+desired_repository=f3arif/AFZ-Blog
+repo_visibility=private
+replace_production_git=false
+publish_website=false
+restart_blog=false
+request=afz-blog-git-migration-20260901-r1
