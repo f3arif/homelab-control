@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-tool-dispatch-repair-20260902-r1",
+  "action": "repair-local-tool-dispatch",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "provider": "custom",
+  "model": "qwen3.6:35b-a3b",
+  "tool_use_enforcement": false,
+  "task_completion_guidance": false,
+  "parallel_tool_call_guidance": false,
+  "require_telegram_toolset_not_explicitly_empty": true,
+  "restart_gateway": true,
+  "change_provider": false,
+  "mutate_ollama": false,
+  "change_network": false,
+  "run_model_generation": false
+}
