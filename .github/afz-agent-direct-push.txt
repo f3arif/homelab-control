@@ -1,7 +1,6 @@
 AFZ direct agent source recovery
-reason=prospect-openai-utf8-json-transport-fix
+reason=windows-main-transport-recovery-for-h3-qwen35b-mobilemenu-qa01
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-prospect-engine-health-verification
-source_commit=641c87e205a06ada6eab1f95b157ff480b239732
-requested_at=2026-09-02T16:35:30Z
+operation=source-sync-and-worker-transport-recovery
+requested_at=2026-09-02T19:14:30Z
