@@ -108,7 +108,7 @@ try{
   $pdf=$pdfs[0]
   $skillText=[IO.File]::ReadAllText($skill);$suspicious=($skillText -match '(?im)^\s*pdf\s+text\b')
 
-  $depCode='import importlib.util;mods=[\"pypdf\",\"reportlab\",\"pdfplumber\"];print(\";\".join(m+\"=\"+(\"1\" if importlib.util.find_spec(m) is not None else \"0\") for m in mods))'
+  $depCode='import importlib.util;mods=["pypdf","reportlab","pdfplumber"];print(";".join(m+"="+("1" if importlib.util.find_spec(m) is not None else "0") for m in mods))'
   $dep=Run-Python -PyArgs @('-c',$depCode) -TimeoutSeconds 20
   if($dep.timedOut -or $dep.exit -ne 0){Emit ([ordered]@{ok=$false;classification='HERMES_PDF_DEPENDENCY_PROBE_FAILED';mutation='NONE';pythonTimedOut=$dep.timedOut;pythonExit=$dep.exit;pythonStderrBytes=$dep.stderrBytes;pythonStderrPreview=$dep.stderrPreview}) 46}
   $depLine=([string]$dep.stdout).Trim()
