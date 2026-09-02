@@ -1,0 +1,9 @@
+H3 Hermes Desktop direct refresh
+reason=desktop-runtime-stale-provider-state
+target=DESKTOP-H3R6CQN
+authority=github+tailscale-oidc
+mutation=stop-exact-desktop-ephemeral-backend-only
+provider_switch=false
+model_generation=false
+ollama_mutation=false
+requested_at=2026-09-01T21:24:00-04:00
