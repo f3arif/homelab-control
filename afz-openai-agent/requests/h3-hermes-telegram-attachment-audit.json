@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-telegram-attachment-audit-20260902-r3",
+  "id": "h3-hermes-telegram-attachment-audit-20260902-r4",
   "action": "audit-and-reload-telegram-gateway",
   "status": "ACTIVE",
   "target": "h3",
