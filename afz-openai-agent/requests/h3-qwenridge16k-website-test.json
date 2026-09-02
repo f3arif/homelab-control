@@ -1,12 +1,13 @@
 {
   "schema": 1,
   "project": "qwen38-ridge16k-website-direct-test",
-  "job_id": "qwenridge16k-afz-website-20260902-r1",
+  "job_id": "qwenridge16k-afz-website-20260902-r2",
   "model": "qwen3.8-ridge:27b-16k",
   "context": 16384,
   "no_think": true,
   "max_model_calls": 1,
-  "recovery_generation": 6,
-  "project_root": "C:\\Projects\\Qwen38-Ridge16K-AFZ-Website-Test-20260902-r1",
+  "num_predict": 15000,
+  "recovery_generation": 7,
+  "project_root": "C:\\Projects\\Qwen38-Ridge16K-AFZ-Website-Test-20260902-r2",
   "required_routes": ["/", "/services", "/projects", "/about", "/contact"]
 }
