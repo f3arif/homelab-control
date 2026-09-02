@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "id": "h3-hermes-desktop-profile-ollama-20260901-r11",
+  "id": "h3-hermes-desktop-route-ollama-20260901-r12",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "deployment": "native",
-  "runtime_mode": "active-desktop-profile",
+  "runtime_mode": "desktop-route-aware",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "provider_name": "ollama",
