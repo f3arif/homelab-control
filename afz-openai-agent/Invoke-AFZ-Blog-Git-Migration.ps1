@@ -24,12 +24,16 @@ function Save-Result($Object){
   }
 }
 function Run([string]$Exe,[string[]]$Args,[string]$WorkingDirectory=''){
-  $psi=New-Object Diagnostics.ProcessStartInfo
-  $psi.FileName=$Exe;$psi.UseShellExecute=$false;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true;$psi.CreateNoWindow=$true
-  if($WorkingDirectory){$psi.WorkingDirectory=$WorkingDirectory}
-  foreach($a in $Args){[void]$psi.ArgumentList.Add($a)}
-  $p=New-Object Diagnostics.Process;$p.StartInfo=$psi;[void]$p.Start();$stdout=$p.StandardOutput.ReadToEnd();$stderr=$p.StandardError.ReadToEnd();$p.WaitForExit()
-  return [pscustomobject]@{exitCode=$p.ExitCode;stdout=$stdout.Trim();stderr=$stderr.Trim()}
+  $old=(Get-Location).Path
+  try{
+    if($WorkingDirectory){Set-Location -LiteralPath $WorkingDirectory}
+    $raw=@(& $Exe @Args 2>&1)
+    $code=$LASTEXITCODE
+    $text=($raw|ForEach-Object{[string]$_}) -join [Environment]::NewLine
+    return [pscustomobject]@{exitCode=$code;stdout=$text.Trim();stderr=$(if($code -ne 0){$text.Trim()}else{''})}
+  }finally{
+    if($old){Set-Location -LiteralPath $old}
+  }
 }
 function Git([string[]]$Args,[string]$WorkingDirectory){return Run 'git.exe' $Args $WorkingDirectory}
 function Get-Gh {
@@ -58,7 +62,7 @@ try{
   if($TargetRepository -ne 'f3arif/AFZ-Blog'){throw 'Target repository is not allowlisted'}
   if($JobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'Invalid JobId'}
   if(-not(Test-Path -LiteralPath $sourceRoot -PathType Container)){throw "Production Blog root missing: $sourceRoot"}
-  $gitCmd=Get-Command git.exe -ErrorAction Stop
+  $null=Get-Command git.exe -ErrorAction Stop
 
   $gitStatus='';$gitRemotes='';$head='';$isGitRepo=$false
   $probe=Git @('rev-parse','--is-inside-work-tree') $sourceRoot
