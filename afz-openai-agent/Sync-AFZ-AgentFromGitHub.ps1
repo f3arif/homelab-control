@@ -146,6 +146,56 @@ function Publish-Qwen35BDiagnostic {
   }
 }
 
+function Invoke-H3HermesQwenOneShot {
+  param([string]$SyncedSha)
+  # Git source sync remains authoritative. This bounded one-shot only executes the
+  # currently committed H3 Hermes request after the exact SHA has been installed.
+  # Failure is returned as diagnostic state and must never fail source sync.
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'
+  $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesAgent-Install.ps1'
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return [ordered]@{ok=$false;status='request-missing';syncedSha=$SyncedSha}}
+  if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){return [ordered]@{ok=$false;status='runner-missing';syncedSha=$SyncedSha}}
+
+  try{
+    $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+    $jobId=([string]$r.id).Trim()
+    if([int]$r.schema -ne 1 -or $jobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$' -or [string]$r.action -ne 'install-and-configure' -or [string]$r.status -ne 'ACTIVE' -or [string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){
+      return [ordered]@{ok=$false;status='request-contract-invalid';syncedSha=$SyncedSha}
+    }
+    if([bool]$r.expose_api -or [bool]$r.run_generation_test -or [bool]$r.mutate_ollama){
+      return [ordered]@{ok=$false;status='request-safety-flags-invalid';jobId=$jobId;syncedSha=$SyncedSha}
+    }
+
+    $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-postsync'
+    $marker=Join-Path $markerRoot ($jobId+'-v1.json')
+    New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+    if(Test-Path -LiteralPath $marker -PathType Leaf){
+      try{return Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-attempted';jobId=$jobId;marker=$marker;syncedSha=$SyncedSha}}
+    }
+
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -InstallRoot $InstallRoot -RequestPath $request 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $parsed=$null
+    foreach($line in @($raw -split "`r?`n"|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})){try{$parsed=$line|ConvertFrom-Json}catch{}}
+    $ok=($code -eq 0 -and $null -ne $parsed -and [bool]$parsed.ok)
+    $o=[ordered]@{
+      ok=$ok
+      status=$(if($ok){'completed'}else{'attempt-failed'})
+      jobId=$jobId
+      syncedSha=$SyncedSha
+      exit=$code
+      classification=$(if($null -ne $parsed -and $parsed.PSObject.Properties.Name -contains 'classification'){[string]$parsed.classification}else{$null})
+      result=$parsed
+      attemptedAt=(Get-Date -Format o)
+      marker=$marker
+    }
+    $o|ConvertTo-Json -Depth 20 -Compress|Set-Content -LiteralPath $marker -Encoding UTF8
+    return $o
+  }catch{
+    return [ordered]@{ok=$false;status='activation-exception';syncedSha=$SyncedSha;error=$_.Exception.Message}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -193,6 +243,10 @@ try{
     $recovery=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message;syncedSha=$resolvedSha}
   }
 
+  # Execute the current H3 Hermes request once after exact Git source sync. This is
+  # deliberately non-fatal to sync and carries its own per-request one-shot marker.
+  $h3HermesQwenActivation=Invoke-H3HermesQwenOneShot -SyncedSha $resolvedSha
+
   # One-shot activation for the already-reviewed 35B A3B comparison request.
   # The activation marker is written at bootstrap start, so later source syncs
   # cannot replay this job. H3 also independently guards model_call_attempted.
@@ -223,6 +277,7 @@ try{
   foreach($p in $result.PSObject.Properties){$out[$p.Name]=$p.Value}
   $out['fallbackUpdaterRepair']=$fallbackUpdaterRepair
   $out['h3GenericWorkerRecovery']=$recovery
+  $out['h3HermesQwenActivation']=$h3HermesQwenActivation
   $out['qwen35BA3BActivation']=$qwen35BActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
