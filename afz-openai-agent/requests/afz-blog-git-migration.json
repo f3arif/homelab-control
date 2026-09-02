@@ -1,0 +1,18 @@
+{
+  "schema": "afz.blog.git-migration.request.v1",
+  "id": "afz-blog-git-migration-20260901-r1",
+  "enabled": true,
+  "action": "apply",
+  "projectId": "afz-blog",
+  "targetHost": "DESKTOP-10SKF0M",
+  "sourceRoot": "C:\\docker\\afz-blog-manager",
+  "desiredRepository": "f3arif/AFZ-Blog",
+  "desiredVisibility": "private",
+  "defaultBranch": "main",
+  "h3Checkout": "C:\\AFZ\\Workspaces\\AFZ-Blog\\blog-manager",
+  "preserveDirtyTree": true,
+  "excludeSecrets": true,
+  "replaceProductionGit": false,
+  "publishWebsite": false,
+  "restartBlog": false
+}
