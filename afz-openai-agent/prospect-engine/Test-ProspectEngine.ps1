@@ -9,6 +9,9 @@ function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){thro
 
 try{
   . (Join-Path $PSScriptRoot 'ProspectEngine.ps1')
+  $engineSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ProspectEngine.ps1') -Raw -Encoding UTF8
+  Assert-True ($engineSource.Contains("type='web_search_preview'")) 'Responses API research must use the documented web-search preview declaration'
+  Assert-True (-not $engineSource.Contains("type='web_search';")) 'legacy web_search plus search_context_size declaration must not return'
   $sol=Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})
   Assert-True ($sol.model -eq 'test-sol' -and $sol.searchContextSize -eq 'high') 'Sol selection should use the configured Sol model'
   $luna=Resolve-ProspectResearchModel ([pscustomobject]@{model='luna'})
