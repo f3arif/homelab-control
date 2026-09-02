@@ -1,0 +1,60 @@
+diff --git a/afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1 b/afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1
+--- a/afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1
++++ b/afz-openai-agent/homeassistant/Publish-AFZ-Fleet-Mqtt.ps1
+@@
+-$PublisherVersion = '1.0.1'
++$PublisherVersion = '1.0.2'
++$RetiredWorkers = @('asus')
+@@
+-    'asus' = @{
+-        Presence = @()
+-        Telemetry = @()
+-        Job = @()
+-    }
+@@
+-        'windows-main' { return 'Windows Main' }
++        'windows-main' { return 'ASUS Windows Main' }
+@@
+-        'asus' { return 'ASUS' }
+@@
+ function Publish-Discovery($Connection) {
+@@
+ }
++
++function Clear-RetiredWorkerTopics($Connection) {
++    foreach ($worker in $RetiredWorkers) {
++        $slug = $worker.Replace('-','_')
++        foreach ($definition in $EntityDefinitions) {
++            $unique = "afz_${slug}_$($definition.Key)"
++            $discoveryTopic = "$DiscoveryPrefix/$($definition.Component)/$unique/config"
++            Publish-Mqtt $Connection $discoveryTopic '' $true
++            Publish-Mqtt $Connection "$BaseTopic/$worker/$($definition.Suffix)" '' $true
++        }
++    }
++}
+@@
+                 $connection = Open-MqttConnection
+                 if (([DateTimeOffset]::UtcNow - $lastDiscovery).TotalSeconds -ge $DiscoveryRefreshSeconds) {
++                    Clear-RetiredWorkerTopics $connection
+                     Publish-Discovery $connection
+                     $lastDiscovery = [DateTimeOffset]::UtcNow
++                    Write-Log "RETIRED_DISCOVERY_CLEARED=YES workers=$($RetiredWorkers -join ',')"
+                     Write-Log 'DISCOVERY_PUBLISHED=YES'
+                 }
+diff --git a/afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1 b/afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1
+--- a/afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1
++++ b/afz-openai-agent/homeassistant/Install-AFZ-Fleet-MqttPublisher.ps1
+@@
+ if ($dryExit -ne 0) { throw "Publisher dry run failed: exit $dryExit" }
+ $dryText = $dryOutput | Out-String
+ if ($dryText -notmatch '"worker":"h3"') { throw 'Dry run did not map canonical H3 worker.' }
+-if ($dryText -notmatch '"worker":"asus","availability":"offline"') { throw 'Dry run did not fail closed for missing ASUS source.' }
++if ($dryText -notmatch '"worker":"windows-main"') { throw 'Dry run did not map canonical ASUS Windows-main worker.' }
++if ($dryText -match '"worker":"asus"') { throw 'Dry run still exposes duplicate standalone ASUS worker.' }
+ Write-Host 'DRY_RUN=PASS'
+@@
+ if ($canaryExit -ne 0) { throw "Publisher one-shot MQTT canary failed: exit $canaryExit" }
++if ($canaryText -notmatch 'RETIRED_DISCOVERY_CLEARED=YES workers=asus') { throw 'Retired ASUS discovery cleanup was not confirmed.' }
+ if ($canaryText -notmatch 'DISCOVERY_PUBLISHED=YES') { throw 'Discovery publish was not confirmed.' }
+ if ($canaryText -notmatch 'STATE_PUBLISHED=YES') { throw 'State publish was not confirmed.' }
+ Write-Host 'ONE_SHOT_MQTT_CANARY=PASS'
