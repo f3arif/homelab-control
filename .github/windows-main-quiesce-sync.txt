@@ -1,0 +1,9 @@
+purpose=hermes-desktop-quiesce-exact-sync
+target=windows-main
+authority=github-exact-sha
+provider_switch=false
+model_generation=false
+ollama_mutation=false
+firewall_change=false
+acl_change=false
+requested_at=2026-09-01T21:58:00-04:00
