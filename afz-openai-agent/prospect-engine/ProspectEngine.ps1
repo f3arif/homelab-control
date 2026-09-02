@@ -356,14 +356,59 @@ function Unprotect-OutlookRefreshToken {
 
 function Get-WebExceptionJson {
   param($ErrorRecord)
+  $candidates = @()
+  try {
+    if ($ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$ErrorRecord.ErrorDetails.Message)) {
+      $candidates += [string]$ErrorRecord.ErrorDetails.Message
+    }
+  } catch {}
   try {
     $response = $ErrorRecord.Exception.Response
-    if (-not $response) { return $null }
-    $reader = New-Object IO.StreamReader($response.GetResponseStream())
-    try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    if ($raw) { return $raw | ConvertFrom-Json }
+    if ($response) {
+      if ($response.PSObject.Properties['Content'] -and $response.Content) {
+        try { $candidates += [string]$response.Content.ReadAsStringAsync().GetAwaiter().GetResult() } catch {}
+      }
+      if ($response.PSObject.Methods['GetResponseStream']) {
+        $stream = $response.GetResponseStream()
+        if ($stream) {
+          $reader = New-Object IO.StreamReader($stream)
+          try { $candidates += $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+      }
+    }
   } catch {}
+  foreach ($candidate in $candidates) {
+    $raw = ([string]$candidate).Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+    try { return $raw | ConvertFrom-Json -ErrorAction Stop } catch {}
+    $first = $raw.IndexOf('{'); $last = $raw.LastIndexOf('}')
+    if ($first -ge 0 -and $last -gt $first) {
+      try { return $raw.Substring($first,$last-$first+1) | ConvertFrom-Json -ErrorAction Stop } catch {}
+    }
+  }
   return $null
+}
+
+function Get-WebExceptionStatusCode {
+  param($ErrorRecord)
+  try {
+    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+      return [int]$ErrorRecord.Exception.Response.StatusCode
+    }
+  } catch {}
+  return 0
+}
+
+function Test-OutlookDevicePollWaiting {
+  param($ErrorRecord,$Body)
+  $code = [string](Get-ProspectProperty $Body 'error' '')
+  if ($code -in @('authorization_pending','slow_down')) { return $true }
+  if (-not [string]::IsNullOrWhiteSpace($code)) { return $false }
+  # Windows PowerShell 5.1 can consume an OAuth error response body before the
+  # catch block reads it. The device-code request has already validated the
+  # client and tenant, so an otherwise-unclassified 400 during this bounded
+  # pre-expiry poll is treated as Microsoft's normal authorization_pending state.
+  return (Get-WebExceptionStatusCode $ErrorRecord) -eq 400
 }
 
 function Start-OutlookDeviceFlow {
@@ -401,7 +446,7 @@ function Complete-OutlookDeviceFlow {
   } catch {
     $body = Get-WebExceptionJson $_
     $code = [string](Get-ProspectProperty $body 'error' '')
-    if ($code -in @('authorization_pending','slow_down')) { return [ordered]@{ok=$true;state='waiting'} }
+    if (Test-OutlookDevicePollWaiting $_ $body) { return [ordered]@{ok=$true;state='waiting'} }
     $description = [string](Get-ProspectProperty $body 'error_description' $_.Exception.Message)
     Write-ProspectAudit 'outlook-connect-failed' '' $false $code
     return [ordered]@{ok=$false;state='failed';error=$description}

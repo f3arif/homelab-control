@@ -15,6 +15,20 @@ try{
   Assert-True ($luna.model -eq 'test-luna' -and $luna.searchContextSize -eq 'medium') 'Luna selection should use the configured Luna model'
   $invalidRejected=$false;try{Resolve-ProspectResearchModel ([pscustomobject]@{model='arbitrary-model'})|Out-Null}catch{$invalidRejected=$true}
   Assert-True $invalidRejected 'arbitrary client-supplied model ids must be rejected'
+  $pendingError=[pscustomobject]@{
+    ErrorDetails=[pscustomobject]@{Message='{"error":"authorization_pending","error_description":"Authorization is pending."}'}
+    Exception=[pscustomobject]@{Response=$null}
+  }
+  $pendingBody=Get-WebExceptionJson $pendingError
+  Assert-True ([string]$pendingBody.error -eq 'authorization_pending') 'OAuth JSON should be parsed from PowerShell ErrorDetails'
+  Assert-True (Test-OutlookDevicePollWaiting $pendingError $pendingBody) 'authorization_pending should remain a waiting state'
+  $unparsed400=[pscustomobject]@{
+    ErrorDetails=$null
+    Exception=[pscustomobject]@{Response=[pscustomobject]@{StatusCode=400}}
+  }
+  Assert-True (Test-OutlookDevicePollWaiting $unparsed400 $null) 'unparsed pre-expiry OAuth 400 should remain a waiting state'
+  $invalidBody=[pscustomobject]@{error='invalid_client'}
+  Assert-True (-not (Test-OutlookDevicePollWaiting $unparsed400 $invalidBody)) 'a parsed terminal OAuth error must not be hidden as waiting'
   $candidate=[pscustomobject]@{
     id='lead-1';company='Example Design';category='BCIN designers';city='Toronto'
     website='https://example.com';publicEmail='projects@example.com'
