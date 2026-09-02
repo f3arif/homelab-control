@@ -21,7 +21,8 @@ $ProgressPreference = 'SilentlyContinue'
 
 $BaseTopic = 'afz/fleet'
 $DiscoveryPrefix = 'homeassistant'
-$PublisherVersion = '1.0.1'
+$PublisherVersion = '1.0.2'
+$RetiredWorkers = @('asus')
 
 $WorkerMap = [ordered]@{
     'windows-main' = @{
@@ -38,11 +39,6 @@ $WorkerMap = [ordered]@{
         Presence = @('lenovo-presence-observer-1','lenovo-local-observer-1','lenovo-direct-1')
         Telemetry = @('lenovo-local-observer-1','lenovo-direct-1')
         Job = @('lenovo-direct-1')
-    }
-    'asus' = @{
-        Presence = @()
-        Telemetry = @()
-        Job = @()
     }
     'hp' = @{
         Presence = @('hpenvy-direct-1')
@@ -304,10 +300,9 @@ function Get-CanonicalWorkerState($Index, [string]$Worker, $Map) {
 
 function Get-DisplayName([string]$Worker) {
     switch ($Worker) {
-        'windows-main' { return 'Windows Main' }
+        'windows-main' { return 'ASUS Windows Main' }
         'h3' { return 'H3' }
         'lenovo' { return 'Lenovo' }
-        'asus' { return 'ASUS' }
         'hp' { return 'HP' }
         'pi' { return 'Pi' }
         default { return $Worker }
@@ -376,6 +371,18 @@ function Publish-Discovery($Connection) {
     }
 }
 
+function Clear-RetiredWorkerTopics($Connection) {
+    foreach ($worker in $RetiredWorkers) {
+        $slug = $worker.Replace('-','_')
+        foreach ($definition in $EntityDefinitions) {
+            $unique = "afz_${slug}_$($definition.Key)"
+            $discoveryTopic = "$DiscoveryPrefix/$($definition.Component)/$unique/config"
+            Publish-Mqtt $Connection $discoveryTopic '' $true
+            Publish-Mqtt $Connection "$BaseTopic/$worker/$($definition.Suffix)" '' $true
+        }
+    }
+}
+
 function Publish-WorkerState($Connection, $State) {
     $worker = [string]$State.worker
     Publish-Mqtt $Connection "$BaseTopic/$worker/availability" ([string]$State.availability) $true
@@ -437,8 +444,10 @@ try {
             try {
                 $connection = Open-MqttConnection
                 if (([DateTimeOffset]::UtcNow - $lastDiscovery).TotalSeconds -ge $DiscoveryRefreshSeconds) {
+                    Clear-RetiredWorkerTopics $connection
                     Publish-Discovery $connection
                     $lastDiscovery = [DateTimeOffset]::UtcNow
+                    Write-Log "RETIRED_DISCOVERY_CLEARED=YES workers=$($RetiredWorkers -join ',')"
                     Write-Log 'DISCOVERY_PUBLISHED=YES'
                 }
                 foreach ($mappedWorker in $mapped) {

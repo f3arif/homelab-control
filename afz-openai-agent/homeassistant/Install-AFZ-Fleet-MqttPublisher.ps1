@@ -39,7 +39,8 @@ $dryOutput | ForEach-Object { Write-Host $_ }
 if ($dryExit -ne 0) { throw "Publisher dry run failed: exit $dryExit" }
 $dryText = $dryOutput | Out-String
 if ($dryText -notmatch '"worker":"h3"') { throw 'Dry run did not map canonical H3 worker.' }
-if ($dryText -notmatch '"worker":"asus","availability":"offline"') { throw 'Dry run did not fail closed for missing ASUS source.' }
+if ($dryText -notmatch '"worker":"windows-main"') { throw 'Dry run did not map canonical ASUS Windows-main worker.' }
+if ($dryText -match '"worker":"asus"') { throw 'Dry run still exposes duplicate standalone ASUS worker.' }
 Write-Host 'DRY_RUN=PASS'
 
 if ($ValidateOnly) {
@@ -55,6 +56,7 @@ $canaryExit = $LASTEXITCODE
 $canaryOutput | ForEach-Object { Write-Host $_ }
 $canaryText = $canaryOutput | Out-String
 if ($canaryExit -ne 0) { throw "Publisher one-shot MQTT canary failed: exit $canaryExit" }
+if ($canaryText -notmatch 'RETIRED_DISCOVERY_CLEARED=YES workers=asus') { throw 'Retired ASUS discovery cleanup was not confirmed.' }
 if ($canaryText -notmatch 'DISCOVERY_PUBLISHED=YES') { throw 'Discovery publish was not confirmed.' }
 if ($canaryText -notmatch 'STATE_PUBLISHED=YES') { throw 'State publish was not confirmed.' }
 Write-Host 'ONE_SHOT_MQTT_CANARY=PASS'
