@@ -363,6 +363,13 @@ function Invoke-OpenAIResponse {
       return Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/responses' -Headers $headers -Body $json -TimeoutSec 180
     } catch {
       $failure = Get-OpenAIRequestFailure $_
+      if ($failure.status -eq 400) {
+        $safeMessage = ([string]$failure.message).Trim()
+        if ([string]::IsNullOrWhiteSpace($safeMessage)) { $safeMessage = 'The request was rejected as invalid.' }
+        if ($safeMessage.Length -gt 600) { $safeMessage = $safeMessage.Substring(0,600) }
+        Write-AgentLog "openai-400 code=$($failure.code) type=$($failure.type)"
+        Throw-OpenAIBoundedError 'openai_bad_request' ("OpenAI rejected the request: " + $safeMessage) 0
+      }
       if ($failure.status -ne 429) { throw }
       $isQuota = ($failure.code -in @('insufficient_quota','billing_hard_limit_reached')) -or
         ($failure.type -eq 'insufficient_quota') -or ($failure.message -match '(?i)quota|billing limit|credit balance')
