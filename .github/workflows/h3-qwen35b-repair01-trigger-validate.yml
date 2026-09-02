@@ -31,7 +31,7 @@ jobs:
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
             if($errors.Count -gt 0){$errors|ForEach-Object {Write-Host $_.Message -ForegroundColor Red};throw "PowerShell parse failure: $file"}
           }
-      - name: Assert frozen r1 and one-shot repair activation
+      - name: Assert frozen r1 and guarded repair reconcile v2
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -42,9 +42,34 @@ jobs:
           if([int]$t.schema -ne 1 -or [string]$t.action -ne 'start-qwen35b-repair01'){throw 'Invalid repair trigger schema/action'}
           if([string]$t.job_id -ne 'qwen35b-a3b-website-20260830-r1-repair01' -or [string]$t.original_job_id -ne 'qwen35b-a3b-website-20260830-r1'){throw 'Repair/original job identity mismatch'}
           if([string]$t.model -ne 'qwen3.6:35b-a3b' -or [int]$t.context -ne 16384 -or -not [bool]$t.no_think -or [int]$t.max_repair_model_calls -ne 1){throw 'Repair trigger model/context/one-call contract invalid'}
-          foreach($needle in @('QWEN35B_R1_TRANSPORT_FROZEN_POSTRETURN_ONLY','modelCallIssued=$false','h3-qwen35b-repair01.trigger','repair-bootstrap-started','activation-v1.json','S-1-5-18')){if(-not $router.Contains($needle)){throw "Router boundary missing: $needle"}}
+          if([int]$t.transport_reconcile_generation -ne 2){throw 'Repair transport reconcile generation must be exactly 2'}
+
+          foreach($needle in @(
+            'QWEN35B_R1_TRANSPORT_FROZEN_POSTRETURN_ONLY',
+            'modelCallIssued=$false',
+            'h3-qwen35b-repair01.trigger',
+            'repair-bootstrap-started',
+            'activation-v1.json',
+            'reconcile-v2.json',
+            'transport_reconcile_generation',
+            'S-1-5-18',
+            'repairLaunchState'
+          )){if(-not $router.Contains($needle)){throw "Router boundary missing: $needle"}}
+
+          foreach($needle in @(
+            'afz_h3_worker_system',
+            'S-1-5-18',
+            'QWEN35B_REPAIR_ALREADY_STARTED',
+            'repair_model_call_attempted',
+            'SilentlyContinue',
+            'FromBase64String',
+            'WindowsIdentity]::GetCurrent().Name',
+            'QWEN35B_REPAIR_REMOTE_FAILED'
+          )){if(-not $launcher.Contains($needle)){throw "Launcher boundary missing: $needle"}}
+
           if($router -match '127\.0\.0\.1:11434/api/generate'){throw 'Frozen r1 router must not contain a model endpoint'}
           if($launcher -match '127\.0\.0\.1:11434/api/generate'){throw 'Windows repair launcher must not contain a model endpoint'}
+          if($launcher -match 'Invoke-WebRequest.*Start-H3-Qwen35BA3B-WebsiteRepair01'){throw 'Repair launcher must stream synced runner instead of H3 raw-GitHub download'}
           if(($runner -split '127\.0\.0\.1:11434/api/generate').Count -ne 2){throw 'H3 repair runner must contain exactly one model endpoint'}
           if($runner -notmatch 'max_repair_model_calls=1' -or $runner -notmatch 'repair_model_call_attempted' -or $runner -notmatch 'human_written_website_code=0'){throw 'H3 repair runner one-call/Qwen-only guards missing'}
           if($runner -notmatch 'Qwen36-35B-A3B-Website-Test-20260830-r1-repair01'){throw 'Separate repair root missing'}
