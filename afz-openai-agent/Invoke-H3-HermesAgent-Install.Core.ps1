@@ -49,6 +49,7 @@ $dashboardUser='afz'
 $baseModel='qwen3.6:35b-a3b'
 $preferredModel='qwen3.6:35b-a3b-hermes64k'
 $containerBaseUrl='http://host.docker.internal:11434/v1'
+$qwenAlias='qwen-h3'
 $repo='f3arif/homelab-control'
 $resultBranch='h3-direct-results'
 $resultPath='afz-openai-agent/results/h3-hermes-docker-latest.json'
@@ -103,6 +104,9 @@ function Publish-Result([bool]$ok,[string]$classification,[hashtable]$extra){
       dashboardUrl=("http://{0}:{1}" -f $bindIp,$dashboardPort)
       dashboardUsername=$dashboardUser
       containerBaseUrl=$containerBaseUrl
+      qwenAlias=$qwenAlias
+      qwenAliasConfigured=$(if($extra.ContainsKey('qwenAliasConfigured')){[bool]$extra.qwenAliasConfigured}else{$false})
+      defaultModelPreserved=$(if($extra.ContainsKey('defaultModelPreserved')){[bool]$extra.defaultModelPreserved}else{$true})
       apiPublished=$false
       generationTestStarted=$false
       ollamaMutationStarted=$false
@@ -185,13 +189,24 @@ function Test-CurrentHealth([string]$serverVersion){
     resourceMemory='4g';resourceCpus=2;shmSize='1g'
   }
 }
+function Ensure-QwenAlias{
+  if(-not(Test-Path -LiteralPath $configPath -PathType Leaf)){return [ordered]@{ok=$false;error='Hermes config.yaml is missing.'}}
+  $aliasSpec=[ordered]@{model=$script:selectedModel;provider='custom';base_url=$containerBaseUrl;api_key='none'}|ConvertTo-Json -Compress
+  $setRaw=(& $script:docker exec $container hermes config set ("model_aliases.{0}" -f $qwenAlias) $aliasSpec 2>&1|Out-String).Trim()
+  if($LASTEXITCODE -ne 0){return [ordered]@{ok=$false;error=("hermes config set failed: {0}" -f $setRaw)}}
+  $getRaw=(& $script:docker exec $container hermes config get ("model_aliases.{0}" -f $qwenAlias) --json 2>&1|Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($getRaw)){return [ordered]@{ok=$false;error=("hermes config get failed: {0}" -f $getRaw)}}
+  try{$a=$getRaw|ConvertFrom-Json}catch{return [ordered]@{ok=$false;error='Hermes returned non-JSON alias state.'}}
+  $ok=([string]$a.model -eq $script:selectedModel -and [string]$a.provider -eq 'custom' -and [string]$a.base_url -eq $containerBaseUrl)
+  return [ordered]@{ok=$ok;error=$(if($ok){$null}else{'Hermes alias verification mismatch.'})}
+}
 function Emit([bool]$ok,[string]$classification,[hashtable]$extra,[bool]$publish){
   $pub=[ordered]@{ok=$false;error=$null}
   if($publish){$pub=Publish-Result $ok $classification $extra}
   $o=[ordered]@{
     schema=2;ok=$ok;classification=$classification;deployment='docker-desktop';host=$env:COMPUTERNAME
     containerName=$container;image=$image;dashboardUrl=("http://{0}:{1}" -f $bindIp,$dashboardPort)
-    credentialsPath=$credentialPath;containerBaseUrl=$containerBaseUrl
+    credentialsPath=$credentialPath;containerBaseUrl=$containerBaseUrl;qwenAlias=$qwenAlias
     generationTestStarted=$false;ollamaMutationStarted=$false;apiPublished=$false
     githubPublished=[bool]$pub.ok;githubResultBranch=$(if($pub.ok){$resultBranch}else{$null});githubResultPath=$(if($pub.ok){$resultPath}else{$null})
     githubPublishError=$(if($pub.ok){$null}else{[string]$pub.error});capturedAt=(Get-Date -Format o)
@@ -221,12 +236,15 @@ try{
   if(-not $script:hostOllama){Emit $false 'HERMES_DOCKER_HOST_OLLAMA_UNREACHABLE' @{retryable=$true;dockerReady=$true;dockerServerVersion=$serverVersion;repaired=$false} $false;exit 34}
   $script:selectedModel=$(if($preferredModel -in $script:hostModels){$preferredModel}elseif($baseModel -in $script:hostModels){$baseModel}else{$baseModel})
 
-  # verify_before_repair: do not replace a healthy container.
+  # Healthy containers are preserved. Add/verify the Qwen alias in-place without changing model.default.
   $before=Test-CurrentHealth $serverVersion
   if([bool]$before.ready){
-    $e=@{};foreach($p in $before.GetEnumerator()){$e[$p.Key]=$p.Value};$e.repaired=$false;$e.retryable=$false
-    Emit $true 'HERMES_READY_LOCAL_OLLAMA_64K' $e $true
-    exit 0
+    $alias=Ensure-QwenAlias
+    $e=@{};foreach($p in $before.GetEnumerator()){$e[$p.Key]=$p.Value};$e.repaired=$false;$e.defaultModelPreserved=$true;$e.qwenAliasConfigured=[bool]$alias.ok
+    if([bool]$alias.ok){$e.retryable=$false;Emit $true 'HERMES_READY_LOCAL_OLLAMA_64K' $e $true;exit 0}
+    $e.retryable=$true;$e.error=[string]$alias.error
+    Emit $false 'HERMES_OLLAMA_ALIAS_CONFIG_FAILED' $e $false
+    exit 38
   }
 
   New-Item -ItemType Directory -Force -Path $root,$dataRoot|Out-Null
@@ -244,7 +262,16 @@ try{
     ('HERMES_DASHBOARD_BASIC_AUTH_PASSWORD='+$password),('HERMES_DASHBOARD_BASIC_AUTH_SECRET='+$secret)
   ) -join "`n"
   [IO.File]::WriteAllText($envPath,$envText+"`n",$utf8);ProtectFile $envPath
-  $config=@"
+
+  # Preserve any existing Hermes model/provider configuration. Only bootstrap Qwen as
+  # the main model when config.yaml does not yet exist or is empty.
+  $defaultModelPreserved=$false
+  if(Test-Path -LiteralPath $configPath -PathType Leaf){
+    $existingConfig=[IO.File]::ReadAllText($configPath)
+    if(-not [string]::IsNullOrWhiteSpace($existingConfig)){$defaultModelPreserved=$true}
+  }
+  if(-not $defaultModelPreserved){
+    $config=@"
 model:
   default: "$script:selectedModel"
   provider: custom
@@ -257,11 +284,12 @@ tool_loop_guardrails:
     exact_failure: 5
     idempotent_no_progress: 5
 "@
-  [IO.File]::WriteAllText($configPath,$config,$utf8)
+    [IO.File]::WriteAllText($configPath,$config,$utf8)
+  }
   [IO.File]::WriteAllText($credentialPath,("Hermes Desktop H3`r`nURL: http://${bindIp}:9119`r`nUsername: afz`r`nPassword: $password`r`n"),$utf8);ProtectFile $credentialPath
 
   & $script:docker pull $image *> $null
-  if($LASTEXITCODE -ne 0){Emit $false 'HERMES_DOCKER_IMAGE_PULL_FAILED' @{retryable=$true;dockerReady=$true;dockerServerVersion=$serverVersion;repaired=$false} $false;exit 35}
+  if($LASTEXITCODE -ne 0){Emit $false 'HERMES_DOCKER_IMAGE_PULL_FAILED' @{retryable=$true;dockerReady=$true;dockerServerVersion=$serverVersion;repaired=$false;defaultModelPreserved=$defaultModelPreserved} $false;exit 35}
   $exists=(& $script:docker ps -a --filter "name=^/${container}$" --format '{{.Names}}' 2>$null|Out-String).Trim()
   if($exists -eq $container){& $script:docker rm -f $container *> $null;if($LASTEXITCODE -ne 0){throw 'Could not replace unhealthy Hermes container.'}}
   $runArgs=@(
@@ -270,7 +298,7 @@ tool_loop_guardrails:
     $image,'gateway','run'
   )
   $cid=(& $script:docker @runArgs 2>&1|Out-String).Trim()
-  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cid)){Emit $false 'HERMES_DOCKER_CONTAINER_START_FAILED' @{retryable=$true;dockerReady=$true;dockerServerVersion=$serverVersion;repaired=$true} $false;exit 36}
+  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cid)){Emit $false 'HERMES_DOCKER_CONTAINER_START_FAILED' @{retryable=$true;dockerReady=$true;dockerServerVersion=$serverVersion;repaired=$true;defaultModelPreserved=$defaultModelPreserved} $false;exit 36}
 
   $after=$null
   for($i=0;$i -lt 45;$i++){
@@ -280,9 +308,15 @@ tool_loop_guardrails:
     if(-not [bool]$after.containerRunning){break}
   }
   if($null -eq $after){$after=Test-CurrentHealth $serverVersion}
-  $x=@{};foreach($p in $after.GetEnumerator()){$x[$p.Key]=$p.Value};$x.repaired=$true
-  if([bool]$after.ready){$x.retryable=$false;Emit $true 'HERMES_READY_LOCAL_OLLAMA_64K' $x $true;exit 0}
-  $x.retryable=$true
+  $x=@{};foreach($p in $after.GetEnumerator()){$x[$p.Key]=$p.Value};$x.repaired=$true;$x.defaultModelPreserved=$defaultModelPreserved
+  if([bool]$after.ready){
+    $alias=Ensure-QwenAlias;$x.qwenAliasConfigured=[bool]$alias.ok
+    if([bool]$alias.ok){$x.retryable=$false;Emit $true 'HERMES_READY_LOCAL_OLLAMA_64K' $x $true;exit 0}
+    $x.retryable=$true;$x.error=[string]$alias.error
+    Emit $false 'HERMES_OLLAMA_ALIAS_CONFIG_FAILED' $x $false
+    exit 38
+  }
+  $x.qwenAliasConfigured=$false;$x.retryable=$true
   Emit $false 'HERMES_DOCKER_DESKTOP_SETUP_INCOMPLETE' $x $false
   exit 37
 }catch{
