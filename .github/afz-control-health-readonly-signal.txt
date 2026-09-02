@@ -1,4 +1,4 @@
 schema=1
-purpose=radiohilal-edge-promo-resume-readonly-health
+purpose=afz-blog-cutover-resume-readonly-health
 mutation=none
-requested_at=2026-08-31T23:26:00-04:00
+requested_at=2026-09-02T11:44:00-04:00
