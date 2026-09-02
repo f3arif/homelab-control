@@ -1,0 +1,57 @@
+name: H3 Qwen35B Repair01 Direct Read Only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-qwen35b-repair01-direct-readonly.yml'
+      - '.github/h3-qwen35b-repair01-direct-readonly-signal.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-qwen35b-repair01-direct-readonly
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 SSH and Repair01 state read only
+        shell: bash
+        run: |
+          set +e
+          host='100.106.186.118'
+          echo "TIME=$(date -u +%FT%TZ)"
+          tailscale ping --timeout=5s "$host"
+          echo "TAILSCALE_PING_EXIT=$?"
+          timeout 5s bash -c "</dev/tcp/${host}/22" 2>/dev/null
+          echo "TCP22_EXIT=$?"
+          echo '--- tailscale ssh hostname ---'
+          timeout 25s tailscale ssh "Faiz@${host}" 'hostname'
+          echo "TAILSCALE_SSH_HOSTNAME_EXIT=$?"
+          echo '--- tailscale ssh repair state ---'
+          timeout 30s tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$p=''C:\ProgramData\AFZ\H3Qwen35BA3BRepair\qwen35b-a3b-website-20260830-r1-repair01.json''; if(Test-Path -LiteralPath $p){Get-Content -LiteralPath $p -Raw -Encoding UTF8}else{''REPAIR01_STATE_MISSING''}"'
+          echo "TAILSCALE_SSH_STATE_EXIT=$?"
+          exit 0
+
+      - name: Enforce read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/h3-qwen35b-repair01-direct-readonly.yml'
+          ! grep -Eq '\b(Start|Stop|Register|Unregister)-ScheduledTask\b|Stop-Process|taskkill|ollama[[:space:]]+(run|pull|rm)|/api/generate|curl .*-(X|request)[[:space:]]*(POST|PUT|PATCH|DELETE)' "$wf"
+          echo 'READ_ONLY_CONTRACT=PASS'
