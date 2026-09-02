@@ -9,8 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $publisher = Join-Path $InstallRoot 'afz-openai-agent\homeassistant\Publish-AFZ-Fleet-Mqtt.ps1'
 $logRoot = 'C:\ProgramData\AFZ\HomeAssistant'
-$stdout = Join-Path $logRoot 'mqtt-publisher.out.log'
-$stderr = Join-Path $logRoot 'mqtt-publisher.err.log'
+$logFile = Join-Path $logRoot 'mqtt-publisher.log'
 
 Write-Host "=== AFZ FLEET MQTT PUBLISHER INSTALLER ==="
 
@@ -38,8 +37,9 @@ $dryOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass
 $dryExit = $LASTEXITCODE
 $dryOutput | ForEach-Object { Write-Host $_ }
 if ($dryExit -ne 0) { throw "Publisher dry run failed: exit $dryExit" }
-if (($dryOutput | Out-String) -notmatch '"worker":"h3"') { throw 'Dry run did not map canonical H3 worker.' }
-if (($dryOutput | Out-String) -notmatch '"worker":"asus","availability":"offline"') { throw 'Dry run did not fail closed for missing ASUS source.' }
+$dryText = $dryOutput | Out-String
+if ($dryText -notmatch '"worker":"h3"') { throw 'Dry run did not map canonical H3 worker.' }
+if ($dryText -notmatch '"worker":"asus","availability":"offline"') { throw 'Dry run did not fail closed for missing ASUS source.' }
 Write-Host 'DRY_RUN=PASS'
 
 if ($ValidateOnly) {
@@ -53,19 +53,19 @@ $canaryOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Byp
     -File $publisher -Once 2>&1
 $canaryExit = $LASTEXITCODE
 $canaryOutput | ForEach-Object { Write-Host $_ }
+$canaryText = $canaryOutput | Out-String
 if ($canaryExit -ne 0) { throw "Publisher one-shot MQTT canary failed: exit $canaryExit" }
-if (($canaryOutput | Out-String) -notmatch 'DISCOVERY_PUBLISHED=YES') { throw 'Discovery publish was not confirmed.' }
-if (($canaryOutput | Out-String) -notmatch 'STATE_PUBLISHED=YES') { throw 'State publish was not confirmed.' }
+if ($canaryText -notmatch 'DISCOVERY_PUBLISHED=YES') { throw 'Discovery publish was not confirmed.' }
+if ($canaryText -notmatch 'STATE_PUBLISHED=YES') { throw 'State publish was not confirmed.' }
 Write-Host 'ONE_SHOT_MQTT_CANARY=PASS'
 
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existing) {
-    $existingActions = @($existing.Actions)
     $samePublisher = $false
-    foreach ($a in $existingActions) {
-        if ([string]$a.Execute -match 'powershell' -and [string]$a.Arguments -like "*$publisher*") {
+    foreach ($existingAction in @($existing.Actions)) {
+        if ([string]$existingAction.Execute -match 'powershell' -and [string]$existingAction.Arguments -like "*$publisher*") {
             $samePublisher = $true
         }
     }
@@ -73,18 +73,15 @@ if ($existing) {
         throw "Task '$TaskName' already exists with a different action. Refusing to replace it."
     }
     Write-Host 'EXISTING_TASK=SAME_PUBLISHER'
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-$arguments = @(
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', ('"' + $publisher + '"')
-) -join ' '
+# Task Scheduler is only the startup launcher. The publisher owns one long-running
+# 15-second read/publish loop; there is no recurring Task Scheduler trigger.
+$command = "& '$publisher' *>> '$logFile'"
+$arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$command`""
 
-# This task is only a startup launcher. The publisher itself owns the 15-second
-# read/publish loop; there is no recurring Task Scheduler trigger.
 $action = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
     -Argument $arguments `
@@ -117,10 +114,9 @@ $info = Get-ScheduledTaskInfo -TaskName $TaskName
 
 Write-Host "TASK_STATE=$($task.State)"
 Write-Host "LAST_TASK_RESULT=$($info.LastTaskResult)"
-Write-Host "TASK_TRIGGER=AT_STARTUP_ONLY"
-Write-Host "RECURRING_TASK_TRIGGER=NO"
+Write-Host 'TASK_TRIGGER=AT_STARTUP_ONLY'
+Write-Host 'RECURRING_TASK_TRIGGER=NO'
 Write-Host "PUBLISHER=$publisher"
-Write-Host "STDOUT_LOG=$stdout"
-Write-Host "STDERR_LOG=$stderr"
+Write-Host "LOG_FILE=$logFile"
 Write-Host 'INSTALL_PERFORMED=YES'
 Write-Host 'NEXT=VERIFY_HOME_ASSISTANT_MQTT_ENTITIES'
