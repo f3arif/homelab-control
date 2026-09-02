@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-ollama-provider-schema-repair-20260902-r19",
+  "id": "h3-hermes-ollama-provider-schema-repair-20260902-r20",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "target": "h3",
