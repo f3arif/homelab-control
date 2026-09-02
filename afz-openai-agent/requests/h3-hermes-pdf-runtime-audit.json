@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-pdf-runtime-repair-20260902-r5",
+  "id": "h3-hermes-pdf-runtime-repair-20260902-r6",
   "action": "audit-and-repair-pdf-runtime",
   "status": "ACTIVE",
   "target": "h3",
