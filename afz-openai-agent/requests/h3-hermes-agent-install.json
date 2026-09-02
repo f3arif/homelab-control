@@ -1,20 +1,21 @@
 {
   "schema": 1,
   "id": "h3-hermes-desktop-backend-refresh-20260901-r17",
-  "action": "install-and-configure",
-  "status": "ACTIVE",
+  "action": "completed",
+  "status": "COMPLETED",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "provider_name": "ollama",
   "base_url": "http://127.0.0.1:11434/v1",
   "base_model": "qwen3.6:35b-a3b",
   "context_length": 65536,
-  "restart_desktop_backend": true,
+  "restart_desktop_backend": false,
   "restart_electron_ui": false,
   "restart_messaging_gateway": false,
   "mutate_ollama": false,
   "run_generation_test": false,
   "expose_api": false,
   "publish_result": true,
-  "emergency_diagnostic_ack": true
+  "emergency_diagnostic_ack": true,
+  "result": "desktop-not-running-process-audit-complete"
 }
