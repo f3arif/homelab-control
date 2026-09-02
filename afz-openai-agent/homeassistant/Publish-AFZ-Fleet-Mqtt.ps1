@@ -21,7 +21,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $BaseTopic = 'afz/fleet'
 $DiscoveryPrefix = 'homeassistant'
-$PublisherVersion = '1.0.0'
+$PublisherVersion = '1.0.1'
 
 $WorkerMap = [ordered]@{
     'windows-main' = @{
@@ -131,7 +131,7 @@ function Open-MqttConnection {
     $username = [Environment]::GetEnvironmentVariable('AFZ_MQTT_USERNAME')
     $password = [Environment]::GetEnvironmentVariable('AFZ_MQTT_PASSWORD')
 
-    $flags = 0x02 # clean session
+    $flags = 0x02
     $payloadParts = New-Object 'System.Collections.Generic.List[byte]'
     $payloadParts.AddRange([byte[]]$clientBytes)
 
@@ -146,7 +146,7 @@ function Open-MqttConnection {
 
     $variable = New-Object 'System.Collections.Generic.List[byte]'
     $variable.AddRange([byte[]]$protocol)
-    $variable.Add([byte]4) # MQTT 3.1.1
+    $variable.Add([byte]4)
     $variable.Add([byte]$flags)
     $variable.Add([byte]0)
     $variable.Add([byte]60)
@@ -156,7 +156,7 @@ function Open-MqttConnection {
     $connack = Read-Exact $stream 4
     if ($connack[0] -ne 0x20 -or $connack[1] -ne 0x02) {
         $tcp.Dispose()
-        throw "Unexpected MQTT CONNACK: $([BitConverter]::ToString($connack))"
+        throw "Unexpected MQTT CONNACK: $([BitConverter]::ToString([byte[]]$connack))"
     }
     if ($connack[3] -ne 0x00) {
         $code = $connack[3]
@@ -168,7 +168,7 @@ function Open-MqttConnection {
 }
 
 function Publish-Mqtt($Connection, [string]$Topic, [AllowEmptyString()][string]$Payload, [bool]$Retain=$true) {
-    $topicBytes = ConvertTo-MqttStringBytes $Topic
+    $topicBytes = [byte[]](ConvertTo-MqttStringBytes $Topic)
     $bodyBytes = [Text.Encoding]::UTF8.GetBytes($Payload)
     $packetPayload = New-Object byte[] ($topicBytes.Length + $bodyBytes.Length)
     [Array]::Copy($topicBytes, 0, $packetPayload, 0, $topicBytes.Length)
@@ -182,7 +182,8 @@ function Publish-Mqtt($Connection, [string]$Topic, [AllowEmptyString()][string]$
 function Close-MqttConnection($Connection) {
     if ($null -eq $Connection) { return }
     try {
-        $Connection.Stream.Write([byte[]](0xE0,0x00), 0, 2)
+        $disconnect = [byte[]]@(0xE0,0x00)
+        $Connection.Stream.Write($disconnect, 0, $disconnect.Length)
         $Connection.Stream.Flush()
     } catch {}
     try { $Connection.Stream.Dispose() } catch {}
@@ -229,8 +230,8 @@ function Select-FreshRecord($Index, [string[]]$Ids) {
 function Select-FirstFreshOnlineRecord($Index, [string[]]$Ids) {
     foreach ($id in @($Ids)) {
         if (-not $Index.ContainsKey($id)) { continue }
-        $r = $Index[$id]
-        if ((Test-RecordFresh $r) -and (Test-StateOnline ([string]$r.state))) { return $r }
+        $record = $Index[$id]
+        if ((Test-RecordFresh $record) -and (Test-StateOnline ([string]$record.state))) { return $record }
     }
     return $null
 }
@@ -238,9 +239,9 @@ function Select-FirstFreshOnlineRecord($Index, [string[]]$Ids) {
 function Get-MetadataScalar($Record, [string[]]$Keys) {
     if ($null -eq $Record -or $null -eq $Record.metadata) { return $null }
     foreach ($key in $Keys) {
-        foreach ($p in $Record.metadata.PSObject.Properties) {
-            if ($p.Name -ieq $key) {
-                $value = $p.Value
+        foreach ($property in $Record.metadata.PSObject.Properties) {
+            if ($property.Name -ieq $key) {
+                $value = $property.Value
                 if ($null -ne $value -and $value -isnot [pscustomobject] -and $value -isnot [System.Array]) {
                     return $value
                 }
@@ -253,10 +254,10 @@ function Get-MetadataScalar($Record, [string[]]$Keys) {
 function Get-MetricFromPreferences($Index, [string[]]$Ids, [string[]]$Keys) {
     foreach ($id in @($Ids)) {
         if (-not $Index.ContainsKey($id)) { continue }
-        $r = $Index[$id]
-        if (-not (Test-RecordFresh $r)) { continue }
-        $v = Get-MetadataScalar $r $Keys
-        if ($null -ne $v -and [string]$v -ne '') { return $v }
+        $record = $Index[$id]
+        if (-not (Test-RecordFresh $record)) { continue }
+        $value = Get-MetadataScalar $record $Keys
+        if ($null -ne $value -and [string]$value -ne '') { return $value }
     }
     return $null
 }
@@ -265,8 +266,8 @@ function Get-LatestHeartbeat($Index, [string[]]$Ids) {
     $latest = $null
     foreach ($id in @($Ids)) {
         if (-not $Index.ContainsKey($id)) { continue }
-        $hb = Get-HeartbeatTime $Index[$id]
-        if ($null -ne $hb -and ($null -eq $latest -or $hb -gt $latest)) { $latest = $hb }
+        $heartbeat = Get-HeartbeatTime $Index[$id]
+        if ($null -ne $heartbeat -and ($null -eq $latest -or $heartbeat -gt $latest)) { $latest = $heartbeat }
     }
     return $latest
 }
@@ -313,9 +314,9 @@ function Get-DisplayName([string]$Worker) {
     }
 }
 
-function Get-DiscoveryPayload([string]$Worker, $Def) {
+function Get-DiscoveryPayload([string]$Worker, $Definition) {
     $slug = $Worker.Replace('-','_')
-    $unique = "afz_${slug}_$($Def.Key)"
+    $unique = "afz_${slug}_$($Definition.Key)"
     $display = Get-DisplayName $Worker
     $device = [ordered]@{
         identifiers = @("afz_worker_$slug")
@@ -324,11 +325,11 @@ function Get-DiscoveryPayload([string]$Worker, $Def) {
         model = 'Control Hub worker'
     }
 
-    if ($Def.Key -eq 'online') {
-        $cfg = [ordered]@{
+    if ($Definition.Key -eq 'online') {
+        $config = [ordered]@{
             name = "AFZ $display Online"
             unique_id = $unique
-            object_id = $unique
+            default_entity_id = "binary_sensor.$unique"
             state_topic = "$BaseTopic/$Worker/availability"
             payload_on = 'online'
             payload_off = 'offline'
@@ -336,7 +337,7 @@ function Get-DiscoveryPayload([string]$Worker, $Def) {
             device = $device
         }
     } else {
-        $nameSuffix = switch ($Def.Key) {
+        $nameSuffix = switch ($Definition.Key) {
             'cpu' { 'CPU' }
             'ram' { 'RAM' }
             'gpu' { 'GPU' }
@@ -345,31 +346,31 @@ function Get-DiscoveryPayload([string]$Worker, $Def) {
             'ollama_state' { 'Ollama State' }
             'active_job' { 'Active Job' }
             'last_heartbeat' { 'Last Heartbeat' }
-            default { $Def.Key }
+            default { $Definition.Key }
         }
-        $cfg = [ordered]@{
+        $config = [ordered]@{
             name = "AFZ $display $nameSuffix"
             unique_id = $unique
-            object_id = $unique
-            state_topic = "$BaseTopic/$Worker/$($Def.Suffix)"
+            default_entity_id = "sensor.$unique"
+            state_topic = "$BaseTopic/$Worker/$($Definition.Suffix)"
             availability_topic = "$BaseTopic/$Worker/availability"
             payload_available = 'online'
             payload_not_available = 'offline'
             device = $device
         }
-        if ($Def.Unit) { $cfg.unit_of_measurement = $Def.Unit }
-        if ($Def.StateClass) { $cfg.state_class = $Def.StateClass }
+        if ($Definition.Unit) { $config.unit_of_measurement = $Definition.Unit }
+        if ($Definition.StateClass) { $config.state_class = $Definition.StateClass }
     }
-    return ($cfg | ConvertTo-Json -Depth 8 -Compress)
+    return ($config | ConvertTo-Json -Depth 8 -Compress)
 }
 
 function Publish-Discovery($Connection) {
     foreach ($worker in $WorkerMap.Keys) {
         $slug = $worker.Replace('-','_')
-        foreach ($def in $EntityDefinitions) {
-            $unique = "afz_${slug}_$($def.Key)"
-            $topic = "$DiscoveryPrefix/$($def.Component)/$unique/config"
-            $payload = Get-DiscoveryPayload $worker $def
+        foreach ($definition in $EntityDefinitions) {
+            $unique = "afz_${slug}_$($definition.Key)"
+            $topic = "$DiscoveryPrefix/$($definition.Component)/$unique/config"
+            $payload = Get-DiscoveryPayload $worker $definition
             Publish-Mqtt $Connection $topic $payload $true
         }
     }
@@ -394,11 +395,13 @@ function Publish-WorkerState($Connection, $State) {
         $value = $State[$field]
         $topic = "$BaseTopic/$worker/$($topicMap[$field])"
         if ($null -eq $value -or [string]$value -eq '') {
-            Publish-Mqtt $Connection $topic '' $true # clears stale retained state
+            Publish-Mqtt $Connection $topic '' $true
         } else {
             $text = if ($value -is [double] -or $value -is [single] -or $value -is [decimal]) {
-                ([Convert]::ToString($value, [Globalization.CultureInfo]::InvariantCulture))
-            } else { [string]$value }
+                [Convert]::ToString($value, [Globalization.CultureInfo]::InvariantCulture)
+            } else {
+                [string]$value
+            }
             Publish-Mqtt $Connection $topic $text $true
         }
     }
@@ -411,7 +414,6 @@ function Read-LiveState {
 }
 
 $lastDiscovery = [DateTimeOffset]::MinValue
-$stopping = $false
 
 try {
     Write-Log "START version=$PublisherVersion stateUri=$ControlHubStateUri broker=$BrokerHost`:$BrokerPort pollSeconds=$PollSeconds staleSeconds=$StaleSeconds once=$Once dryRun=$DryRun"
@@ -421,27 +423,30 @@ try {
         $live = Read-LiveState
         $index = Get-RecordIndex $live
         $mapped = @()
+
         foreach ($worker in $WorkerMap.Keys) {
             $mapped += ,(Get-CanonicalWorkerState $index $worker $WorkerMap[$worker])
         }
 
         if ($DryRun) {
-            foreach ($m in $mapped) {
-                Write-Host ($m | ConvertTo-Json -Compress)
+            foreach ($mappedWorker in $mapped) {
+                Write-Host ($mappedWorker | ConvertTo-Json -Compress)
             }
         } else {
-            $conn = $null
+            $connection = $null
             try {
-                $conn = Open-MqttConnection
+                $connection = Open-MqttConnection
                 if (([DateTimeOffset]::UtcNow - $lastDiscovery).TotalSeconds -ge $DiscoveryRefreshSeconds) {
-                    Publish-Discovery $conn
+                    Publish-Discovery $connection
                     $lastDiscovery = [DateTimeOffset]::UtcNow
                     Write-Log 'DISCOVERY_PUBLISHED=YES'
                 }
-                foreach ($m in $mapped) { Publish-WorkerState $conn $m }
+                foreach ($mappedWorker in $mapped) {
+                    Publish-WorkerState $connection $mappedWorker
+                }
                 Write-Log "STATE_PUBLISHED=YES workers=$($mapped.Count) hubWorkers=$(@($live.workers).Count)"
             } finally {
-                Close-MqttConnection $conn
+                Close-MqttConnection $connection
             }
         }
 
@@ -449,21 +454,21 @@ try {
         $elapsed = ([DateTimeOffset]::UtcNow - $cycleStart).TotalSeconds
         $sleep = [math]::Max(1, $PollSeconds - [int][math]::Floor($elapsed))
         Start-Sleep -Seconds $sleep
-    } while (-not $stopping)
+    } while ($true)
 }
 finally {
     if (-not $DryRun -and -not $Once) {
-        $conn = $null
+        $connection = $null
         try {
-            $conn = Open-MqttConnection
+            $connection = Open-MqttConnection
             foreach ($worker in $WorkerMap.Keys) {
-                Publish-Mqtt $conn "$BaseTopic/$worker/availability" 'offline' $true
+                Publish-Mqtt $connection "$BaseTopic/$worker/availability" 'offline' $true
             }
             Write-Log 'CLEAN_SHUTDOWN_OFFLINE_PUBLISHED=YES'
         } catch {
             Write-Log "CLEAN_SHUTDOWN_OFFLINE_PUBLISHED=NO error=$($_.Exception.Message)"
         } finally {
-            Close-MqttConnection $conn
+            Close-MqttConnection $connection
         }
     }
     Write-Log 'STOP'
