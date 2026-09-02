@@ -1,9 +1,10 @@
 {
   "schema": 1,
-  "id": "h3-hermes-docker-desktop-20260901-r8",
+  "id": "h3-hermes-adaptive-qwen-20260901-r9",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "deployment": "docker-desktop",
+  "runtime_mode": "adaptive-native-first-when-docker-unavailable",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "image": "nousresearch/hermes-agent:latest",
