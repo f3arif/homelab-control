@@ -77,6 +77,18 @@ try:
         digest = hashlib.sha256(raw_locked.encode("utf-8")).hexdigest()
         normalized = "".join(raw_locked.split())
 
+        # Exact observed H3 corruption fingerprint from 2026-09-02. A legitimate
+        # Hermes active-session entry cannot fit in this 15-byte payload. Mutation
+        # is therefore restricted to this one SHA-256 only and remains reversible
+        # through the pre-write backup made by backup_and_write_empty().
+        if size_bytes == 15 and digest == "5322fecfc92a5e3248a297a3df3eddfb9bd9049504272e4f572b87fa36d4b3bd":
+            backup_and_write_empty(
+                state,
+                "HERMES_SESSION_REGISTRY_KNOWN_15B_CORRUPTION_REPAIRED",
+                "KNOWN_15B_FINGERPRINT_TO_ENTRIES",
+                base,
+            )
+
         try:
             parsed_locked = json.loads(raw_locked)
         except Exception as exc:
