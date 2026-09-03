@@ -1,5 +1,5 @@
 name: HP Envy Reachability Check Once
-# Read-only refresh for H3 Hermes relay diagnostics: 2026-09-03T16:14Z
+# Read-only relay diagnostics for AFZ control and H3: 2026-09-03
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -22,6 +22,7 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
+
       - name: Check HP Envy reachability
         shell: bash
         run: |
@@ -33,8 +34,77 @@ jobs:
           echo '=== TCP PORTS ==='
           for p in 22 80 443 8500; do
             if timeout 4 bash -c "</dev/tcp/100.71.26.69/$p" 2>/dev/null; then
-              echo "TCP_$p=OPEN"
+              echo "HPENVY_TCP_$p=OPEN"
             else
-              echo "TCP_$p=CLOSED_OR_FILTERED"
+              echo "HPENVY_TCP_$p=CLOSED_OR_FILTERED"
             fi
           done
+
+      - name: Probe AFZ nodes from HP Envy relay
+        shell: bash
+        run: |
+          set -u
+          remote_script=$(cat <<'REMOTE'
+          set +e
+          echo 'RELAY_HOST_BEGIN'
+          printf 'HOSTNAME=%s\n' "$(hostname 2>/dev/null || true)"
+          printf 'USER=%s\n' "$(id -un 2>/dev/null || true)"
+          echo 'RELAY_HOST_END'
+
+          probe_tcp() {
+            label="$1"; host="$2"; port="$3"
+            if timeout 4 bash -c "</dev/tcp/${host}/${port}" 2>/dev/null; then
+              echo "${label}_TCP_${port}=OPEN"
+            else
+              echo "${label}_TCP_${port}=CLOSED_OR_FILTERED"
+            fi
+          }
+
+          echo 'WINDOWS_MAIN_FROM_HPENVY_BEGIN'
+          tailscale ping --timeout=5s --c=1 100.70.25.8 >/tmp/wm-ping.txt 2>&1
+          wm_ping=$?
+          cat /tmp/wm-ping.txt
+          echo "WINDOWS_MAIN_TAILSCALE_PING_EXIT=${wm_ping}"
+          probe_tcp WINDOWS_MAIN 100.70.25.8 8797
+          wm_http=$(curl --silent --show-error --connect-timeout 3 --max-time 6 \
+            --write-out ' HTTP_CODE=%{http_code}' http://100.70.25.8:8797/health 2>&1)
+          wm_curl=$?
+          printf 'WINDOWS_MAIN_HEALTH_CURL_EXIT=%s\n' "$wm_curl"
+          printf 'WINDOWS_MAIN_HEALTH=%s\n' "$wm_http"
+          echo 'WINDOWS_MAIN_FROM_HPENVY_END'
+
+          echo 'H3_FROM_HPENVY_BEGIN'
+          tailscale ping --timeout=5s --c=1 100.106.186.118 >/tmp/h3-ping.txt 2>&1
+          h3_ping=$?
+          cat /tmp/h3-ping.txt
+          echo "H3_TAILSCALE_PING_EXIT=${h3_ping}"
+          probe_tcp H3 100.106.186.118 22
+          probe_tcp H3 100.106.186.118 9119
+          h3_http=$(curl --silent --show-error --connect-timeout 3 --max-time 6 \
+            --write-out ' HTTP_CODE=%{http_code}' http://100.106.186.118:9119/api/status 2>&1)
+          h3_curl=$?
+          printf 'H3_HERMES_CURL_EXIT=%s\n' "$h3_curl"
+          printf 'H3_HERMES_STATUS=%s\n' "$h3_http"
+          echo 'H3_FROM_HPENVY_END'
+          REMOTE
+          )
+
+          set +e
+          output=$(printf '%s\n' "$remote_script" | tailscale ssh coolyo@100.71.26.69 'bash -s' 2>&1)
+          relay_exit=$?
+          set -e
+          printf '%s\n' "$output"
+          echo "HPENVY_RELAY_SSH_EXIT=${relay_exit}"
+          if [ "$relay_exit" -ne 0 ]; then
+            exit "$relay_exit"
+          fi
+
+      - name: Enforce relay read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/hpenvy-reachability-check-once.yml'
+          ! grep -Eq 'curl .*(-X|--request)[[:space:]]+(POST|PUT|PATCH|DELETE)' "$wf"
+          ! grep -Eq '\b(sudo|systemctl|service|docker|apt|dnf|yum|Start-ScheduledTask|Stop-ScheduledTask|Stop-Process|New-NetFirewallRule|Remove-NetFirewallRule)\b' "$wf"
+          ! grep -Eq 'afz-openai-agent/' "$wf"
+          echo 'READ_ONLY_RELAY_CONTRACT=PASS'
