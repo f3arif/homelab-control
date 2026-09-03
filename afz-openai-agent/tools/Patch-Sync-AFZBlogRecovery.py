@@ -13,7 +13,7 @@ if f'function {fname}' not in s:
   $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
   $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
-  $marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v3.json')
   $utf8=New-Object Text.UTF8Encoding($false)
   New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
   if(Test-Path -LiteralPath $marker -PathType Leaf){
@@ -36,22 +36,28 @@ if f'function {fname}' not in s:
 '''
     s = s.replace(anchor, fn + anchor, 1)
 else:
-    # Re-arm only this recovery carrier. v1 may already exist from the failed
-    # transport attempt; v2 permits one new carrier launch while the H3 recovery
-    # script still independently forbids a 35B replay and guards Ridge.
+    # v2 reached the windows-main interactive carrier but failed before H3 due
+    # to the validated ArgumentList binding defect. v3 permits exactly one new
+    # transport launch after that fix. The H3 recovery script independently
+    # forbids any 35B replay and permits Ridge only when prior state proves it
+    # unattempted.
     start = s.index(f'function {fname}')
     end_anchor = "if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){"
     end = s.index(end_anchor, start)
     segment = s[start:end]
-    old = "$marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')"
-    new = "$marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')"
-    if old in segment:
-        if segment.count(old) != 1:
-            raise SystemExit('unexpected v1 recovery marker count')
-        segment = segment.replace(old, new, 1)
+    v1 = "$marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')"
+    v2 = "$marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')"
+    v3 = "$marker=Join-Path $markerRoot ($jobId+'-activation-v3.json')"
+    if segment.count(v3) == 1:
+        pass
+    elif segment.count(v2) == 1 and segment.count(v1) == 0:
+        segment = segment.replace(v2, v3, 1)
         s = s[:start] + segment + s[end:]
-    elif segment.count(new) != 1:
-        raise SystemExit('recovery marker is neither expected v1 nor v2')
+    elif segment.count(v1) == 1 and segment.count(v2) == 0:
+        segment = segment.replace(v1, v3, 1)
+        s = s[:start] + segment + s[end:]
+    else:
+        raise SystemExit('recovery marker is not a single expected v1/v2/v3 marker')
 
 call = "$afzBlogComparisonRecoveryActivation=Start-AFZBlogModelComparisonRecoveryOneShot -SyncedSha $resolvedSha"
 if call not in s:
@@ -103,9 +109,9 @@ if diag_out not in s:
 for required in (
     'replay35B=$false',
     'ridgeOnlyIfUnattempted=$true',
-    "$jobId+'-activation-v2.json'",
+    "$jobId+'-activation-v3.json'",
     'Publish-AFZBlogRecoveryTransportState.ps1',
-    "readOnly=$true",
+    'readOnly=$true',
 ):
     if required not in s:
         raise SystemExit(f'missing guarded recovery/diagnostic marker: {required}')
