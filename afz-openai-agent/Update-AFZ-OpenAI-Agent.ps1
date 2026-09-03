@@ -133,6 +133,16 @@ try{
   if($ExpectedSha -and $remoteSha -ne $ExpectedSha){throw "Agent source sync returned unexpected remoteSha: actual=$remoteSha expected=$ExpectedSha"}
   $changed=[bool]$syncResult.changed
 
+# MOVIERECOMMENDER_STREMIO_POSTSYNC_HOOK_V1
+  # Fixed typed request only. Runs before nonessential runtime hooks so updater
+  # contention elsewhere cannot starve MovieRecommender acceptance.
+  $movieRecommenderRunner=Join-Path $InstallRoot 'afz-openai-agent\\Invoke-MovieRecommender-Stremio-Rebind.ps1'
+  if(Test-Path -LiteralPath $movieRecommenderRunner -PathType Leaf){
+    try{
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $movieRecommenderRunner -InstallRoot $InstallRoot *> $null
+    }catch{}
+  }
+
 
 # Narrow Blog runtime persistence hook. The helper is SYSTEM-only and
 # fail-closed: it requires a clean canonical Blog checkout and existing
