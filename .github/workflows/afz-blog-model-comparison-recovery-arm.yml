@@ -121,3 +121,5 @@ jobs:
           git add afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
           git commit -m 'Arm guarded AFZ blog comparison recovery'
           git push origin HEAD:main
+
+# validation trigger v1
