@@ -113,6 +113,9 @@ function Find-Ollama {
   }
   return $null
 }
+function Get-OllamaServeProcesses {
+  return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]$_.CommandLine) -match '(?i)ollama(?:[.]exe)?\s+serve'})
+}
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST'}) 30}
 if(-not(Test-Path -LiteralPath $hermes -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND'}) 41}
 if(-not(Test-Path -LiteralPath $config -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_CONFIG_NOT_FOUND'}) 42}
@@ -120,14 +123,26 @@ if(-not(Test-Path -LiteralPath $config -PathType Leaf)){Emit ([ordered]@{ok=$fal
 # IMPORTANT: no marker short-circuit is permitted here. Every invocation performs
 # a fresh endpoint probe so a prior success can never masquerade as current health.
 $before=Probe-Ollama
-$ollamaExe=$null;$ollamaStarted=$false;$ollamaPid=$null
+$ollamaExe=$null;$ollamaStarted=$false;$ollamaPid=$null;$ollamaRecycled=$false;$recycledProcessCount=0
+if(-not [bool]$before.reachable){
+  Start-Sleep -Seconds 2
+  $confirm=Probe-Ollama
+  if([bool]$confirm.reachable){$before=$confirm}
+}
 if(-not [bool]$before.reachable){
   $ollamaExe=Find-Ollama
   if([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=$false}) 43}
+  $stale=@(Get-OllamaServeProcesses)
+  if($stale.Count -gt 0){
+    foreach($proc in $stale){
+      try{Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop;$recycledProcessCount++}catch{}
+    }
+    if($recycledProcessCount -gt 0){$ollamaRecycled=$true;Start-Sleep -Seconds 2}
+  }
   try{
     $p=Start-Process -FilePath $ollamaExe -ArgumentList @('serve') -WindowStyle Hidden -PassThru
     $ollamaPid=[int]$p.Id;$ollamaStarted=$true
-  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name}) 44}
+  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 44}
 }
 $live=$before
 if(-not [bool]$live.reachable){
@@ -137,8 +152,8 @@ if(-not [bool]$live.reachable){
     if([bool]$live.reachable){break}
   }
 }
-if(-not [bool]$live.reachable){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_ENDPOINT_UNREACHABLE';freshProbe=$true;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid}) 45}
-if(-not [bool]$live.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_MODEL_NOT_REACHABLE';freshProbe=$true;ollamaReachable=$true;modelListed=$false;modelCount=[int]$live.modelCount;ollamaServerStarted=$ollamaStarted;modelPullStarted=$false}) 46}
+if(-not [bool]$live.reachable){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_ENDPOINT_UNREACHABLE';freshProbe=$true;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 45}
+if(-not [bool]$live.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_MODEL_NOT_REACHABLE';freshProbe=$true;ollamaReachable=$true;modelListed=$false;modelCount=[int]$live.modelCount;ollamaServerStarted=$ollamaStarted;modelPullStarted=$false;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 46}
 
 # Keep the provider registry aligned with the already-selected local model route.
 $oldHome=$env:HERMES_HOME
@@ -157,8 +172,10 @@ try{
 } catch {Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_PROVIDER_CONFIG_FAILED';freshProbe=$true;ollamaReachable=$true;modelListed=$true;stage=$_.Exception.Message}) 47}
 finally{if($null -eq $oldHome){Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue}else{$env:HERMES_HOME=$oldHome}}
 
-# Install a lightweight one-minute liveness guard. It never pulls/loads a model;
-# it only restores the local Ollama server process if the loopback endpoint is down.
+# Install a one-minute endpoint-authoritative liveness guard. It never pulls or
+# generates with a model. Two failed loopback probes mean the serve process is
+# unhealthy even if a stale ollama serve PID still exists; recycle only that
+# server process, restart it, and verify the endpoint comes back.
 $watchdogInstalled=$false;$watchdogTaskState=$null;$watchdogError=$null
 try{
   if([string]::IsNullOrWhiteSpace($ollamaExe)){$ollamaExe=Find-Ollama}
@@ -166,9 +183,21 @@ try{
     $escapedExe=$ollamaExe.Replace("'","''")
     $wd=@"
 `$ErrorActionPreference='SilentlyContinue'
-try{Invoke-RestMethod -Uri '$baseUrl/models' -Method Get -TimeoutSec 5|Out-Null;exit 0}catch{}
+function Test-AFZOllamaEndpoint {
+  try{Invoke-RestMethod -Uri '$baseUrl/models' -Method Get -TimeoutSec 5|Out-Null;return `$true}catch{return `$false}
+}
+if(Test-AFZOllamaEndpoint){exit 0}
+Start-Sleep -Seconds 2
+if(Test-AFZOllamaEndpoint){exit 0}
 `$running=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]`$_.CommandLine) -match '(?i)ollama(?:[.]exe)?\s+serve'})
-if(`$running.Count -eq 0){Start-Process -FilePath '$escapedExe' -ArgumentList @('serve') -WindowStyle Hidden|Out-Null}
+foreach(`$proc in `$running){try{Stop-Process -Id ([int]`$proc.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}}
+Start-Sleep -Seconds 2
+try{Start-Process -FilePath '$escapedExe' -ArgumentList @('serve') -WindowStyle Hidden|Out-Null}catch{exit 1}
+for(`$i=0;`$i -lt 20;`$i++){
+  Start-Sleep -Seconds 2
+  if(Test-AFZOllamaEndpoint){exit 0}
+}
+exit 1
 "@
     [IO.File]::WriteAllText($watchdog,$wd,$utf8)
     $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$watchdog+'"')
@@ -183,13 +212,13 @@ if(`$running.Count -eq 0){Start-Process -FilePath '$escapedExe' -ArgumentList @(
 
 # Final fresh probe after configuration and watchdog setup.
 $final=Probe-Ollama
-if(-not [bool]$final.reachable -or -not [bool]$final.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_FINAL_LIVENESS_FAILED';freshProbe=$true;ollamaReachable=[bool]$final.reachable;modelListed=[bool]$final.modelListed;ollamaServerStarted=$ollamaStarted;watchdogInstalled=$watchdogInstalled;watchdogError=$watchdogError}) 48}
+if(-not [bool]$final.reachable -or -not [bool]$final.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_FINAL_LIVENESS_FAILED';freshProbe=$true;ollamaReachable=[bool]$final.reachable;modelListed=[bool]$final.modelListed;ollamaServerStarted=$ollamaStarted;watchdogInstalled=$watchdogInstalled;watchdogError=$watchdogError;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 48}
 Emit ([ordered]@{
   ok=$true;classification='HERMES_OLLAMA_FRESH_LIVENESS_READY';host=$env:COMPUTERNAME;freshProbe=$true;
   providerName='ollama';providerIdentity='custom:ollama';providerConfigured=$true;providerApi=$baseUrl;providerTransport='openai_chat';
   runtimeResolved=$true;runtimeProvider='custom';runtimeBaseUrl=$baseUrl;runtimeApiMode='chat_completions';
   ollamaReachable=$true;selectedModel=$model;modelListed=$true;modelCount=[int]$final.modelCount;contextLength=65536;
-  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;
+  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;
   watchdogInstalled=$watchdogInstalled;watchdogTask=$watchdogTask;watchdogTaskState=$watchdogTaskState;watchdogError=$watchdogError;
   modelPullStarted=$false;generationTestStarted=$false;messagingGatewayTouched=$false;networkChanged=$false;observedAt=(Get-Date -Format o)
 }) 0
@@ -219,7 +248,7 @@ $o=[ordered]@{
   runtimeProvider=$(if($result.PSObject.Properties.Name -contains 'runtimeProvider'){[string]$result.runtimeProvider}else{$null});runtimeBaseUrl=$(if($result.PSObject.Properties.Name -contains 'runtimeBaseUrl'){[string]$result.runtimeBaseUrl}else{$null});runtimeApiMode=$(if($result.PSObject.Properties.Name -contains 'runtimeApiMode'){[string]$result.runtimeApiMode}else{$null});
   ollamaReachable=$(if($result.PSObject.Properties.Name -contains 'ollamaReachable'){[bool]$result.ollamaReachable}else{$false});selectedModel='qwen3.6:35b-a3b';contextLength=65536;
   modelListed=$(if($result.PSObject.Properties.Name -contains 'modelListed'){[bool]$result.modelListed}else{$false});endpointReachableBefore=$(if($result.PSObject.Properties.Name -contains 'endpointReachableBefore'){[bool]$result.endpointReachableBefore}else{$null});
-  ollamaServerStarted=$(if($result.PSObject.Properties.Name -contains 'ollamaServerStarted'){[bool]$result.ollamaServerStarted}else{$false});watchdogInstalled=$(if($result.PSObject.Properties.Name -contains 'watchdogInstalled'){[bool]$result.watchdogInstalled}else{$false});watchdogTaskState=$(if($result.PSObject.Properties.Name -contains 'watchdogTaskState'){[string]$result.watchdogTaskState}else{$null});
+  ollamaServerStarted=$(if($result.PSObject.Properties.Name -contains 'ollamaServerStarted'){[bool]$result.ollamaServerStarted}else{$false});ollamaRecycled=$(if($result.PSObject.Properties.Name -contains 'ollamaRecycled'){[bool]$result.ollamaRecycled}else{$false});recycledProcessCount=$(if($result.PSObject.Properties.Name -contains 'recycledProcessCount'){[int]$result.recycledProcessCount}else{0});watchdogInstalled=$(if($result.PSObject.Properties.Name -contains 'watchdogInstalled'){[bool]$result.watchdogInstalled}else{$false});watchdogTaskState=$(if($result.PSObject.Properties.Name -contains 'watchdogTaskState'){[string]$result.watchdogTaskState}else{$null});
   electronUiTouched=$false;desktopBackendTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false;networkChanged=$false;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)
 }
 Save-Result $o
