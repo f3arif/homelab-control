@@ -1,0 +1,32 @@
+name: H3 Hermes Telegram Followup Bind V3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-telegram-followup-bind-v3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bind:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run guarded binder
+        shell: powershell
+        run: .\afz-openai-agent\Bind-H3-Hermes-TelegramFollowup.ps1
+      - name: Commit validated binding and retire temporary binders
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm '.github/workflows/h3-hermes-telegram-followup-bind.yml' '.github/workflows/h3-hermes-telegram-followup-bind-v2.yml' '.github/workflows/h3-hermes-telegram-followup-bind-v3.yml' 'afz-openai-agent/Bind-H3-Hermes-TelegramFollowup.ps1'
+          git add 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' '.github/workflows/h3-hermes-agent-validate.yml'
+          git commit -m 'Bind guarded H3 Telegram document follow-up repair'
+          git push origin HEAD:main
