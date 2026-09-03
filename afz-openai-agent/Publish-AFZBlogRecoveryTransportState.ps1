@@ -15,6 +15,10 @@ $sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Wor
 $sharedDiagPath=Join-Path $sharedDiagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
 $termDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $termDiagPath=Join-Path $termDiagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
+$h3Tailscale='100.106.186.118'
+$h3Lan='192.168.50.213'
+$h3Mac='4C-ED-FB-3F-B0-9E'
+$broadcast='192.168.50.255'
 $utf8=New-Object Text.UTF8Encoding($false)
 
 function Read-SafeJson([string]$Path){
@@ -25,6 +29,28 @@ function Write-SafeJson([string]$Path,$Value){
   $parent=Split-Path $Path -Parent
   if($parent -and -not(Test-Path -LiteralPath $parent -PathType Container)){New-Item -ItemType Directory -Force -Path $parent|Out-Null}
   [IO.File]::WriteAllText($Path,($Value|ConvertTo-Json -Depth 30 -Compress),$utf8)
+}
+function Ensure-H3Awake {
+  $wasOnline=(Test-Connection -ComputerName $h3Tailscale -Count 1 -Quiet -ErrorAction SilentlyContinue) -or (Test-Connection -ComputerName $h3Lan -Count 1 -Quiet -ErrorAction SilentlyContinue)
+  if($wasOnline){return [ordered]@{ok=$true;wakeAttempted=$false;online=$true;target='DESKTOP-H3R6CQN'}}
+  try{
+    $bytes=$h3Mac -split '[:-]'|ForEach-Object{[Convert]::ToByte($_,16)}
+    $packet=New-Object byte[] 102
+    0..5|ForEach-Object{$packet[$_]=0xFF}
+    for($i=1;$i -le 16;$i++){[Array]::Copy($bytes,0,$packet,6+(($i-1)*6),6)}
+    $client=New-Object Net.Sockets.UdpClient
+    try{
+      $client.EnableBroadcast=$true
+      foreach($round in 1..5){foreach($port in @(9,7)){$ep=New-Object Net.IPEndPoint ([Net.IPAddress]::Parse($broadcast)),$port;[void]$client.Send($packet,$packet.Length,$ep)};Start-Sleep -Milliseconds 400}
+    }finally{$client.Dispose()}
+  }catch{return [ordered]@{ok=$false;wakeAttempted=$true;online=$false;error=$_.Exception.Message;target='DESKTOP-H3R6CQN'}}
+  foreach($i in 1..24){
+    if((Test-Connection -ComputerName $h3Lan -Count 1 -Quiet -ErrorAction SilentlyContinue) -or (Test-Connection -ComputerName $h3Tailscale -Count 1 -Quiet -ErrorAction SilentlyContinue)){
+      return [ordered]@{ok=$true;wakeAttempted=$true;online=$true;target='DESKTOP-H3R6CQN';waitSeconds=($i*3)}
+    }
+    Start-Sleep -Seconds 3
+  }
+  return [ordered]@{ok=$false;wakeAttempted=$true;online=$false;target='DESKTOP-H3R6CQN';error='H3 did not become reachable after bounded Wake-on-LAN wait.'}
 }
 
 function Invoke-H3ReadOnlyProbe {
@@ -118,8 +144,8 @@ $o=[ordered]@{
     }finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
   }
 
-  $probe=Invoke-ProbeTarget 'Faiz@100.106.186.118' 'tailscale-system-ssh' @()
-  if(-not [bool]$probe.ok){$probe=Invoke-ProbeTarget 'Faiz@192.168.50.185' 'lan-system-ssh' @('-o','HostKeyAlias=100.106.186.118')}
+  $probe=Invoke-ProbeTarget ('Faiz@'+$h3Tailscale) 'tailscale-system-ssh' @()
+  if(-not [bool]$probe.ok){$probe=Invoke-ProbeTarget ('Faiz@'+$h3Lan) 'lan-system-ssh' @('-o',('HostKeyAlias='+$h3Tailscale))}
   return $probe
 }
 
@@ -191,15 +217,17 @@ $v4=Read-SafeJson $v4Marker
 $carrier=Read-SafeJson $carrierResult
 $transportTask=Get-ScheduledTask -TaskName $transportTaskName -ErrorAction SilentlyContinue
 $transportInfo=$(if($transportTask){Get-ScheduledTaskInfo -TaskName $transportTaskName -ErrorAction SilentlyContinue}else{$null})
+$wake=$null
+try{$wake=Ensure-H3Awake}catch{$wake=[ordered]@{ok=$false;wakeAttempted=$false;online=$false;error=$_.Exception.Message}}
 $probe=$null
-try{$probe=Invoke-H3ReadOnlyProbe}catch{$probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
+if($wake -and [bool]$wake.online){try{$probe=Invoke-H3ReadOnlyProbe}catch{$probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}}else{$probe=[pscustomobject]@{ok=$false;classification='H3_OFFLINE_AFTER_WAKE';error=$(if($wake){$wake.error}else{'wake-state-missing'});mutation='NONE'}}
 $v5=$null
 try{$v5=Invoke-GuardedRecoveryV5 $probe $v4 $carrier}catch{$v5=[pscustomobject]@{ok=$false;status='v5-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
 
 $out=[ordered]@{
   schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true
   source='windows-main';controlPlane='github';jobId=$jobId;syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
-  activationV3=$v3;activationV4=$v4
+  wake=$wake;activationV3=$v3;activationV4=$v4
   recoveryV5MarkerExists=(Test-Path -LiteralPath $v5Marker -PathType Leaf);recoveryV5=$v5
   carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrier
   transportTaskExists=($null -ne $transportTask);transportTaskState=$(if($transportTask){[string]$transportTask.State}else{'missing'})
