@@ -1,0 +1,123 @@
+name: H3 Hermes Ollama Task Owner Source Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-ollama-task-owner-source-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase current main
+        shell: pwsh
+        run: |
+          git pull --rebase origin main
+
+      - name: Require protected gate to remain paused
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $req=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw | ConvertFrom-Json
+          if([string]$req.action -ne 'protected-gate-paused' -or [string]$req.status -ne 'PAUSED_PROTECTED_GATE'){
+            throw 'Refusing source preparation because Hermes live request is not protected-paused.'
+          }
+          if([bool]$req.restart_messaging_gateway -or [bool]$req.mutate_ollama -or [bool]$req.run_generation_test){
+            throw 'Protected-paused request contains forbidden live flags.'
+          }
+          'PROTECTED_GATE_PAUSED=PASS'
+
+      - name: Patch persistent Task Scheduler ownership
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
+          t=p.read_text(encoding='utf-8')
+          marker='# HERMES_R37_TASK_SCHEDULER_OWNS_OLLAMA'
+          if marker in t:
+              raise SystemExit('R37 source fix already present')
+
+          def once(old,new,label):
+              global t
+              n=t.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected one anchor, got {n}')
+              t=t.replace(old,new,1)
+
+          once(
+              "$watchdog=Join-Path $root 'afz-ensure-ollama.ps1'\n$watchdogTask='AFZ H3 Ollama Liveness'\n$utf8=New-Object Text.UTF8Encoding($false)",
+              "$watchdog=Join-Path $root 'afz-ensure-ollama.ps1'\n$watchdogTask='AFZ H3 Ollama Liveness'\n$ollamaServerTask='AFZ H3 Ollama Server'\n$utf8=New-Object Text.UTF8Encoding($false)",
+              'server task variable')
+
+          once(
+              "$before=Probe-Ollama\n$ollamaExe=$null;$ollamaStarted=$false;$ollamaPid=$null;$ollamaRecycled=$false;$recycledProcessCount=0",
+              "$before=Probe-Ollama\n$ollamaExe=Find-Ollama\nif([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=[bool]$before.reachable}) 43}\n# HERMES_R37_TASK_SCHEDULER_OWNS_OLLAMA\n# The server task directly owns ollama.exe. This avoids tying the model server to\n# the lifetime of the SSH-hosted repair PowerShell process. S4U keeps the Faiz\n# user profile/model path while allowing the task to run without an interactive logon.\n$ollamaServerTaskInstalled=$false;$ollamaServerTaskState=$null\ntry{\n  $serverAction=New-ScheduledTaskAction -Execute $ollamaExe -Argument 'serve' -WorkingDirectory (Split-Path -Parent $ollamaExe)\n  $serverTrigger=New-ScheduledTaskTrigger -AtStartup\n  $serverSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)\n  $serverPrincipal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Highest\n  Register-ScheduledTask -TaskName $ollamaServerTask -Action $serverAction -Trigger $serverTrigger -Settings $serverSettings -Principal $serverPrincipal -Force|Out-Null\n  $serverTaskReadback=Get-ScheduledTask -TaskName $ollamaServerTask -ErrorAction Stop\n  $ollamaServerTaskInstalled=$true;$ollamaServerTaskState=[string]$serverTaskReadback.State\n}catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_TASK_INSTALL_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name}) 44}\n$ollamaStarted=$false;$ollamaPid=$null;$ollamaRecycled=$false;$recycledProcessCount=0",
+              'persistent server registration')
+
+          once(
+              "if(-not [bool]$before.reachable){\n  $ollamaExe=Find-Ollama\n  if([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=$false}) 43}\n  $stale=@(Get-OllamaServeProcesses)",
+              "if(-not [bool]$before.reachable){\n  $stale=@(Get-OllamaServeProcesses)",
+              'remove SSH-local executable lookup')
+
+          once(
+              "  try{\n    $p=Start-Process -FilePath $ollamaExe -ArgumentList @('serve') -WindowStyle Hidden -PassThru\n    $ollamaPid=[int]$p.Id;$ollamaStarted=$true\n  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 44}",
+              "  try{\n    Start-ScheduledTask -TaskName $ollamaServerTask -ErrorAction Stop\n    $ollamaStarted=$true\n  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_TASK_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 44}",
+              'replace SSH child launch')
+
+          once(
+              "`$running=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]`$_.CommandLine) -match '(?i)ollama(?:[.]exe)?\\s+serve'})\nforeach(`$proc in `$running){try{Stop-Process -Id ([int]`$proc.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}}\nStart-Sleep -Seconds 2\ntry{Start-Process -FilePath '$escapedExe' -ArgumentList @('serve') -WindowStyle Hidden|Out-Null}catch{exit 1}\nfor(`$i=0;`$i -lt 20;`$i++){\n  Start-Sleep -Seconds 2\n  if(Test-AFZOllamaEndpoint){exit 0}\n}\nexit 1",
+              "try{\n  `$serverTask=Get-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction Stop\n  if([string]`$serverTask.State -eq 'Running'){\n    Stop-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction SilentlyContinue\n    Start-Sleep -Seconds 2\n  }\n  Start-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction Stop\n}catch{exit 1}\nfor(`$i=0;`$i -lt 20;`$i++){\n  Start-Sleep -Seconds 2\n  if(Test-AFZOllamaEndpoint){exit 0}\n}\nexit 1",
+              'watchdog server-task recovery')
+
+          once(
+              "    $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"'+$watchdog+'\"')\n    $trigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)\n    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew\n    $principal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited\n    Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force|Out-Null",
+              "    $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"'+$watchdog+'\"')\n    $startupTrigger=New-ScheduledTaskTrigger -AtStartup\n    $repeatTrigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)\n    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)\n    $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n    Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger @($startupTrigger,$repeatTrigger) -Settings $settings -Principal $principal -Force|Out-Null",
+              'watchdog noninteractive principal')
+
+          once(
+              "  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;",
+              "  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;ollamaServerTask=$ollamaServerTask;ollamaServerTaskInstalled=$ollamaServerTaskInstalled;ollamaServerTaskState=$ollamaServerTaskState;",
+              'result telemetry')
+
+          p.write_text(t,encoding='utf-8',newline='\n')
+
+      - name: Validate source-only repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'R37 installer parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @(
+            'HERMES_R37_TASK_SCHEDULER_OWNS_OLLAMA',
+            "`$ollamaServerTask='AFZ H3 Ollama Server'",
+            '-LogonType S4U -RunLevel Highest',
+            "-UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
+            'Start-ScheduledTask -TaskName $ollamaServerTask',
+            'Stop-ScheduledTask -TaskName',
+            'Register-ScheduledTask -TaskName $watchdogTask'
+          )){if(-not $c.Contains($required)){throw "Missing R37 invariant: $required"}}
+          if($c.Contains("Start-Process -FilePath `$ollamaExe -ArgumentList @('serve')")){throw 'SSH-owned ollama serve launch remains'}
+          $req=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw | ConvertFrom-Json
+          if([string]$req.action -ne 'protected-gate-paused'){throw 'Protected gate changed during source preparation'}
+          'HERMES_R37_SOURCE_ONLY=PASS'
+
+      - name: Commit source fix
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1
+          git commit -m 'Make Task Scheduler own Hermes Ollama server'
+          git push origin HEAD:main
