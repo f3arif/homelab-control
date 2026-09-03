@@ -80,6 +80,23 @@ try{
   }
 }catch{}
 
+# Guarded Telegram document-followup repair preflight. It patches only the
+# Telegram adapter's attachment-only batching behavior, runs a local canary,
+# and then uses the existing guarded native gateway restart helper.
+$followupRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+$followupRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-followup-repair.json'
+try{
+  if((Test-Path -LiteralPath $followupRelay -PathType Leaf) -and (Test-Path -LiteralPath $followupRequest -PathType Leaf)){
+    $followupReq=Get-Content -LiteralPath $followupRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $followupId=([string]$followupReq.id).Trim()
+    $followupDone=$false
+    if($followupId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
+      $followupStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-followup' ($followupId+'.json')
+      if(Test-Path -LiteralPath $followupStatePath -PathType Leaf){try{$followupState=Get-Content -LiteralPath $followupStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$followupDone=[bool]$followupState.ok}catch{}}
+      if(-not $followupDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $followupRelay -InstallRoot $InstallRoot -RequestPath $followupRequest *> $null}
+    }
+  }
+}catch{}
 function Save-Result($result){
   $json=$result|ConvertTo-Json -Depth 20 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
