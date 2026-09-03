@@ -261,6 +261,31 @@ function Start-AFZBlogModelComparisonOneShot {
   }
 }
 
+function Start-AFZBlogModelComparisonRecoveryOneShot {
+  param([string]$SyncedSha)
+  $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
+  $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
+  $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  $utf8=New-Object Text.UTF8Encoding($false)
+  New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+  if(Test-Path -LiteralPath $marker -PathType Leaf){
+    try{return Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-activated';jobId=$jobId;marker=$marker;syncedSha=$SyncedSha}}
+  }
+  if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;syncedSha=$SyncedSha}}
+  try{
+    $o=[ordered]@{ok=$true;status='recovery-starting';jobId=$jobId;syncedSha=$SyncedSha;marker=$marker;replay35B=$false;ridgeOnlyIfUnattempted=$true;activatedAt=(Get-Date -Format o)}
+    [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`" -Mode Bootstrap"
+    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+    $o['status']='recovery-bootstrap-started';$o['bootstrapPid']=$p.Id
+    [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+    return $o
+  }catch{
+    return [ordered]@{ok=$false;status='recovery-activation-exception';jobId=$jobId;syncedSha=$SyncedSha;error=$_.Exception.Message;marker=$marker}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -320,6 +345,9 @@ try{
   # Isolated AFZ blog article model comparison; one call max per model, no publish/DB mutation.
   $afzBlogComparisonActivation=Start-AFZBlogModelComparisonOneShot -SyncedSha $resolvedSha
 
+  # Post-return recovery: never replays 35B; Ridge may run only if prior state proves it unattempted.
+  $afzBlogComparisonRecoveryActivation=Start-AFZBlogModelComparisonRecoveryOneShot -SyncedSha $resolvedSha
+
   # Read-only Ridge16K r2 visual/content QA. The typed request forbids model calls and site mutation.
   $ridge16KQAActivation=Start-Ridge16KQualityAuditOneShot -SyncedSha $resolvedSha
 
@@ -351,6 +379,7 @@ try{
   $out['h3HermesQwenActivation']=$h3HermesQwenActivation
   $out['qwen35BA3BActivation']=$qwen35BActivation
   $out['afzBlogModelComparisonActivation']=$afzBlogComparisonActivation
+  $out['afzBlogModelComparisonRecoveryActivation']=$afzBlogComparisonRecoveryActivation
   $out['qwenRidge16KQAActivation']=$ridge16KQAActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
