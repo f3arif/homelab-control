@@ -18,165 +18,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate staged read-only liveness path
+      - name: Run validated read-only liveness binder
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          foreach($p in @(
-            'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1',
-            'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'
-          )){
-            $tokens=$null;$errors=$null
-            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors|ForEach-Object{Write-Error ("${p}: "+$_.Message)};exit 1}
-          }
-          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json' -Raw|ConvertFrom-Json
-          if($r.schema -ne 1 -or -not $r.enabled -or $r.action -ne 'audit-registry-liveness'){throw 'liveness schema/action/enabled'}
-          if($r.target -ne 'h3' -or $r.host -ne 'DESKTOP-H3R6CQN'){throw 'liveness target'}
-          if(-not $r.read_only -or $r.mutation -ne 'none'){throw 'liveness read-only contract'}
-          if($r.restart_gateway -or $r.change_provider -or $r.run_model_generation -or $r.mutate_ollama -or $r.change_network){throw 'liveness forbidden mutation'}
-          $relay=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1' -Raw
-          foreach($m in @('AFZ-H3-HERMES-REGISTRY-LIVENESS-LATEST.txt','lan-hostkey-alias','HostKeyAlias=100.106.186.118','Read-H3-Hermes-RegistryLiveness.ps1','gatewayRestarted=$false','registryMutated=$false')){if(-not $relay.Contains($m)){throw "relay marker missing: $m"}}
-          $reader=Get-Content 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1' -Raw
-          foreach($m in @('REGISTRY_LIVE_OWNERS_PRESENT','REGISTRY_STALE_CANDIDATES_ONLY','REGISTRY_INDETERMINATE','REGISTRY_EMPTY','mutation=''NONE''')){if(-not $reader.Contains($m)){throw "reader marker missing: $m"}}
-          foreach($forbidden in @('Stop-Process','Stop-ScheduledTask','gateway restart','config set','ollama pull','/api/generate')){
-            if($relay.Contains($forbidden) -or $reader.Contains($forbidden)){throw "forbidden liveness content: $forbidden"}
-          }
-          'LIVENESS_STAGE=PASS'
+          & '.\afz-openai-agent\Bind-H3-Hermes-RegistryLiveness.ps1'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
 
-      - name: Bind dedicated liveness handler and validator
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $utf8=New-Object Text.UTF8Encoding($false)
-          function Replace-One([string]$Text,[string]$Old,[string]$New,[string]$Name){
-            if(([regex]::Matches($Text,[regex]::Escape($Old))).Count -ne 1){throw "$Name marker mismatch"}
-            return $Text.Replace($Old,$New)
-          }
-
-          $watchPath='afz-openai-agent/Push-Deploy-Watcher.ps1'
-          $w=[IO.File]::ReadAllText($watchPath)
-          if(-not $w.Contains('Invoke-H3-Hermes-RegistryLivenessAudit.ps1')){
-            $old='$h3HermesLastAttempt=[DateTime]::MinValue'
-            $new=@'
-$h3HermesLastAttempt=[DateTime]::MinValue
-$h3HermesRegistryLivenessRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-RegistryLivenessAudit.ps1'
-$h3HermesRegistryLivenessRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-registry-liveness-audit.json'
-$h3HermesRegistryLivenessStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-registry-liveness'
-$h3HermesRegistryLivenessLastAttempt=[DateTime]::MinValue
-'@
-            $w=Replace-One $w $old $new 'watcher variables'
-          }
-          if(-not $w.Contains('function Handle-H3HermesRegistryLivenessRequest{')){
-            $marker='function Test-H3HermesPdfAuxPending{'
-            $insert=@'
-function Handle-H3HermesRegistryLivenessRequest{
-  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRunner -PathType Leaf)){return}
-  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRequest -PathType Leaf)){return}
-  try{
-    $req=Get-Content -LiteralPath $h3HermesRegistryLivenessRequest -Raw -Encoding UTF8|ConvertFrom-Json
-    $id=([string]$req.id).Trim()
-    if([int]$req.schema -ne 1 -or -not [bool]$req.enabled -or [string]$req.action -ne 'audit-registry-liveness'){return}
-    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
-    if(-not [bool]$req.read_only -or [string]$req.mutation -ne 'none'){return}
-    if([bool]$req.restart_gateway -or [bool]$req.change_provider -or [bool]$req.run_model_generation -or [bool]$req.mutate_ollama -or [bool]$req.change_network){return}
-    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
-    $statePath=Join-Path $h3HermesRegistryLivenessStateRoot ($id+'.json')
-    if(Test-Path -LiteralPath $statePath -PathType Leaf){
-      try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
-    }
-    $now=Get-Date
-    if(($now-$script:h3HermesRegistryLivenessLastAttempt).TotalSeconds -lt 60){return}
-    $script:h3HermesRegistryLivenessLastAttempt=$now
-    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesRegistryLivenessRunner -InstallRoot $InstallRoot -RequestPath $h3HermesRegistryLivenessRequest 2>&1|Out-String).Trim()
-    $code=$LASTEXITCODE
-    $classification='NO_CLASSIFICATION'
-    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
-    Log "H3_HERMES_REGISTRY_LIVENESS classification=$classification exit=$code source=$(Current-Sha)"
-  }catch{Log "H3_HERMES_REGISTRY_LIVENESS_ERROR $($_.Exception.Message)"}
-}
-
-'@
-            $w=Replace-One $w $marker ($insert+$marker) 'liveness handler'
-          }
-          if(-not $w.Contains('      Handle-H3HermesRegistryLivenessRequest')){
-            $old='      Handle-H3HermesRequest'
-            $new="      Handle-H3HermesRegistryLivenessRequest`n$old"
-            $w=Replace-One $w $old $new 'liveness loop call'
-          }
-          [IO.File]::WriteAllText($watchPath,$w,$utf8)
-
-          $vPath='.github/workflows/h3-hermes-agent-validate.yml'
-          $v=[IO.File]::ReadAllText($vPath)
-          if(-not $v.Contains("      - 'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1'")){
-            $old="      - 'afz-openai-agent/Invoke-H3-Hermes-SessionRegistryRepair.ps1'"
-            $new=$old+"`n      - 'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1'`n      - 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'"
-            $v=Replace-One $v $old $new 'validator helper paths'
-          }
-          if(-not $v.Contains("      - 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json'")){
-            $old="      - 'afz-openai-agent/requests/h3-hermes-gateway-reload.json'"
-            $new=$old+"`n      - 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json'"
-            $v=Replace-One $v $old $new 'validator request path'
-          }
-          if(-not $v.Contains("throw 'liveness schema/action/enabled'")){
-            $old="          `$g=Get-Content 'afz-openai-agent/requests/h3-hermes-gateway-reload.json' -Raw | ConvertFrom-Json"
-            $block=@'
-          $l=Get-Content 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json' -Raw | ConvertFrom-Json
-          if($l.schema -ne 1 -or -not $l.enabled -or $l.action -ne 'audit-registry-liveness'){throw 'liveness schema/action/enabled'}
-          if($l.target -ne 'h3' -or $l.host -ne 'DESKTOP-H3R6CQN'){throw 'liveness target'}
-          if(-not $l.read_only -or $l.mutation -ne 'none'){throw 'liveness read-only contract'}
-          if($l.restart_gateway -or $l.change_provider -or $l.run_model_generation -or $l.mutate_ollama -or $l.change_network){throw 'liveness forbidden mutation'}
-
-'@
-            $v=Replace-One $v $old ($block+$old) 'typed liveness validator'
-          }
-          if(-not $v.Contains("            'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1',")){
-            $old="            'afz-openai-agent/Invoke-H3-Hermes-SessionRegistryRepair.ps1'"
-            $new=$old+",`n            'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1',`n            'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'"
-            $v=Replace-One $v $old $new 'parse list liveness scripts'
-          }
-          if(-not $v.Contains('$liveness=Get-Content')){
-            $old='          $all=$install+"`n"+$dispatch+"`n"+$pdf+"`n"+$reload'
-            $block=@'
-          $liveness=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1' -Raw
-          foreach($required in @('AFZ-H3-HERMES-REGISTRY-LIVENESS-LATEST.txt','lan-hostkey-alias','Read-H3-Hermes-RegistryLiveness.ps1','gatewayRestarted=$false','registryMutated=$false')){
-            if(-not $liveness.Contains($required)){throw "Liveness relay missing: $required"}
-          }
-          $livenessReader=Get-Content 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1' -Raw
-          foreach($required in @('REGISTRY_LIVE_OWNERS_PRESENT','REGISTRY_STALE_CANDIDATES_ONLY','REGISTRY_INDETERMINATE','REGISTRY_EMPTY')){
-            if(-not $livenessReader.Contains($required)){throw "Liveness reader missing: $required"}
-          }
-'@
-            $v=Replace-One $v $old ($block+$old) 'liveness helper validator'
-          }
-          [IO.File]::WriteAllText($vPath,$v,$utf8)
-
-      - name: Parse and assert generated binding
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          foreach($p in @(
-            'afz-openai-agent/Push-Deploy-Watcher.ps1',
-            'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1',
-            'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'
-          )){
-            $tokens=$null;$errors=$null
-            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors|ForEach-Object{Write-Error ("${p}: "+$_.Message)};exit 1}
-          }
-          $w=Get-Content 'afz-openai-agent/Push-Deploy-Watcher.ps1' -Raw
-          foreach($m in @('Invoke-H3-Hermes-RegistryLivenessAudit.ps1','h3-hermes-registry-liveness-audit.json','Handle-H3HermesRegistryLivenessRequest','H3_HERMES_REGISTRY_LIVENESS')){if(-not $w.Contains($m)){throw "watcher liveness binding missing: $m"}}
-          $v=Get-Content '.github/workflows/h3-hermes-agent-validate.yml' -Raw
-          foreach($m in @('Invoke-H3-Hermes-RegistryLivenessAudit.ps1','Read-H3-Hermes-RegistryLiveness.ps1','h3-hermes-registry-liveness-audit.json','liveness schema/action/enabled')){if(-not $v.Contains($m)){throw "validator liveness binding missing: $m"}}
-          'LIVENESS_BIND=PASS'
-
-      - name: Commit validated binding and retire binder
+      - name: Commit binding and retire one-shot binder
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm '.github/workflows/h3-hermes-registry-liveness-bind.yml'
+          git rm 'afz-openai-agent/Bind-H3-Hermes-RegistryLiveness.ps1'
           git add 'afz-openai-agent/Push-Deploy-Watcher.ps1' '.github/workflows/h3-hermes-agent-validate.yml'
           git commit -m 'Bind read-only H3 Hermes registry liveness audit'
           git fetch origin main
