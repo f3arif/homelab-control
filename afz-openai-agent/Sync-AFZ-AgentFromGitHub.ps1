@@ -266,7 +266,7 @@ function Start-AFZBlogModelComparisonRecoveryOneShot {
   $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
   $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
-  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')
   $utf8=New-Object Text.UTF8Encoding($false)
   New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
   if(Test-Path -LiteralPath $marker -PathType Leaf){

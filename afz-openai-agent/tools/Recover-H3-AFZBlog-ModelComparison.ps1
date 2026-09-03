@@ -71,6 +71,9 @@ function Put-Text([string]$Path,[string]$Text,[string]$Branch,[string]$Message){
 function Publish($Request,$States,[string]$Status){if(-not $script:gh){return $false};try{$base=[string]$Request.result_path;$branch=[string]$Request.result_branch;$summary=[ordered]@{schema=1;project='afz-blog-local-model-comparison';job_id=$JobId;status=$Status;source_sha=$SourceSha;host=$env:COMPUTERNAME;topic=[string]$Request.topic;context=[int]$Request.context;no_think=[bool]$Request.no_think;num_predict=[int]$Request.num_predict;temperature=[double]$Request.temperature;publish_article=$false;production_db_mutation=$false;recovery='post-return-v1';models=$States;updated_at=(Get-Date -Format o)};Put-Text "$base/summary.json" ($summary|ConvertTo-Json -Depth 50) $branch "Recover H3 AFZ blog comparison $Status $JobId";foreach($m in @($Request.models)){$key=Get-Key ([string]$m);foreach($name in @("$key-metrics.json","$key-raw.txt","$key-ollama-response.json","$key-structured.json")){$local=Join-Path $projectRoot $name;if(Test-Path $local){Put-Text "$base/$name" ([IO.File]::ReadAllText($local,$utf8)) $branch "Recover H3 AFZ blog artifact $key $JobId"}}};return $true}catch{return $false}}
 function Comment([string]$Body){if(-not $script:gh){return};$tmp=Join-Path $env:TEMP ('afz-blog-rec-comment-'+[guid]::NewGuid().ToString('N')+'.txt');try{Write-Utf8 $tmp $Body;[void](Invoke-Gh @('issue','comment','31','--repo','f3arif/faiz-homelab','--body-file',$tmp))}finally{Remove-Item $tmp -Force -ErrorAction SilentlyContinue}}
 
+$script:gh=Find-Gh
+if($script:gh){$auth=Invoke-Gh @('auth','status','--hostname','github.com');if($auth.ExitCode -ne 0){$script:gh=$null}}
+
 if(-not(Test-Path $stateFile)){throw 'Prior state file missing; refusing recovery.'}
 if(-not(Test-Path $requestFile)){throw 'Frozen local request missing; refusing recovery.'}
 if(-not(Test-Path $promptFile)){throw 'Frozen prompt missing; refusing recovery.'}
@@ -114,9 +117,7 @@ $failed=@($request.models|Where-Object{[string]$states[[string]$_].status -eq 'f
 $finalStatus=if($completed -eq 2){'completed'}else{'partial'}
 Save-State $finalStatus $states "Recovery finished completed=$completed blocked=$blocked failed=$failed."
 $pushed=Publish $request $states $finalStatus
-$script:gh=Find-Gh
-if($script:gh){$auth=Invoke-Gh @('auth','status','--hostname','github.com');if($auth.ExitCode -ne 0){$script:gh=$null}}
-if($script:gh){[void](Publish $request $states $finalStatus);Comment "[RESULT][H3-AFZ-BLOG-COMPARE-RECOVERY] Job $JobId status=$finalStatus completed=$completed/2 blocked=$blocked failed=$failed. 35B was recovered from its saved response without replay; Ridge was called only if prior state proved it unattempted. publish=false db_mutation=false."}
+if($script:gh){Comment "[RESULT][H3-AFZ-BLOG-COMPARE-RECOVERY] Job $JobId status=$finalStatus completed=$completed/2 blocked=$blocked failed=$failed. 35B was recovered from its saved response without replay; Ridge was called only if prior state proved it unattempted. publish=false db_mutation=false."}
 $out=[ordered]@{ok=($finalStatus -eq 'completed');job_id=$JobId;status=$finalStatus;completed_models=$completed;blocked_models=$blocked;failed_models=$failed;models=$states;publish_article=$false;production_db_mutation=$false;recovery='post-return-v1';completed_at=(Get-Date -Format o)}
 Write-Output ('AFZ_BLOG_COMPARE_RECOVERY_JSON='+($out|ConvertTo-Json -Depth 50 -Compress))
 if($finalStatus -ne 'completed'){exit 20}
