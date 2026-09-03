@@ -1,0 +1,70 @@
+name: H3 Generic Watchdog Audit Text Mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-generic-watchdog-audit-text-mirror.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Add reliable shared text mirror
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1')
+          text=p.read_text(encoding='utf-8')
+          old="$mirrorPath=Join-Path $mirrorRoot 'H3-GENERIC-WORKER-RECOVERY-LATEST.json'\n$utf8=New-Object Text.UTF8Encoding($false)"
+          new="$mirrorPath=Join-Path $mirrorRoot 'H3-GENERIC-WORKER-RECOVERY-LATEST.json'\n$sharedMirrorRoot='C:\\Users\\Faiz\\OneDrive - AFZ Engineering Inc\\AFZ Shared\\AFZ Workers\\Results'\n$sharedMirrorPath=Join-Path $sharedMirrorRoot 'AFZ-H3-OLLAMA-WATCHDOG-AUDIT-LATEST.txt'\n$utf8=New-Object Text.UTF8Encoding($false)"
+          if text.count(old)!=1:
+              raise SystemExit(f'Expected one mirror declaration anchor, got {text.count(old)}')
+          text=text.replace(old,new,1)
+          old2="  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}\n  Write-Output $json"
+          new2="  try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}\n  try{if(Test-Path -LiteralPath $sharedMirrorRoot -PathType Container){[IO.File]::WriteAllText($sharedMirrorPath,$json,$utf8)}}catch{}\n  Write-Output $json"
+          if text.count(old2)!=1:
+              raise SystemExit(f'Expected one Save-Result mirror anchor, got {text.count(old2)}')
+          text=text.replace(old2,new2,1)
+          p.write_text(text,encoding='utf-8',newline='\n')
+
+      - name: Validate source-only observability change
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Text mirror patch parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('AFZ-H3-OLLAMA-WATCHDOG-AUDIT-LATEST.txt','sharedMirrorPath','remoteMutation=''NONE''','HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1')){if(-not $c.Contains($required)){throw "Missing invariant: $required"}}
+          'H3_WATCHDOG_AUDIT_TEXT_MIRROR=PASS'
+
+      - name: Commit and signal exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1
+          git commit -m 'Mirror H3 watchdog audit to shared text result'
+          patch_sha=$(git rev-parse HEAD)
+          printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m 'Signal H3 watchdog audit text mirror'
+          git push origin HEAD:main
+          echo "H3_WATCHDOG_AUDIT_TEXT_MIRROR_SHA=$patch_sha"
