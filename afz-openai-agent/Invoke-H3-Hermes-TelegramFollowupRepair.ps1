@@ -174,7 +174,26 @@ $already=($text.Contains('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS') -and
 $backup=$null
 $mutation='NONE'
 if(-not $already){
-  if($before -ne '__EXPECTED_SHA__'){Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_ADAPTER_HASH_MISMATCH';mutation='NONE';beforeSha256=$before}) 43}
+  if($before -ne '__EXPECTED_SHA__'){
+    $gitHead=$null
+    $adapterTracked=$false
+    $adapterDirty=$null
+    try{
+      $git=Get-Command git.exe -ErrorAction SilentlyContinue
+      if(-not $git){$git=Get-Command git -ErrorAction SilentlyContinue}
+      if($git){
+        Push-Location $source
+        try{
+          $gitHead=((& $git.Source rev-parse HEAD 2>$null | Select-Object -First 1) | Out-String).Trim()
+          & $git.Source ls-files --error-unmatch -- 'plugins/platforms/telegram/adapter.py' *> $null
+          $adapterTracked=($LASTEXITCODE -eq 0)
+          $status=((& $git.Source status --porcelain -- 'plugins/platforms/telegram/adapter.py' 2>$null) | Out-String).Trim()
+          $adapterDirty=(-not [string]::IsNullOrWhiteSpace($status))
+        }finally{Pop-Location}
+      }
+    }catch{}
+    Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_ADAPTER_HASH_MISMATCH';mutation='NONE';beforeSha256=$before;gitHead=$gitHead;adapterTracked=$adapterTracked;adapterDirty=$adapterDirty}) 43
+  }
   $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
   $backup="$adapter.afz-pre-document-followup-$stamp.bak"
   Copy-Item -LiteralPath $adapter -Destination $backup -Force
