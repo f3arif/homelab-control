@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-telegram-document-followup-repair-20260902-r1",
+  "action": "repair-telegram-document-followup",
+  "status": "ACTIVE",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "expected_adapter_sha256": "652a02efc3eeda55078b192010152ecc1b18d501f1ca386af62a5932e48b3270",
+  "followup_delay_seconds": 6.0,
+  "restart_gateway": true,
+  "change_config": false,
+  "change_provider": false,
+  "mutate_ollama": false,
+  "change_network": false,
+  "run_model_generation": false
+}
