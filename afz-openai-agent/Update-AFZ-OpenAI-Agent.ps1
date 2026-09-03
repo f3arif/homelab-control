@@ -144,6 +144,15 @@ try{
   }
 
 
+# MOVIERECOMMENDER_CATALOG_AUDIT_POSTSYNC_HOOK_V1
+  # Read-only one-shot audit of the fixed MovieRecommender Stremio sidecar.
+  $movieCatalogAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-MovieRecommender-Catalog-Audit.ps1'
+  if(Test-Path -LiteralPath $movieCatalogAuditRunner -PathType Leaf){
+    try{
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $movieCatalogAuditRunner -InstallRoot $InstallRoot *> $null
+    }catch{}
+  }
+
 # Narrow Blog runtime persistence hook. The helper is SYSTEM-only and
 # fail-closed: it requires a clean canonical Blog checkout and existing
 # successful .next build before it may recreate the exact Blog Manager task.

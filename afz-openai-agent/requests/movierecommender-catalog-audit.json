@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "project": "movierecommender",
+  "action": "catalog-audit",
+  "job_id": "movierecommender-catalog-audit-20260903-r1",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "read_only": true
+}
