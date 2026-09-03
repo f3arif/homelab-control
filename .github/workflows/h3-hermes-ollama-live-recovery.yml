@@ -1,0 +1,44 @@
+name: H3 Hermes Ollama Live Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-hermes-ollama-live-recovery.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-hermes-ollama-live-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify H3 tailnet reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.106.186.118
+
+      - name: Recover Ollama route and refresh Hermes gateway
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/H3-Hermes-Ollama-LivenessRecovery.ps1"
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
+          timeout 420s tailscale ssh Faiz@100.106.186.118 "$remote"
