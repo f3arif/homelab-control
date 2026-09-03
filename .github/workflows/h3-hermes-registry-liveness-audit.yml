@@ -1,0 +1,48 @@
+name: H3 Hermes Registry Liveness Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-hermes-registry-liveness-audit.txt'
+      - '.github/workflows/h3-hermes-registry-liveness-audit.yml'
+      - 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-hermes-registry-liveness-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Verify H3 tailnet reachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.106.186.118
+
+      - name: Read Hermes registry and process liveness
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1"
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
+          timeout 60s tailscale ssh Faiz@100.106.186.118 "$remote"

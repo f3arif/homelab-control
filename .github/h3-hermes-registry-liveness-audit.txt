@@ -1,0 +1,12 @@
+request=h3-hermes-registry-liveness-audit-20260903-r1
+target=h3
+host=DESKTOP-H3R6CQN
+read_only=true
+mutation=none
+inspect_registry=true
+inspect_process_liveness=true
+restart_gateway=false
+change_provider=false
+mutate_ollama=false
+change_network=false
+run_model_generation=false
