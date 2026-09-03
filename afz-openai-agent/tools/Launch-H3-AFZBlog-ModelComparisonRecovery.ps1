@@ -26,6 +26,22 @@ try{
   $needle='$utf8=New-Object Text.UTF8Encoding($false)'
   if(-not $text.Contains($needle)){throw 'Recovery compatibility patch anchor missing.'}
   $text=$text.Replace($needle,$needle+"`r`n`$script:gh=`$null")
+
+  # Windows PowerShell treats $Args as the automatic unbound-argument variable.
+  # Rename the explicit GitHub CLI argument parameter in the downloaded recovery
+  # script so Start-Process can never receive a null/empty -ArgumentList from that
+  # collision. GitHub publication is additionally disabled for this recovery pass;
+  # local state + the external read-only mirror remain the source of observability.
+  $invokeNeedle='function Invoke-Gh([string[]]$Args)'
+  if(-not $text.Contains($invokeNeedle)){throw 'Recovery Invoke-Gh compatibility anchor missing.'}
+  $text=$text.Replace($invokeNeedle,'function Invoke-Gh([string[]]$GhArgs)')
+  $argsNeedle='($Args|ForEach-Object{Quote-Arg ([string]$_)})'
+  if(-not $text.Contains($argsNeedle)){throw 'Recovery Invoke-Gh argument-use anchor missing.'}
+  $text=$text.Replace($argsNeedle,'($GhArgs|ForEach-Object{Quote-Arg ([string]$_)})')
+  $ghInitNeedle='$script:gh=Find-Gh'
+  if(-not $text.Contains($ghInitNeedle)){throw 'Recovery GitHub init anchor missing.'}
+  $text=$text.Replace($ghInitNeedle,'$script:gh=$null')
+
   [IO.File]::WriteAllText($tmp,$text,$utf8)
   $tokens=$null;$errors=$null
   [void][System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)
