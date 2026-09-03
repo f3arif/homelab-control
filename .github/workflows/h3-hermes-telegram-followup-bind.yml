@@ -37,89 +37,91 @@ jobs:
           foreach($m in @('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_REPAIR_VERIFIED','HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS','FOLLOWUP_CANARY_PASS','expected_adapter_sha256','Invoke-H3-Hermes-GatewayReload.ps1')){if(-not $h.Contains($m)){throw "helper marker missing: $m"}}
 
       - name: Bind follow-up repair into native Hermes carrier and validator
-        shell: python
+        shell: powershell
         run: |
-          from pathlib import Path
-
-          install=Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
-          validator=Path('.github/workflows/h3-hermes-agent-validate.yml')
-          it=install.read_text(encoding='utf-8')
-          vt=validator.read_text(encoding='utf-8')
-
-          insert='''
+          $ErrorActionPreference='Stop'
+          $installPath='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $validatorPath='.github/workflows/h3-hermes-agent-validate.yml'
+          $it=[IO.File]::ReadAllText($installPath)
+          if(-not $it.Contains('Invoke-H3-Hermes-TelegramFollowupRepair.ps1')){
+            $marker='function Save-Result($result){'
+            if(([regex]::Matches($it,[regex]::Escape($marker))).Count -ne 1){throw 'install marker mismatch'}
+            $insert=@'
           # Guarded Telegram document-followup repair preflight. It patches only the
           # Telegram adapter's attachment-only batching behavior, runs a local canary,
           # and then uses the existing guarded native gateway restart helper.
-          $followupRelay=Join-Path $InstallRoot 'afz-openai-agent\\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
-          $followupRequest=Join-Path $InstallRoot 'afz-openai-agent\\requests\\h3-hermes-telegram-followup-repair.json'
+          $followupRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+          $followupRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-followup-repair.json'
           try{
             if((Test-Path -LiteralPath $followupRelay -PathType Leaf) -and (Test-Path -LiteralPath $followupRequest -PathType Leaf)){
               $followupReq=Get-Content -LiteralPath $followupRequest -Raw -Encoding UTF8|ConvertFrom-Json
               $followupId=([string]$followupReq.id).Trim()
               $followupDone=$false
               if($followupId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
-                $followupStatePath=Join-Path 'C:\\ProgramData\\AFZ\\OpenAIAgent\\jobs\\h3-hermes-telegram-followup' ($followupId+'.json')
+                $followupStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-followup' ($followupId+'.json')
                 if(Test-Path -LiteralPath $followupStatePath -PathType Leaf){try{$followupState=Get-Content -LiteralPath $followupStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$followupDone=[bool]$followupState.ok}catch{}}
                 if(-not $followupDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $followupRelay -InstallRoot $InstallRoot -RequestPath $followupRequest *> $null}
               }
             }
           }catch{}
 
-          '''
-          marker='function Save-Result($result){'
-          if 'Invoke-H3-Hermes-TelegramFollowupRepair.ps1' not in it:
-              if it.count(marker)!=1: raise SystemExit('install marker mismatch')
-              it=it.replace(marker,insert+marker,1)
-          install.write_text(it,encoding='utf-8',newline='')
+          '@
+            $it=$it.Replace($marker,$insert+$marker)
+            [IO.File]::WriteAllText($installPath,$it,(New-Object Text.UTF8Encoding($false)))
+          }
 
-          path_old="""      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'\n"""
-          path_new=path_old+"      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'\n"
-          if 'Invoke-H3-Hermes-TelegramFollowupRepair.ps1' not in vt:
-              if vt.count(path_old)!=1: raise SystemExit('validator helper path marker mismatch')
-              vt=vt.replace(path_old,path_new,1)
-          req_old="""      - 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json'\n"""
-          req_new=req_old+"      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'\n"
-          if 'requests/h3-hermes-telegram-followup-repair.json' not in vt:
-              if vt.count(req_old)!=1: raise SystemExit('validator request path marker mismatch')
-              vt=vt.replace(req_old,req_new,1)
-
-          typed_marker="""          $d=Get-Content 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json' -Raw | ConvertFrom-Json\n"""
-          typed_block="""          $f=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json' -Raw | ConvertFrom-Json
+          $v=[IO.File]::ReadAllText($validatorPath)
+          function Replace-Once([string]$Text,[string]$Old,[string]$New,[string]$Name){
+            if(([regex]::Matches($Text,[regex]::Escape($Old))).Count -ne 1){throw "$Name marker mismatch"}
+            return $Text.Replace($Old,$New)
+          }
+          if(-not $v.Contains("      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'")){
+            $old="      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'`n"
+            $new=$old+"      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'`n"
+            $v=Replace-Once $v $old $new 'validator helper path'
+          }
+          if(-not $v.Contains("      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'")){
+            $old="      - 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json'`n"
+            $new=$old+"      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'`n"
+            $v=Replace-Once $v $old $new 'validator request path'
+          }
+          if(-not $v.Contains("throw 'followup schema/action/status'")){
+            $old="          `$d=Get-Content 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json' -Raw | ConvertFrom-Json`n"
+            $block=@'
+          $f=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json' -Raw | ConvertFrom-Json
           if($f.schema -ne 1 -or $f.action -ne 'repair-telegram-document-followup' -or $f.status -ne 'ACTIVE'){throw 'followup schema/action/status'}
           if($f.target -ne 'h3' -or $f.host -ne 'DESKTOP-H3R6CQN'){throw 'followup target'}
           if(([string]$f.expected_adapter_sha256) -notmatch '^[0-9a-f]{64}$'){throw 'followup adapter hash'}
           if([double]$f.followup_delay_seconds -lt 2 -or [double]$f.followup_delay_seconds -gt 15){throw 'followup delay'}
           if(-not $f.restart_gateway -or $f.change_config -or $f.change_provider -or $f.mutate_ollama -or $f.change_network -or $f.run_model_generation){throw 'followup safety'}
 
-"""
-          if "throw 'followup schema/action/status'" not in vt:
-              if vt.count(typed_marker)!=1: raise SystemExit('typed validator marker mismatch')
-              vt=vt.replace(typed_marker,typed_block+typed_marker,1)
-
-          script_old="""            'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',\n"""
-          script_new=script_old+"            'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',\n"
-          scripts_section=vt.split("$scripts=@(",1)[1].split(")",1)[0] if "$scripts=@(" in vt else ''
-          if 'Invoke-H3-Hermes-TelegramFollowupRepair.ps1' not in scripts_section:
-              if vt.count(script_old)!=1: raise SystemExit('parse list marker mismatch')
-              vt=vt.replace(script_old,script_new,1)
-
-          install_required="""'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json'"""
-          install_required_new="""'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json','Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json'"""
-          if install_required_new not in vt:
-              if vt.count(install_required)!=1: raise SystemExit('install required marker mismatch')
-              vt=vt.replace(install_required,install_required_new,1)
-
-          dispatch_marker="""          $dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw\n"""
-          followup_check="""          $followup=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1' -Raw
+          '@
+            $v=Replace-Once $v $old ($block+$old) 'typed validator'
+          }
+          $scriptsStart=$v.IndexOf('          $scripts=@(')
+          $scriptsEnd=$(if($scriptsStart -ge 0){$v.IndexOf('          )',$scriptsStart)}else{-1})
+          if($scriptsStart -lt 0 -or $scriptsEnd -lt 0){throw 'scripts section missing'}
+          $scripts=$v.Substring($scriptsStart,$scriptsEnd-$scriptsStart)
+          if(-not $scripts.Contains('Invoke-H3-Hermes-TelegramFollowupRepair.ps1')){
+            $old="            'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',`n"
+            $new=$old+"            'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',`n"
+            $v=Replace-Once $v $old $new 'parse list'
+          }
+          $oldRequired="'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json'"
+          $newRequired="'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json','Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json'"
+          if(-not $v.Contains($newRequired)){$v=Replace-Once $v $oldRequired $newRequired 'install required'}
+          if(-not $v.Contains('$followup=Get-Content')){
+            $old="          `$dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw`n"
+            $block=@'
+          $followup=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1' -Raw
           foreach($required in @('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_REPAIR_VERIFIED','HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS','FOLLOWUP_CANARY_PASS','expected_adapter_sha256','Invoke-H3-Hermes-GatewayReload.ps1')){
             if(-not $followup.Contains($required)){throw "Follow-up helper missing: $required"}
           }
           foreach($forbidden in @('/api/generate','ollama pull','docker.sock')){if($followup.Contains($forbidden)){throw "Forbidden follow-up helper content: $forbidden"}}
-"""
-          if '$followup=Get-Content' not in vt:
-              if vt.count(dispatch_marker)!=1: raise SystemExit('helper check marker mismatch')
-              vt=vt.replace(dispatch_marker,followup_check+dispatch_marker,1)
-          validator.write_text(vt,encoding='utf-8',newline='')
+          '@
+            $v=Replace-Once $v $old ($block+$old) 'helper validator'
+          }
+          [IO.File]::WriteAllText($validatorPath,$v,(New-Object Text.UTF8Encoding($false)))
 
       - name: Parse integrated PowerShell and assert binding
         shell: powershell
