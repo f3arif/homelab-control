@@ -1,0 +1,11 @@
+schema=1
+purpose=trigger-normal-afz-agent-fast-signal-for-existing-guarded-blog-comparison-recovery
+job_id=afz-blog-qwen35b-vs-ridge27b-20260902-r1
+source_authority=github-main
+requested_source_contains=70c2f41bfc471e05ab9573c9517a4f7eb3d49d11,5b732af7580b9f3a2575a025fceabf9932420588
+qwen35b_replay=false
+ridge_launch_only_if_authoritative_h3_state_unattempted=true
+ridge_saved_response_must_be_absent=true
+ollama_and_model_readiness_required=true
+duplicate_model_call=false
+action=source-sync-and-existing-guarded-post-sync-flow-only
