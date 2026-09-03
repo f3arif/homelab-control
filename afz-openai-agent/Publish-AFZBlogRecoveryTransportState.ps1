@@ -1,8 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param(
-  [string]$SyncedSha=''
-)
+param([string]$SyncedSha='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
@@ -56,10 +54,7 @@ $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $info=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
 $ollama=@(Get-Process -ErrorAction SilentlyContinue|Where-Object{$_.ProcessName -match '^ollama($|_)'}|ForEach-Object{[ordered]@{pid=[int]$_.Id;name=[string]$_.ProcessName}})
 $o=[ordered]@{
-  ok=$true
-  host=$env:COMPUTERNAME
-  readOnly=$true
-  mutation='NONE'
+  ok=$true;host=$env:COMPUTERNAME;readOnly=$true;mutation='NONE'
   stateExists=(Test-Path -LiteralPath $statePath -PathType Leaf)
   stateStatus=$(if($state -and $state.PSObject.Properties.Name -contains 'status'){[string]$state.status}else{$null})
   stateMessage=$(if($state -and $state.PSObject.Properties.Name -contains 'message'){[string]$state.message}else{$null})
@@ -80,17 +75,23 @@ $o=[ordered]@{
 }
 [Console]::Out.WriteLine(($o|ConvertTo-Json -Depth 12 -Compress))
 '@
-  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
+
+  # Keep the remote command tiny. The full read-only probe travels over stdin,
+  # avoiding Windows' command-line length limit while preserving zero mutation.
+  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 read-only probe stdin empty.''};Invoke-Expression $script'
+  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
 
   function Invoke-ProbeTarget([string]$Target,[string]$Transport,[string[]]$ExtraOptions){
     $tag=[guid]::NewGuid().ToString('N')
+    $inFile=Join-Path $env:TEMP ($tag+'.in.ps1')
     $outFile=Join-Path $env:TEMP ($tag+'.out')
     $errFile=Join-Path $env:TEMP ($tag+'.err')
     $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known))
     if($ExtraOptions){$sshArgs+=@($ExtraOptions)}
     $sshArgs+=@($Target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
     try{
-      $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+      [IO.File]::WriteAllText($inFile,$remote,$utf8)
+      $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
       if(-not $p.WaitForExit(25000)){
         try{$p.Kill()}catch{}
         return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_TIMEOUT';transport=$Transport;mutation='NONE'}
@@ -102,14 +103,12 @@ $o=[ordered]@{
       if($parsed){$parsed|Add-Member -NotePropertyName transport -NotePropertyValue $Transport -Force;return $parsed}
       return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_INVALID_RESULT';transport=$Transport;exit=[int]$p.ExitCode;error=$(if($stderr){$stderr}else{$stdout});mutation='NONE'}
     }finally{
-      Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
     }
   }
 
   $probe=Invoke-ProbeTarget 'Faiz@100.106.186.118' 'tailscale-system-ssh' @()
-  if(-not [bool]$probe.ok){
-    $probe=Invoke-ProbeTarget 'Faiz@192.168.50.185' 'lan-system-ssh' @('-o','HostKeyAlias=100.106.186.118')
-  }
+  if(-not [bool]$probe.ok){$probe=Invoke-ProbeTarget 'Faiz@192.168.50.185' 'lan-system-ssh' @('-o','HostKeyAlias=100.106.186.118')}
   return $probe
 }
 
@@ -121,35 +120,19 @@ $h3Probe=$null
 try{$h3Probe=Invoke-H3ReadOnlyProbe}catch{$h3Probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
 
 $out=[ordered]@{
-  schema=1
-  purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY'
-  readOnly=$true
-  source='windows-main'
-  controlPlane='github'
-  jobId=$jobId
+  schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';readOnly=$true;source='windows-main';controlPlane='github';jobId=$jobId
   syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
-  activationMarker='activation-v3'
-  activationMarkerExists=(Test-Path -LiteralPath $marker -PathType Leaf)
-  activation=$markerValue
-  carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf)
-  carrierResult=$carrierValue
-  transportTaskExists=($null -ne $task)
-  transportTaskState=$(if($task){[string]$task.State}else{'missing'})
+  activationMarker='activation-v3';activationMarkerExists=(Test-Path -LiteralPath $marker -PathType Leaf);activation=$markerValue
+  carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrierValue
+  transportTaskExists=($null -ne $task);transportTaskState=$(if($task){[string]$task.State}else{'missing'})
   transportTaskLastRunTime=$(if($taskInfo -and $taskInfo.LastRunTime -gt [datetime]'2000-01-01'){$taskInfo.LastRunTime.ToString('o')}else{$null})
   transportTaskLastTaskResult=$(if($taskInfo){[int]$taskInfo.LastTaskResult}else{$null})
   h3Probe=$h3Probe
-  modelReplay35B=$false
-  ridgeCallAuthorizedByMirror=$false
-  modelActionPerformedByMirror=$false
+  modelReplay35B=$false;ridgeCallAuthorizedByMirror=$false;modelActionPerformedByMirror=$false
   observedAt=(Get-Date -Format o)
 }
 $json=$out|ConvertTo-Json -Depth 30
-foreach($target in @(
-  [pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},
-  [pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath}
-)){
-  try{
-    if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}
-  }catch{}
+foreach($target in @([pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},[pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath})){
+  try{if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}}catch{}
 }
 Write-Output ($out|ConvertTo-Json -Depth 30 -Compress)
