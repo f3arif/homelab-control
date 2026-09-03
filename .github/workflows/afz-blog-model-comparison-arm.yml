@@ -1,0 +1,118 @@
+name: AFZ Blog Model Comparison Arm
+
+on:
+  push:
+    paths:
+      - '.github/workflows/afz-blog-model-comparison-arm.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  arm:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase onto current main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git fetch origin main
+          git checkout -B main origin/main
+
+      - name: Patch post-sync one-shot
+        shell: python
+        run: |
+          from pathlib import Path
+          sync = Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1')
+          text = sync.read_text(encoding='utf-8')
+          fn = r'''function Start-AFZBlogModelComparisonOneShot {
+            param([string]$SyncedSha)
+            $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
+            $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-afz-blog-model-comparison.json'
+            $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparison.ps1'
+            $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-request'
+            $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+            $utf8=New-Object Text.UTF8Encoding($false)
+            New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+            if(Test-Path -LiteralPath $marker -PathType Leaf){
+              try{return Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-activated';jobId=$jobId;marker=$marker;syncedSha=$SyncedSha}}
+            }
+            if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return [ordered]@{ok=$false;status='request-missing';jobId=$jobId;syncedSha=$SyncedSha}}
+            if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;syncedSha=$SyncedSha}}
+            try{
+              $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+              $models=@($r.models|ForEach-Object{[string]$_})
+              if([int]$r.schema -ne 1 -or [string]$r.project -ne 'afz-blog-local-model-comparison' -or [string]$r.job_id -ne $jobId -or [string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN' -or [int]$r.context -ne 16384 -or -not [bool]$r.no_think -or [int]$r.max_model_calls_per_model -ne 1 -or [bool]$r.publish_article -or [bool]$r.production_db_mutation -or $models.Count -ne 2 -or $models[0] -ne 'qwen3.6:35b-a3b' -or $models[1] -ne 'qwen3.8-ridge:27b-16k'){
+                return [ordered]@{ok=$false;status='request-contract-invalid';jobId=$jobId;syncedSha=$SyncedSha}
+              }
+              $o=[ordered]@{ok=$true;status='activation-starting';jobId=$jobId;syncedSha=$SyncedSha;marker=$marker;maxModelCallsPerModel=1;publishArticle=$false;productionDbMutation=$false;activatedAt=(Get-Date -Format o)}
+              [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+              $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
+              $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+              $o['status']='bootstrap-started';$o['bootstrapPid']=$p.Id
+              [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+              return $o
+            }catch{
+              return [ordered]@{ok=$false;status='activation-exception';jobId=$jobId;syncedSha=$SyncedSha;error=$_.Exception.Message;marker=$marker}
+            }
+          }'''
+          if 'function Start-AFZBlogModelComparisonOneShot' not in text:
+              needle = "if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){"
+              if needle not in text:
+                  raise SystemExit('function insertion anchor missing')
+              text = text.replace(needle, fn + '\n\n' + needle, 1)
+          call = '  $afzBlogComparisonActivation=Start-AFZBlogModelComparisonOneShot -SyncedSha $resolvedSha'
+          if call not in text:
+              needle = '  $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha'
+              if needle not in text:
+                  raise SystemExit('activation anchor missing')
+              text = text.replace(needle, needle + '\n\n  # Isolated AFZ blog article model comparison; one call max per model, no publish/DB mutation.\n' + call, 1)
+          out = "  $out['afzBlogModelComparisonActivation']=$afzBlogComparisonActivation"
+          if out not in text:
+              needle = "  $out['qwen35BA3BActivation']=$qwen35BActivation"
+              if needle not in text:
+                  raise SystemExit('output anchor missing')
+              text = text.replace(needle, needle + '\n' + out, 1)
+          sync.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Validate benchmark fabric
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1',
+            'afz-openai-agent/Bootstrap-H3-AFZBlog-ModelComparison.ps1',
+            'afz-openai-agent/tools/Run-WindowsMain-H3-AFZBlog-ModelComparison-Carrier.ps1',
+            'afz-openai-agent/tools/Launch-H3-AFZBlog-ModelComparison.ps1',
+            'afz-openai-agent/tools/Start-H3-AFZBlog-ModelComparison.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){throw "$file parse failure: $($errors.Message -join '; ')"}
+          }
+          $r=Get-Content 'afz-openai-agent/requests/h3-afz-blog-model-comparison.json' -Raw -Encoding UTF8|ConvertFrom-Json
+          if($r.job_id -ne 'afz-blog-qwen35b-vs-ridge27b-20260902-r1'){throw 'job mismatch'}
+          if($r.publish_article -or $r.production_db_mutation){throw 'production safety flags invalid'}
+          if($r.max_model_calls_per_model -ne 1){throw 'model call guard invalid'}
+          if(@($r.models).Count -ne 2){throw 'model count invalid'}
+          if($r.models[0] -ne 'qwen3.6:35b-a3b' -or $r.models[1] -ne 'qwen3.8-ridge:27b-16k'){throw 'models invalid'}
+          $runner=Get-Content 'afz-openai-agent/tools/Start-H3-AFZBlog-ModelComparison.ps1' -Raw -Encoding UTF8
+          if($runner -notmatch 'modelStates\[\$model\].*attempted=\$true' -and $runner -notmatch "attempted=\$true;status='running'"){throw 'runner missing pre-call attempted guard'}
+          if($runner -notmatch 'publish_article' -or $runner -notmatch 'production_db_mutation'){throw 'runner missing production safety checks'}
+
+      - name: Commit validated arm
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
+          if(git diff --cached --quiet){Write-Host 'No sync-arm changes needed.'; exit 0}
+          git commit -m 'Arm guarded H3 AFZ blog model comparison'
+          git pull --rebase origin main
+          git push origin HEAD:main
