@@ -21,10 +21,104 @@ function Read-SafeJson([string]$Path){
   try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return [pscustomobject]@{readError=$_.Exception.Message}}
 }
 
+function Invoke-H3ReadOnlyProbe {
+  $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
+  $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
+  $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+  foreach($required in @($key,$known,$ssh)){
+    if(-not(Test-Path -LiteralPath $required -PathType Leaf)){
+      return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_LOCAL_PREREQUISITE_MISSING';missing=$required;mutation='NONE'}
+    }
+  }
+
+  $remote=@'
+$ErrorActionPreference='SilentlyContinue'
+Set-StrictMode -Version 2.0
+$statePath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\state.json'
+$taskName='AFZ H3 AFZ Blog Comparison Recovery'
+$stdoutPath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\recovery.stdout.log'
+$stderrPath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\recovery.stderr.log'
+$projectRoot='C:\Projects\AFZ-Blog-Model-Comparison-20260902-r1'
+function ReadJson([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return $null}}
+function Tail([string]$Path,[int]$Max=3000){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{$t=[IO.File]::ReadAllText($Path);if($t.Length -gt $Max){return $t.Substring($t.Length-$Max)};return $t}catch{return $null}}
+function ModelState($State,[string]$Name){
+  $v=$null
+  if($State -and $State.PSObject.Properties.Name -contains 'models'){
+    foreach($p in $State.models.PSObject.Properties){if([string]$p.Name -eq $Name){$v=$p.Value;break}}
+  }
+  if(-not $v){return [ordered]@{present=$false;attempted=$false;status=$null}}
+  $o=[ordered]@{present=$true;attempted=$(if($v.PSObject.Properties.Name -contains 'attempted'){[bool]$v.attempted}else{$false});status=$(if($v.PSObject.Properties.Name -contains 'status'){[string]$v.status}else{$null})}
+  foreach($n in @('started_at','completed_at','finished_at','done_reason','output_tokens','output_tokens_per_second','wall_seconds','recovered_from_saved_response','recovery_kind')){if($v.PSObject.Properties.Name -contains $n){$o[$n]=$v.$n}}
+  return $o
+}
+$state=ReadJson $statePath
+$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$info=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
+$ollama=@(Get-Process -ErrorAction SilentlyContinue|Where-Object{$_.ProcessName -match '^ollama($|_)'}|ForEach-Object{[ordered]@{pid=[int]$_.Id;name=[string]$_.ProcessName}})
+$o=[ordered]@{
+  ok=$true
+  host=$env:COMPUTERNAME
+  readOnly=$true
+  mutation='NONE'
+  stateExists=(Test-Path -LiteralPath $statePath -PathType Leaf)
+  stateStatus=$(if($state -and $state.PSObject.Properties.Name -contains 'status'){[string]$state.status}else{$null})
+  stateMessage=$(if($state -and $state.PSObject.Properties.Name -contains 'message'){[string]$state.message}else{$null})
+  stateSourceSha=$(if($state -and $state.PSObject.Properties.Name -contains 'source_sha'){[string]$state.source_sha}else{$null})
+  stateUpdatedAt=$(if($state -and $state.PSObject.Properties.Name -contains 'updated_at'){[string]$state.updated_at}else{$null})
+  qwen35b=(ModelState $state 'qwen3.6:35b-a3b')
+  ridge27b=(ModelState $state 'qwen3.8-ridge:27b-16k')
+  ridgeSavedResponseExists=(Test-Path -LiteralPath (Join-Path $projectRoot 'ridge27b-16k-ollama-response.json') -PathType Leaf)
+  qwen35bSavedResponseExists=(Test-Path -LiteralPath (Join-Path $projectRoot 'qwen35b-a3b-ollama-response.json') -PathType Leaf)
+  recoveryTaskExists=($null -ne $task)
+  recoveryTaskState=$(if($task){[string]$task.State}else{'missing'})
+  recoveryTaskLastRun=$(if($info -and $info.LastRunTime -gt [datetime]'2000-01-01'){$info.LastRunTime.ToString('o')}else{$null})
+  recoveryTaskLastResult=$(if($info){[int]$info.LastTaskResult}else{$null})
+  ollamaProcesses=$ollama
+  stdoutTail=(Tail $stdoutPath)
+  stderrTail=(Tail $stderrPath)
+  observedAt=(Get-Date -Format o)
+}
+[Console]::Out.WriteLine(($o|ConvertTo-Json -Depth 12 -Compress))
+'@
+  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
+
+  function Invoke-ProbeTarget([string]$Target,[string]$Transport,[string[]]$ExtraOptions){
+    $tag=[guid]::NewGuid().ToString('N')
+    $outFile=Join-Path $env:TEMP ($tag+'.out')
+    $errFile=Join-Path $env:TEMP ($tag+'.err')
+    $sshArgs=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known))
+    if($ExtraOptions){$sshArgs+=@($ExtraOptions)}
+    $sshArgs+=@($Target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
+    try{
+      $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+      if(-not $p.WaitForExit(25000)){
+        try{$p.Kill()}catch{}
+        return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_TIMEOUT';transport=$Transport;mutation='NONE'}
+      }
+      $stdout=$(if(Test-Path -LiteralPath $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
+      $stderr=$(if(Test-Path -LiteralPath $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
+      $parsed=$null
+      foreach($line in @($stdout -split "`r?`n"|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})){try{$parsed=$line|ConvertFrom-Json}catch{}}
+      if($parsed){$parsed|Add-Member -NotePropertyName transport -NotePropertyValue $Transport -Force;return $parsed}
+      return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_INVALID_RESULT';transport=$Transport;exit=[int]$p.ExitCode;error=$(if($stderr){$stderr}else{$stdout});mutation='NONE'}
+    }finally{
+      Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  $probe=Invoke-ProbeTarget 'Faiz@100.106.186.118' 'tailscale-system-ssh' @()
+  if(-not [bool]$probe.ok){
+    $probe=Invoke-ProbeTarget 'Faiz@192.168.50.185' 'lan-system-ssh' @('-o','HostKeyAlias=100.106.186.118')
+  }
+  return $probe
+}
+
 $markerValue=Read-SafeJson $marker
 $carrierValue=Read-SafeJson $carrierResult
 $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $taskInfo=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
+$h3Probe=$null
+try{$h3Probe=Invoke-H3ReadOnlyProbe}catch{$h3Probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
 
 $out=[ordered]@{
   schema=1
@@ -43,12 +137,13 @@ $out=[ordered]@{
   transportTaskState=$(if($task){[string]$task.State}else{'missing'})
   transportTaskLastRunTime=$(if($taskInfo -and $taskInfo.LastRunTime -gt [datetime]'2000-01-01'){$taskInfo.LastRunTime.ToString('o')}else{$null})
   transportTaskLastTaskResult=$(if($taskInfo){[int]$taskInfo.LastTaskResult}else{$null})
+  h3Probe=$h3Probe
   modelReplay35B=$false
   ridgeCallAuthorizedByMirror=$false
   modelActionPerformedByMirror=$false
   observedAt=(Get-Date -Format o)
 }
-$json=$out|ConvertTo-Json -Depth 20
+$json=$out|ConvertTo-Json -Depth 30
 foreach($target in @(
   [pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},
   [pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath}
@@ -57,4 +152,4 @@ foreach($target in @(
     if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}
   }catch{}
 }
-Write-Output ($out|ConvertTo-Json -Depth 20 -Compress)
+Write-Output ($out|ConvertTo-Json -Depth 30 -Compress)
