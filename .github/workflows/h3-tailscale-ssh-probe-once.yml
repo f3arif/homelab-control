@@ -1,0 +1,35 @@
+name: H3 Tailscale SSH Probe Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-tailscale-ssh-probe-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 with Tailscale SSH read only
+        shell: bash
+        run: |
+          set +e
+          echo 'H3_TS_SSH_PROBE_BEGIN'
+          output=$(timeout 25 tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "$o=[ordered]@{computer=$env:COMPUTERNAME;user=$env:USERNAME;time=(Get-Date -Format o)};$o|ConvertTo-Json -Compress"' 2>&1)
+          rc=$?
+          printf '%s\n' "$output"
+          echo "H3_TS_SSH_EXIT=$rc"
+          echo 'H3_TS_SSH_PROBE_END'
+          exit "$rc"
