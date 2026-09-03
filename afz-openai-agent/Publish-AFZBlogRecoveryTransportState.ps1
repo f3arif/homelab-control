@@ -5,7 +5,9 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
 $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
-$marker='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request\'+$jobId+'-activation-v3.json'
+$markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
+$marker=Join-Path $markerRoot ($jobId+'-activation-v3.json')
+$v4Marker=Join-Path $markerRoot ($jobId+'-activation-v4.json')
 $carrierResult='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery\'+$jobId+'.json'
 $taskName='AFZ H3 AFZ Blog Recovery Transport'
 $sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
@@ -17,6 +19,12 @@ $utf8=New-Object Text.UTF8Encoding($false)
 function Read-SafeJson([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
   try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return [pscustomobject]@{readError=$_.Exception.Message}}
+}
+
+function Write-SafeJson([string]$Path,$Value){
+  $parent=Split-Path $Path -Parent
+  if($parent -and -not(Test-Path -LiteralPath $parent -PathType Container)){New-Item -ItemType Directory -Force -Path $parent|Out-Null}
+  [IO.File]::WriteAllText($Path,($Value|ConvertTo-Json -Depth 20 -Compress),$utf8)
 }
 
 function Invoke-H3ReadOnlyProbe {
@@ -112,23 +120,87 @@ $o=[ordered]@{
   return $probe
 }
 
+function Invoke-GuardedRecoveryV4($Probe){
+  if(Test-Path -LiteralPath $v4Marker -PathType Leaf){
+    $prior=Read-SafeJson $v4Marker
+    if($prior){return $prior}
+    return [ordered]@{ok=$true;status='already-armed';jobId=$jobId;marker=$v4Marker;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
+  }
+
+  $eligible=(
+    $Probe -and [bool]$Probe.ok -and
+    $Probe.qwen35b -and [bool]$Probe.qwen35b.attempted -and
+    [bool]$Probe.qwen35bSavedResponseExists -and
+    $Probe.ridge27b -and -not [bool]$Probe.ridge27b.attempted -and
+    -not [bool]$Probe.ridgeSavedResponseExists -and
+    @($Probe.ollamaProcesses).Count -eq 0 -and
+    [bool]$Probe.recoveryTaskExists -and
+    [string]$Probe.recoveryTaskState -eq 'Ready' -and
+    [int]$Probe.recoveryTaskLastResult -ne 0
+  )
+  if(-not $eligible){return [ordered]@{ok=$true;status='not-eligible';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
+  if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){return [ordered]@{ok=$false;status='invalid-synced-sha';jobId=$jobId;mutation='NONE'}}
+
+  $bootstrap=Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
+  if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;mutation='NONE'}}
+
+  $armed=[ordered]@{
+    ok=$true;status='armed';jobId=$jobId;marker=$v4Marker;syncedSha=$SyncedSha
+    modelReplay35B=$false;ridgeOnlyIfUnattempted=$true
+    authoritativeProof=[ordered]@{
+      qwen35bAttempted=[bool]$Probe.qwen35b.attempted
+      qwen35bSavedResponseExists=[bool]$Probe.qwen35bSavedResponseExists
+      ridge27bAttempted=[bool]$Probe.ridge27b.attempted
+      ridgeSavedResponseExists=[bool]$Probe.ridgeSavedResponseExists
+      ollamaProcessCount=@($Probe.ollamaProcesses).Count
+      recoveryTaskState=[string]$Probe.recoveryTaskState
+      recoveryTaskLastResult=[int]$Probe.recoveryTaskLastResult
+      observedAt=[string]$Probe.observedAt
+    }
+    armedAt=(Get-Date -Format o)
+  }
+  Write-SafeJson $v4Marker $armed
+
+  try{
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
+    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+    $armed.status='recovery-bootstrap-started'
+    $armed.bootstrapPid=[int]$p.Id
+    $armed.startedAt=(Get-Date -Format o)
+    Write-SafeJson $v4Marker $armed
+    return $armed
+  }catch{
+    $armed.ok=$false
+    $armed.status='bootstrap-start-failed'
+    $armed.error=$_.Exception.Message
+    $armed.failedAt=(Get-Date -Format o)
+    Write-SafeJson $v4Marker $armed
+    return $armed
+  }
+}
+
 $markerValue=Read-SafeJson $marker
 $carrierValue=Read-SafeJson $carrierResult
 $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $taskInfo=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
 $h3Probe=$null
 try{$h3Probe=Invoke-H3ReadOnlyProbe}catch{$h3Probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
+$v4Action=$null
+try{$v4Action=Invoke-GuardedRecoveryV4 $h3Probe}catch{$v4Action=[pscustomobject]@{ok=$false;status='v4-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
 
 $out=[ordered]@{
-  schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';readOnly=$true;source='windows-main';controlPlane='github';jobId=$jobId
+  schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true;source='windows-main';controlPlane='github';jobId=$jobId
   syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
   activationMarker='activation-v3';activationMarkerExists=(Test-Path -LiteralPath $marker -PathType Leaf);activation=$markerValue
+  recoveryV4MarkerExists=(Test-Path -LiteralPath $v4Marker -PathType Leaf);recoveryV4=$v4Action
   carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrierValue
   transportTaskExists=($null -ne $task);transportTaskState=$(if($task){[string]$task.State}else{'missing'})
   transportTaskLastRunTime=$(if($taskInfo -and $taskInfo.LastRunTime -gt [datetime]'2000-01-01'){$taskInfo.LastRunTime.ToString('o')}else{$null})
   transportTaskLastTaskResult=$(if($taskInfo){[int]$taskInfo.LastTaskResult}else{$null})
   h3Probe=$h3Probe
-  modelReplay35B=$false;ridgeCallAuthorizedByMirror=$false;modelActionPerformedByMirror=$false
+  modelReplay35B=$false
+  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if($v4Action -and [string]$v4Action.status -eq 'recovery-bootstrap-started'){$true}else{$false})
+  modelActionPerformedByDiagnosticProbe=$false
   observedAt=(Get-Date -Format o)
 }
 $json=$out|ConvertTo-Json -Depth 30
