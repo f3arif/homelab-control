@@ -1,0 +1,104 @@
+name: AFZ Stale Exact SHA Monotonic Unpin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-stale-exact-sha-monotonic-unpin.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Patch monotonic stale exact-SHA resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1')
+          s=p.read_text(encoding='utf-8')
+          old="""if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
+            $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
+            if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
+          }else{
+            $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $ref=Invoke-RestMethod -Uri ('https://api.github.com/repos/f3arif/homelab-control/git/ref/heads/main?nocache='+$nonce) -Headers $headers -TimeoutSec 30
+            $resolvedSha=([string]$ref.object.sha).Trim().ToLowerInvariant()
+            if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'Unable to resolve current main SHA'}
+          }
+""".replace('          ','')
+          new="""if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
+            $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
+            if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
+
+            # MONOTONIC_STALE_EXACT_SHA_UNPIN_V1
+            # A long-lived watcher may still be executing an older exact-SHA signal after
+            # a newer deploy signal has superseded it. Because this wrapper is downloaded
+            # fresh from main on every updater pass, it can safely break that stale pin.
+            # Advance only when GitHub proves the current deploy signal is a descendant of
+            # the requested SHA; never move sideways, backwards, or to an unproven ref.
+            try{
+              $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+              $signalRaw=(Invoke-WebRequest -Uri ('https://raw.githubusercontent.com/f3arif/homelab-control/main/.github/afz-agent-deploy-signal.txt?nocache='+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 20).Content
+              $signalSha=([string]$signalRaw).Trim().ToLowerInvariant()
+              if($signalSha -match '^[0-9a-f]{40}$' -and $signalSha -ne $resolvedSha){
+                $pair=($resolvedSha+'...'+$signalSha)
+                $cmp=Invoke-RestMethod -Uri ('https://api.github.com/repos/f3arif/homelab-control/compare/'+$pair+'?nocache='+$nonce) -Headers $headers -TimeoutSec 30
+                if(([string]$cmp.status).ToLowerInvariant() -eq 'ahead'){
+                  $resolvedSha=$signalSha
+                }
+              }
+            }catch{}
+          }else{
+            $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $ref=Invoke-RestMethod -Uri ('https://api.github.com/repos/f3arif/homelab-control/git/ref/heads/main?nocache='+$nonce) -Headers $headers -TimeoutSec 30
+            $resolvedSha=([string]$ref.object.sha).Trim().ToLowerInvariant()
+            if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'Unable to resolve current main SHA'}
+          }
+""".replace('          ','')
+          if s.count(old)!=1:
+              raise SystemExit(f'expected one resolver block, got {s.count(old)}')
+          p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+          PY
+
+      - name: Validate sync wrapper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Sync wrapper parse failed'}
+          $t=Get-Content $p -Raw
+          if($t -notmatch 'MONOTONIC_STALE_EXACT_SHA_UNPIN_V1'){throw 'Unpin marker missing'}
+          if($t -notmatch 'compare/'){throw 'Ancestry compare missing'}
+          'AFZ_STALE_EXACT_SHA_MONOTONIC_UNPIN_VALIDATE=PASS'
+
+      - name: Commit bootstrap patch without changing deploy signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          before_signal=$(cat .github/afz-agent-deploy-signal.txt)
+          test "$before_signal" = '4edf15e2948fcdd4fc6733ab9ae961adc8f4307b'
+          git add afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
+          git commit -m 'Unpin superseded exact-SHA updater monotonically'
+          after_signal=$(cat .github/afz-agent-deploy-signal.txt)
+          test "$after_signal" = "$before_signal"
+          git push origin HEAD:main
