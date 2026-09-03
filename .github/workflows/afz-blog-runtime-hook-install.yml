@@ -1,0 +1,76 @@
+name: AFZ Blog Runtime Hook Install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-blog-runtime-hook-install.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: afz-blog-runtime-hook-install
+  cancel-in-progress: false
+
+jobs:
+  install-hook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install narrow SYSTEM post-sync hook
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1')
+          text = p.read_text(encoding='utf-8-sig')
+          sentinel = "Ensure-AFZ-BlogManager-Runtime.ps1"
+          if sentinel in text:
+              print('Blog runtime ensure hook already present; no patch needed.')
+              raise SystemExit(0)
+          marker = "  $changed=[bool]$syncResult.changed\n"
+          if text.count(marker) != 1:
+              raise SystemExit(f'Expected one updater insertion marker, found {text.count(marker)}')
+          block = r'''
+
+          # Narrow Blog runtime persistence hook. The helper is SYSTEM-only and
+          # fail-closed: it requires a clean canonical Blog checkout and existing
+          # successful .next build before it may recreate the exact Blog Manager task.
+          # Failure is isolated from source sync and is mirrored by the helper itself.
+          $blogRuntimeEnsure=Join-Path $InstallRoot 'afz-openai-agent\Ensure-AFZ-BlogManager-Runtime.ps1'
+          if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
+            try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
+          }
+          '''
+          # Dedent only the Python source indentation, preserving PowerShell indentation.
+          import textwrap
+          block = textwrap.dedent(block)
+          text = text.replace(marker, marker + block, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "Ensure-AFZ-BlogManager-Runtime.ps1" afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1
+          git diff --check
+
+      - name: Commit patch if changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1; then
+            echo 'No change required.'
+            exit 0
+          fi
+          git config user.name 'AFZ Automation'
+          git config user.email '77086535+f3arif@users.noreply.github.com'
+          git add afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1
+          git commit -m 'Wire guarded AFZ Blog runtime recovery into updater'
+          git pull --rebase origin main
+          git push origin HEAD:main
