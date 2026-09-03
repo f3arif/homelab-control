@@ -1,0 +1,116 @@
+name: H3 Hermes R32 Chat Gateway Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-r32-chat-gateway-repair.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: h3-hermes-r32-chat-gateway-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch r32 bounded chat canary and post-canary gateway refresh
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          p = Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
+          text = p.read_text(encoding='utf-8')
+
+          guard = "if(-not [bool]$req.publish_result -or -not [bool]$req.emergency_diagnostic_ack){throw 'H3 Hermes provider repair publish policy mismatch.'}\n"
+          guard_add = guard + "$runChatCanary=($req.PSObject.Properties.Name -contains 'run_chat_canary' -and [bool]$req.run_chat_canary)\n$refreshGatewayAfterCanary=($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary' -and [bool]$req.refresh_gateway_after_canary)\nif(-not $runChatCanary -or -not $refreshGatewayAfterCanary){throw 'H3 Hermes r32 chat/gateway recovery guards mismatch.'}\n"
+          if text.count(guard) != 1:
+              raise SystemExit(f'Expected one publish guard, got {text.count(guard)}')
+          text = text.replace(guard, guard_add, 1)
+
+          marker = "$o=[ordered]@{\n  schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;\n"
+          if text.count(marker) != 1:
+              raise SystemExit(f'Expected one final result marker, got {text.count(marker)}')
+
+          recovery = r'''# R32: prove the exact OpenAI-compatible chat path Hermes uses, then refresh the
+# Telegram gateway only after that path has answered. This is a bounded two-token
+# canary; it does not pull a model, expose an API, or change provider/network settings.
+if([bool]$result.ok){
+  $recoveryPath=Join-Path $InstallRoot 'afz-openai-agent\H3-Hermes-Ollama-LivenessRecovery.ps1'
+  if(-not(Test-Path -LiteralPath $recoveryPath -PathType Leaf)){
+    $fail=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification='HERMES_R32_CHAT_RECOVERY_SCRIPT_MISSING';retryable=$true;deployment='native';transport=[string]$chosen.transport;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
+    Save-Result $fail;exit 1
+  }
+  $recoveryScript=Get-Content -LiteralPath $recoveryPath -Raw -Encoding UTF8
+  $recoveryRun=Invoke-RemoteScript $chosen.target $chosen.extra $recoveryScript 360000
+  $recoveryParsed=Parse-JsonResult $recoveryRun
+  if($null -eq $recoveryParsed){
+    $fail=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification='HERMES_R32_CHAT_RECOVERY_INVALID_RESULT';retryable=$true;deployment='native';transport=[string]$chosen.transport;recoveryTimedOut=[bool]$recoveryRun.timedOut;recoveryExit=$recoveryRun.exit;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
+    Save-Result $fail;exit 1
+  }
+  if(-not [bool]$recoveryParsed.ok){
+    $fail=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification=[string]$recoveryParsed.classification;retryable=$true;deployment='native';transport=[string]$chosen.transport;chatCanaryIssued=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanaryIssued'){[bool]$recoveryParsed.chatCanaryIssued}else{$false});chatCanaryPassed=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanaryPassed'){[bool]$recoveryParsed.chatCanaryPassed}else{$false});gatewayLifecycle=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycle'){[string]$recoveryParsed.gatewayLifecycle}else{$null});routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
+    Save-Result $fail;exit 1
+  }
+  $ready=[ordered]@{
+    schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id
+    ok=$true;classification=[string]$recoveryParsed.classification;retryable=$false;deployment='native';transport=[string]$chosen.transport
+    freshProbe=$true;providerName='ollama';providerIdentity='custom:ollama';providerConfigured=$true;providerApi='http://127.0.0.1:11434/v1';providerTransport='openai_chat'
+    runtimeResolved=$true;runtimeProvider='custom';runtimeBaseUrl='http://127.0.0.1:11434/v1';runtimeApiMode='chat_completions'
+    ollamaReachable=$true;selectedModel='qwen3.6:35b-a3b';contextLength=65536;modelListed=$true
+    endpointReachableBefore=$(if($recoveryParsed.PSObject.Properties.Name -contains 'endpointReachableBefore'){[bool]$recoveryParsed.endpointReachableBefore}else{$null})
+    ollamaServerStarted=$(if($recoveryParsed.PSObject.Properties.Name -contains 'ollamaServerStarted'){[bool]$recoveryParsed.ollamaServerStarted}else{$false})
+    chatCanaryIssued=$true;chatCanaryPassed=$true;chatCanarySeconds=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanarySeconds'){$recoveryParsed.chatCanarySeconds}else{$null})
+    messagingGatewayTouched=$true;gatewayLifecycle=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycle'){[string]$recoveryParsed.gatewayLifecycle}else{$null});gatewayLifecycleExit=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycleExit'){$recoveryParsed.gatewayLifecycleExit}else{$null})
+    beforeGatewayPids=$(if($recoveryParsed.PSObject.Properties.Name -contains 'beforeGatewayPids'){@($recoveryParsed.beforeGatewayPids)}else{@()});afterGatewayPids=$(if($recoveryParsed.PSObject.Properties.Name -contains 'afterGatewayPids'){@($recoveryParsed.afterGatewayPids)}else{@()})
+    generationTestStarted=$true;generationTestPurpose='bounded-chat-canary';generationMaxTokens=2;modelPullStarted=$false;ollamaMutationStarted=$false;networkChanged=$false;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)
+  }
+  Save-Result $ready;exit 0
+}
+'''
+          text = text.replace(marker, recovery + marker, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+          reqp = Path('afz-openai-agent/requests/h3-hermes-agent-install.json')
+          req = json.loads(reqp.read_text(encoding='utf-8'))
+          req['id'] = 'h3-hermes-chat-gateway-recovery-20260903-r32'
+          req['run_chat_canary'] = True
+          req['refresh_gateway_after_canary'] = True
+          # Existing broad mutation flags stay false; r32 uses its two explicit bounded guards.
+          reqp.write_text(json.dumps(req, indent=2) + '\n', encoding='utf-8', newline='\n')
+
+      - name: Parse PowerShell and enforce r32 invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r32 parse failed'}
+          $c=Get-Content $path -Raw
+          foreach($required in @('H3-Hermes-Ollama-LivenessRecovery.ps1','run_chat_canary','refresh_gateway_after_canary','bounded-chat-canary','HERMES_R32_CHAT_RECOVERY_INVALID_RESULT')){if(-not $c.Contains($required)){throw "Missing r32 invariant: $required"}}
+          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
+          if($r.id -ne 'h3-hermes-chat-gateway-recovery-20260903-r32' -or -not $r.run_chat_canary -or -not $r.refresh_gateway_after_canary){throw 'r32 request mismatch'}
+          if($r.change_provider -or $r.mutate_ollama -or $r.change_network -or $r.expose_api){throw 'r32 forbidden mutation'}
+          'H3_HERMES_R32_PATCH=PASS'
+
+      - name: Commit r32 repair on current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1 afz-openai-agent/requests/h3-hermes-agent-install.json
+          git commit -m 'Run Hermes chat canary before Telegram gateway refresh'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
