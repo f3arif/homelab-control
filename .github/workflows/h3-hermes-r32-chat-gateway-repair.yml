@@ -1,4 +1,4 @@
-name: H3 Hermes R32 Chat Gateway Repair
+name: H3 Hermes R33 Priority Chat Recovery
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: h3-hermes-r32-chat-gateway-repair
+  group: h3-hermes-r33-priority-chat-recovery
   cancel-in-progress: false
 
 jobs:
@@ -22,58 +22,75 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch r32 bounded chat canary and post-canary gateway refresh
+      - name: Make chat recovery priority and completion-aware
         shell: python
         run: |
           from pathlib import Path
           import json
 
-          p = Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
-          text = p.read_text(encoding='utf-8')
+          install = Path('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1')
+          text = install.read_text(encoding='utf-8')
+          anchor = "$refreshGatewayAfterCanary=($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary' -and [bool]$req.refresh_gateway_after_canary)\n"
+          addition = anchor + "$priorityChatRecovery=($runChatCanary -and $refreshGatewayAfterCanary)\n"
+          if '$priorityChatRecovery=' not in text:
+              if text.count(anchor) != 1:
+                  raise SystemExit(f'Expected one r32 guard anchor, got {text.count(anchor)}')
+              text = text.replace(anchor, addition, 1)
 
-          guard = "if(-not [bool]$req.publish_result -or -not [bool]$req.emergency_diagnostic_ack){throw 'H3 Hermes provider repair publish policy mismatch.'}\n"
-          guard_add = guard + "$runChatCanary=($req.PSObject.Properties.Name -contains 'run_chat_canary' -and [bool]$req.run_chat_canary)\n$refreshGatewayAfterCanary=($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary' -and [bool]$req.refresh_gateway_after_canary)\nif(-not $runChatCanary -or -not $refreshGatewayAfterCanary){throw 'H3 Hermes r32 chat/gateway recovery guards mismatch.'}\n"
-          if text.count(guard) != 1:
-              raise SystemExit(f'Expected one publish guard, got {text.count(guard)}')
-          text = text.replace(guard, guard_add, 1)
+          hook_start = "foreach($hook in @(\n  [ordered]@{script='Invoke-H3-Hermes-PdfRuntimeAudit.ps1';request='h3-hermes-pdf-runtime-audit.json'},"
+          if 'if(-not $priorityChatRecovery){\nforeach($hook in @(' not in text:
+              if text.count(hook_start) != 1:
+                  raise SystemExit(f'Expected one auxiliary hook block, got {text.count(hook_start)}')
+              text = text.replace(hook_start, "if(-not $priorityChatRecovery){\n" + hook_start, 1)
+              hook_end = "}\n\nfunction Save-Result($result){"
+              if text.count(hook_end) != 1:
+                  raise SystemExit(f'Expected one hook end marker, got {text.count(hook_end)}')
+              text = text.replace(hook_end, "}\n}\n\nfunction Save-Result($result){", 1)
+          install.write_text(text, encoding='utf-8', newline='\n')
 
-          marker = "$o=[ordered]@{\n  schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;\n"
-          if text.count(marker) != 1:
-              raise SystemExit(f'Expected one final result marker, got {text.count(marker)}')
-          recovery = Path('.github/h3-hermes-r32-recovery.fragment.ps1').read_text(encoding='utf-8')
-          text = text.replace(marker, recovery + marker, 1)
-          p.write_text(text, encoding='utf-8', newline='\n')
+          watcher = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          w = watcher.read_text(encoding='utf-8')
+          old = "if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K' -and -not $pdfAuxPending){return}"
+          new = "if([bool]$existing.ok -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY') -and -not $pdfAuxPending){return}"
+          if new not in w:
+              if w.count(old) != 1:
+                  raise SystemExit(f'Expected one Hermes completion guard, got {w.count(old)}')
+              w = w.replace(old, new, 1)
+          watcher.write_text(w, encoding='utf-8', newline='\n')
 
           reqp = Path('afz-openai-agent/requests/h3-hermes-agent-install.json')
           req = json.loads(reqp.read_text(encoding='utf-8'))
-          req['id'] = 'h3-hermes-chat-gateway-recovery-20260903-r32'
+          req['id'] = 'h3-hermes-chat-gateway-recovery-20260903-r33'
           req['run_chat_canary'] = True
           req['refresh_gateway_after_canary'] = True
           reqp.write_text(json.dumps(req, indent=2) + '\n', encoding='utf-8', newline='\n')
 
-      - name: Parse PowerShell and enforce r32 invariants
+      - name: Parse and validate r33
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $path='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
-          $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r32 parse failed'}
-          $c=Get-Content $path -Raw
-          foreach($required in @('H3-Hermes-Ollama-LivenessRecovery.ps1','run_chat_canary','refresh_gateway_after_canary','bounded-chat-canary','HERMES_R32_CHAT_RECOVERY_INVALID_RESULT')){if(-not $c.Contains($required)){throw "Missing r32 invariant: $required"}}
+          foreach($path in @('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1','afz-openai-agent/Push-Deploy-Watcher.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("${path}: "+$_.Message)};throw 'r33 parse failed'}
+          }
+          $i=Get-Content 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' -Raw
+          foreach($required in @('$priorityChatRecovery','if(-not $priorityChatRecovery)','H3-Hermes-Ollama-LivenessRecovery.ps1','bounded-chat-canary')){if(-not $i.Contains($required)){throw "Missing installer invariant: $required"}}
+          $w=Get-Content 'afz-openai-agent/Push-Deploy-Watcher.ps1' -Raw
+          foreach($required in @('HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){if(-not $w.Contains($required)){throw "Missing completion classification: $required"}}
           $r=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
-          if($r.id -ne 'h3-hermes-chat-gateway-recovery-20260903-r32' -or -not $r.run_chat_canary -or -not $r.refresh_gateway_after_canary){throw 'r32 request mismatch'}
-          if($r.mutate_ollama -or $r.expose_api){throw 'r32 forbidden mutation'}
-          'H3_HERMES_R32_PATCH=PASS'
+          if($r.id -ne 'h3-hermes-chat-gateway-recovery-20260903-r33' -or -not $r.run_chat_canary -or -not $r.refresh_gateway_after_canary){throw 'r33 request mismatch'}
+          if($r.mutate_ollama -or $r.expose_api){throw 'r33 forbidden mutation'}
+          'H3_HERMES_R33_PATCH=PASS'
 
-      - name: Commit r32 repair on current main
+      - name: Commit r33 on current main
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1 afz-openai-agent/requests/h3-hermes-agent-install.json
-          git commit -m 'Run Hermes chat canary before Telegram gateway refresh'
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1 afz-openai-agent/Push-Deploy-Watcher.ps1 afz-openai-agent/requests/h3-hermes-agent-install.json
+          git commit -m 'Prioritize Hermes chat recovery and stop completed reruns'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
