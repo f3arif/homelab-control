@@ -29,14 +29,14 @@ if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){
 if([string]$req.provider -ne 'custom' -or [string]$req.model -ne 'qwen3.6:35b-a3b'){
   throw 'H3 Hermes tool-dispatch provider/model mismatch.'
 }
-if([bool]$req.tool_use_enforcement -or [bool]$req.task_completion_guidance -or [bool]$req.parallel_tool_call_guidance){
-  throw 'H3 Hermes tool-dispatch desired guidance values must all be false.'
+if(-not [bool]$req.tool_use_enforcement -or -not [bool]$req.task_completion_guidance -or [bool]$req.parallel_tool_call_guidance){
+  throw 'H3 Hermes execute/verify guidance values must be true/true/false.'
 }
-if(-not [bool]$req.require_telegram_toolset_not_explicitly_empty -or -not [bool]$req.restart_gateway){
-  throw 'H3 Hermes tool-dispatch guard mismatch.'
+if(-not [bool]$req.require_telegram_toolset_not_explicitly_empty -or [bool]$req.restart_gateway){
+  throw 'H3 Hermes execute/verify safety guard mismatch.'
 }
 if([bool]$req.change_provider -or [bool]$req.mutate_ollama -or [bool]$req.change_network -or [bool]$req.run_model_generation){
-  throw 'H3 Hermes tool-dispatch forbidden mutation requested.'
+  throw 'H3 Hermes execute/verify forbidden mutation requested.'
 }
 
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
@@ -105,11 +105,11 @@ function Read-JsonConfig([string]$Hermes,[string]$Key){
   if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)){return $null}
   try{return $raw | ConvertFrom-Json}catch{return $null}
 }
-function Bool-State($Object,[string]$Name,[bool]$DefaultValue){
+function Value-State($Object,[string]$Name){
   if($null -ne $Object -and $Object.PSObject.Properties.Name -contains $Name){
-    return [ordered]@{present=$true;value=[bool]$Object.$Name}
+    return [ordered]@{present=$true;value=$Object.$Name}
   }
-  return [ordered]@{present=$false;value=$DefaultValue}
+  return [ordered]@{present=$false;value=$null}
 }
 if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){
   Emit ([ordered]@{ok=$false;classification='HERMES_TOOL_DISPATCH_WRONG_HOST';host=$env:COMPUTERNAME;mutation='NONE'}) 30
@@ -129,71 +129,75 @@ try{
   $agentBefore=Read-JsonConfig $hermes 'agent'
   $platformToolsets=Read-JsonConfig $hermes 'platform_toolsets'
   $telegramExplicit=$false
-  $telegramCount=$null
+  $telegramToolsets=@()
   if($null -ne $platformToolsets -and $platformToolsets.PSObject.Properties.Name -contains 'telegram'){
     $telegramExplicit=$true
-    $telegramCount=@($platformToolsets.telegram).Count
+    $telegramToolsets=@($platformToolsets.telegram | ForEach-Object{[string]$_})
   }
-  if($telegramExplicit -and [int]$telegramCount -eq 0){
+  if($telegramExplicit -and $telegramToolsets.Count -eq 0){
     Emit ([ordered]@{
       ok=$false;classification='HERMES_TELEGRAM_TOOLSET_EXPLICITLY_EMPTY';mutation='NONE';
-      telegramToolsetExplicit=$true;telegramToolsetCount=0;
-      before=[ordered]@{
-        tool_use_enforcement=(Bool-State $agentBefore 'tool_use_enforcement' $true)
-        task_completion_guidance=(Bool-State $agentBefore 'task_completion_guidance' $true)
-        parallel_tool_call_guidance=(Bool-State $agentBefore 'parallel_tool_call_guidance' $true)
-      }
+      telegramToolsetExplicit=$true;telegramToolsets=@();before=$agentBefore
     }) 43
+  }
+  if($telegramExplicit -and -not (($telegramToolsets -contains 'hermes-telegram') -or ($telegramToolsets -contains 'terminal'))){
+    Emit ([ordered]@{
+      ok=$false;classification='HERMES_TELEGRAM_TERMINAL_TOOLSET_NOT_CONFIRMED';mutation='NONE';
+      telegramToolsetExplicit=$true;telegramToolsets=$telegramToolsets;before=$agentBefore
+    }) 44
   }
 
   $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
-  $backup="$config.afz-pre-tool-dispatch-$stamp.bak"
+  $backup="$config.afz-pre-execute-verify-$stamp.bak"
   Copy-Item -LiteralPath $config -Destination $backup -Force
   try{
-    & $hermes config set agent.tool_use_enforcement 'false' | Out-Null
-    if($LASTEXITCODE -ne 0){throw 'Failed to set agent.tool_use_enforcement=false'}
-    & $hermes config set agent.task_completion_guidance 'false' | Out-Null
-    if($LASTEXITCODE -ne 0){throw 'Failed to set agent.task_completion_guidance=false'}
+    & $hermes config set agent.tool_use_enforcement 'true' | Out-Null
+    if($LASTEXITCODE -ne 0){throw 'Failed to set agent.tool_use_enforcement=true'}
+    & $hermes config set agent.task_completion_guidance 'true' | Out-Null
+    if($LASTEXITCODE -ne 0){throw 'Failed to set agent.task_completion_guidance=true'}
+    # Keep parallel guidance off. The correction is about real execution and
+    # verification, not encouraging wider batches of tool calls.
     & $hermes config set agent.parallel_tool_call_guidance 'false' | Out-Null
     if($LASTEXITCODE -ne 0){throw 'Failed to set agent.parallel_tool_call_guidance=false'}
 
     $agentAfter=Read-JsonConfig $hermes 'agent'
-    $toolUseOk=($null -ne $agentAfter -and $agentAfter.PSObject.Properties.Name -contains 'tool_use_enforcement' -and $agentAfter.tool_use_enforcement -eq $false)
-    $taskOk=($null -ne $agentAfter -and $agentAfter.PSObject.Properties.Name -contains 'task_completion_guidance' -and $agentAfter.task_completion_guidance -eq $false)
+    $toolUseOk=($null -ne $agentAfter -and $agentAfter.PSObject.Properties.Name -contains 'tool_use_enforcement' -and $agentAfter.tool_use_enforcement -eq $true)
+    $taskOk=($null -ne $agentAfter -and $agentAfter.PSObject.Properties.Name -contains 'task_completion_guidance' -and $agentAfter.task_completion_guidance -eq $true)
     $parallelOk=($null -ne $agentAfter -and $agentAfter.PSObject.Properties.Name -contains 'parallel_tool_call_guidance' -and $agentAfter.parallel_tool_call_guidance -eq $false)
     if(-not($toolUseOk -and $taskOk -and $parallelOk)){
-      throw 'Hermes tool-dispatch guidance verification failed after config set.'
+      throw 'Hermes execute/verify guidance verification failed after config set.'
     }
 
     Emit ([ordered]@{
       ok=$true
-      classification='HERMES_LOCAL_TOOL_DISPATCH_GUIDANCE_DISABLED'
+      classification='HERMES_LOCAL_EXECUTE_VERIFY_GUIDANCE_ENABLED'
       mutation='CONFIG_AGENT_GUIDANCE_ONLY'
       configBackup=$backup
       telegramToolsetExplicit=$telegramExplicit
-      telegramToolsetCount=$telegramCount
+      telegramToolsets=$telegramToolsets
       before=[ordered]@{
-        tool_use_enforcement=(Bool-State $agentBefore 'tool_use_enforcement' $true)
-        task_completion_guidance=(Bool-State $agentBefore 'task_completion_guidance' $true)
-        parallel_tool_call_guidance=(Bool-State $agentBefore 'parallel_tool_call_guidance' $true)
+        tool_use_enforcement=(Value-State $agentBefore 'tool_use_enforcement')
+        task_completion_guidance=(Value-State $agentBefore 'task_completion_guidance')
+        parallel_tool_call_guidance=(Value-State $agentBefore 'parallel_tool_call_guidance')
       }
       after=[ordered]@{
-        tool_use_enforcement=$false
-        task_completion_guidance=$false
+        tool_use_enforcement=$true
+        task_completion_guidance=$true
         parallel_tool_call_guidance=$false
       }
       providerTouched=$false
       ollamaMutationStarted=$false
       networkChanged=$false
       modelGenerationStarted=$false
+      gatewayRestarted=$false
       changedAt=(Get-Date -Format o)
     }) 0
   }catch{
     try{Copy-Item -LiteralPath $backup -Destination $config -Force}catch{}
     Emit ([ordered]@{
-      ok=$false;classification='HERMES_LOCAL_TOOL_DISPATCH_GUIDANCE_REPAIR_FAILED';
+      ok=$false;classification='HERMES_LOCAL_EXECUTE_VERIFY_GUIDANCE_REPAIR_FAILED';
       mutation='CONFIG_AGENT_GUIDANCE_ROLLED_BACK';configBackup=$backup;errorType=$_.Exception.GetType().Name
-    }) 44
+    }) 45
   }
 }finally{
   if($null -eq $priorHome){Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue}else{$env:HERMES_HOME=$priorHome}
@@ -227,26 +231,11 @@ if(-not $configResult -or -not [bool]$configResult.ok){
   exit 1
 }
 
-$reloadHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-GatewayReload.ps1'
-$reloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-gateway-reload.json'
-$reloadResult=$null
-if((Test-Path -LiteralPath $reloadHelper -PathType Leaf) -and (Test-Path -LiteralPath $reloadRequest -PathType Leaf)){
-  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $reloadHelper -InstallRoot $InstallRoot -RequestPath $reloadRequest 2>&1 | Out-String).Trim()
-  $reloadCode=$LASTEXITCODE
-  foreach($line in @($raw -split "`r?`n" | Where-Object{$_})){
-    try{$reloadResult=$line | ConvertFrom-Json}catch{}
-  }
-  if($null -eq $reloadResult){$reloadResult=[pscustomobject]@{ok=$false;classification='HERMES_TOOL_DISPATCH_GATEWAY_RELOAD_UNPARSEABLE';exit=$reloadCode}}
-}else{
-  $reloadResult=[pscustomobject]@{ok=$false;classification='HERMES_TOOL_DISPATCH_GATEWAY_RELOAD_HELPER_MISSING'}
-}
-
-$ok=([bool]$configResult.ok -and $reloadResult -and [bool]$reloadResult.ok)
 $o=[ordered]@{
-  ok=$ok
-  classification=$(if($ok){'HERMES_LOCAL_TOOL_DISPATCH_REPAIR_VERIFIED'}else{[string]$reloadResult.classification})
+  ok=$true
+  classification='HERMES_LOCAL_EXECUTE_VERIFY_REPAIR_VERIFIED'
   configRepair=$configResult
-  gatewayReload=$reloadResult
+  gatewayReload=[ordered]@{attempted=$false;reason='New Telegram sessions pick up the corrected agent guidance without interrupting the active gateway.'}
   providerTouched=$false
   ollamaMutationStarted=$false
   networkChanged=$false
@@ -254,4 +243,4 @@ $o=[ordered]@{
   observedAt=(Get-Date -Format o)
 }
 Save-Result $o
-exit $(if($ok){0}else{1})
+exit 0
