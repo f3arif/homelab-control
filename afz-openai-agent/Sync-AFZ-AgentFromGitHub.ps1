@@ -314,6 +314,16 @@ try{
   if(-not $raw){throw 'Core source sync returned no result'}
   if($raw -is [string]){try{$result=$raw|ConvertFrom-Json}catch{throw "Core source sync returned invalid JSON: $raw"}}else{$result=$raw}
 
+
+# AFZ_BLOG_RUNTIME_SYNC_HOOK
+# The updater downloads this wrapper fresh on every pass. This narrow hook
+# therefore makes Blog runtime persistence independent of a stale updater AST.
+# The helper itself is SYSTEM-only and fail-closed on Git/build/task state.
+$blogRuntimeEnsure=Join-Path $InstallRoot 'afz-openai-agent\Ensure-AFZ-BlogManager-Runtime.ps1'
+if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
+}
+
   # Missing-only repair of the canonical one-minute SYSTEM fallback updater.
   # This never starts/stops a task and never rewrites an existing task.
   $fallbackUpdaterRepair=Ensure-FallbackUpdaterTask
