@@ -1,6 +1,11 @@
 AFZ direct agent source recovery
-reason=windows-main-transport-recovery-for-h3-qwen35b-mobilemenu-qa01
+reason=afz-blog-comparison-saved-35b-postreturn-recovery
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-worker-transport-recovery
-requested_at=2026-09-02T19:14:30Z
+operation=source-sync-and-guarded-h3-blog-comparison-recovery
+job=afz-blog-qwen35b-vs-ridge27b-20260902-r1
+replay_35b=false
+ridge_only_if_prior_state_unattempted=true
+publish_article=false
+production_db_mutation=false
+requested_at=2026-09-02T23:47:00-04:00
