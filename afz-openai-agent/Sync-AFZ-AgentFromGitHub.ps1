@@ -348,6 +348,22 @@ try{
   # Post-return recovery: never replays 35B; Ridge may run only if prior state proves it unattempted.
   $afzBlogComparisonRecoveryActivation=Start-AFZBlogModelComparisonRecoveryOneShot -SyncedSha $resolvedSha
 
+  $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='not-run';syncedSha=$resolvedSha;readOnly=$true}
+  try{
+    $diagHelper=Join-Path $InstallRoot 'afz-openai-agent\Publish-AFZBlogRecoveryTransportState.ps1'
+    if(Test-Path -LiteralPath $diagHelper -PathType Leaf){
+      $diagRaw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $diagHelper -SyncedSha $resolvedSha | Select-Object -Last 1
+      $diagCode=$LASTEXITCODE
+      if($diagRaw -is [string]){try{$diagParsed=$diagRaw|ConvertFrom-Json}catch{$diagParsed=[ordered]@{status='invalid-json';raw=[string]$diagRaw}}}else{$diagParsed=$diagRaw}
+      $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=($diagCode -eq 0);status=$(if($diagCode -eq 0){'captured'}else{'helper-failed'});exit=$diagCode;result=$diagParsed;syncedSha=$resolvedSha;readOnly=$true}
+    }else{
+      $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='helper-missing';path=$diagHelper;syncedSha=$resolvedSha;readOnly=$true}
+    }
+  }catch{
+    $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message;syncedSha=$resolvedSha;readOnly=$true}
+  }
+
+
   # Read-only Ridge16K r2 visual/content QA. The typed request forbids model calls and site mutation.
   $ridge16KQAActivation=Start-Ridge16KQualityAuditOneShot -SyncedSha $resolvedSha
 
@@ -380,6 +396,7 @@ try{
   $out['qwen35BA3BActivation']=$qwen35BActivation
   $out['afzBlogModelComparisonActivation']=$afzBlogComparisonActivation
   $out['afzBlogModelComparisonRecoveryActivation']=$afzBlogComparisonRecoveryActivation
+  $out['afzBlogModelComparisonRecoveryTransportDiagnostic']=$afzBlogComparisonRecoveryTransportDiagnostic
   $out['qwenRidge16KQAActivation']=$ridge16KQAActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
