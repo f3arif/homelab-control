@@ -10,8 +10,10 @@ $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
 $marker='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request\'+$jobId+'-activation-v2.json'
 $carrierResult='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery\'+$jobId+'.json'
 $taskName='AFZ H3 AFZ Blog Recovery Transport'
-$diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
-$diagPath=Join-Path $diagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
+$sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$sharedDiagPath=Join-Path $sharedDiagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
+$termDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+$termDiagPath=Join-Path $termDiagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 
 function Read-SafeJson([string]$Path){
@@ -47,5 +49,12 @@ $out=[ordered]@{
   observedAt=(Get-Date -Format o)
 }
 $json=$out|ConvertTo-Json -Depth 20
-if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagPath,$json,$utf8)}
+foreach($target in @(
+  [pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},
+  [pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath}
+)){
+  try{
+    if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}
+  }catch{}
+}
 Write-Output ($out|ConvertTo-Json -Depth 20 -Compress)
