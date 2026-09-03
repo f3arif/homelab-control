@@ -1,7 +1,11 @@
-AFZ direct agent source recovery
-reason=h3-hermes-telegram-unresponsive-after-new
+AFZ direct agent source synchronization
+reason=afz-blog-comparison-v5-guarded-recovery
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-guarded-h3-telegram-gateway-recovery
+operation=source-sync-only-then-existing-guarded-v5-flow
+protected_job=afz-blog-qwen35b-vs-ridge27b-20260902-r1
+modelReplay35B=false
+ridgeOnlyIfAuthoritativeH3StateUnattempted=true
 arbitrary_shell=false
-requested_at=2026-09-03T12:00:00-04:00
+requested_source_includes=5b732af7580b9f3a2575a025fceabf9932420588
+requested_at=2026-09-03T12:16:00-04:00
