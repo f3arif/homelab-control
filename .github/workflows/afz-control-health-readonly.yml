@@ -58,7 +58,7 @@ jobs:
           fi
           echo 'WINDOWS_MAIN_CONTROL_HEALTH_END'
 
-      - name: Read H3 reachability only
+      - name: Read H3 reachability and Pi observer
         shell: bash
         run: |
           set -u
@@ -73,6 +73,19 @@ jobs:
           else
             echo 'H3_TCP22_REACHABLE=FAIL'
           fi
+          echo 'PI_H3_OBSERVER_BEGIN'
+          if pi_status=$(curl --silent --show-error --fail \
+            --connect-timeout 3 --max-time 8 \
+            http://100.91.50.9:8087/status/h3 2>&1); then
+            echo 'PI_H3_OBSERVER_REACHABLE=PASS'
+            printf '%s\n' "$pi_status"
+          else
+            rc=$?
+            echo 'PI_H3_OBSERVER_REACHABLE=FAIL'
+            echo "PI_H3_OBSERVER_CURL_EXIT=$rc"
+            printf '%s\n' "$pi_status"
+          fi
+          echo 'PI_H3_OBSERVER_END'
           echo 'H3_REACHABILITY_END'
 
       - name: Enforce read-only workflow contract
