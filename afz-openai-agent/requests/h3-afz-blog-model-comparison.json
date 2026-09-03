@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "benchmark_protocol_version": 1,
   "project": "afz-blog-local-model-comparison",
   "job_id": "afz-blog-qwen35b-vs-ridge27b-20260902-r1",
   "target": "h3",
