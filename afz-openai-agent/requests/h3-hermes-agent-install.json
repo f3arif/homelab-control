@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-ollama-provider-fresh-liveness-20260903-r32",
+  "id": "h3-hermes-chat-gateway-recovery-20260903-r32",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "target": "h3",
@@ -17,5 +17,7 @@
   "run_generation_test": false,
   "expose_api": false,
   "publish_result": true,
-  "emergency_diagnostic_ack": true
+  "emergency_diagnostic_ack": true,
+  "run_chat_canary": true,
+  "refresh_gateway_after_canary": true
 }
