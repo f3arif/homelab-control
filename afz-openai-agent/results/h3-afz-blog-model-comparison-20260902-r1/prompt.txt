@@ -1,0 +1,75 @@
+/no_think
+
+You are preparing a DRAFT technical article for AFZ Engineering Inc., an Ontario mechanical engineering practice. The article will be reviewed by a professional engineer before publication. It must never represent itself as permit-specific design advice or replace project-specific engineering.
+
+This is an isolated local-model automation benchmark. You cannot browse the web. A fixed research packet is supplied below so both models receive identical evidence. Use ONLY that packet for source-dependent/current-code assertions. Do not invent a URL, clause number, article number, numeric requirement, airflow rate, replacement-air percentage, separation distance, hood dimension, duct construction rule, fire-suppression rule, or other current requirement that the packet does not explicitly verify.
+
+CURRENT-CODE DISCIPLINE
+For every important technical/code claim classify it as exactly one of:
+CURRENT_CODE_REQUIREMENT
+STANDARD_OR_METHODOLOGY
+ENGINEERING_BEST_PRACTICE
+GENERAL_TECHNICAL_EXPLANATION
+CURRENT_CODE_VERIFICATION_REQUIRED
+
+If a current requirement cannot be verified confidently from THIS packet: do not state it as a current code requirement; classify it CURRENT_CODE_VERIFICATION_REQUIRED; set verificationStatus to ENGINEER_REVIEW_REQUIRED; and identify exactly what the engineer must verify. Never invent a clause number.
+
+ARTICLE REQUIREMENTS
+Write approximately 1,100 to 1,400 words for Ontario homeowners, builders, contractors and property professionals. Tone: professional, technically careful, useful and understandable. Explain distinctions between legal/code requirements, standards/methodology, engineering best practice and general technical explanation. Do not overstate conclusions. Make the article practically useful for coordination before permit submission, including interfaces among hood/exhaust selection, make-up air, HVAC balance, controls/interlocks, architectural/structural/electrical/fire-protection coordination, equipment schedules and permit drawings, while refusing to invent unsupported numeric requirements.
+
+Return the main authoritative sources actually relied upon from the fixed packet. For each source state whether it was relied upon for a current-code claim and whether engineer verification remains necessary. Return specific technicalReviewFlags for items a professional engineer should check before publication. The article MUST remain a draft.
+
+SEO: provide a natural SEO title, meta description and useful non-spam keywords. Do not make promotional claims AFZ cannot substantiate. A short closing invitation to contact AFZ for project-specific mechanical engineering assistance is acceptable.
+
+OUTPUT CONTRACT
+Return ONE valid JSON object only. No Markdown code fence and no text before or after JSON. The JSON object must contain exactly these top-level fields (additional nested detail is not required):
+{
+  "title": string,
+  "articleMarkdown": string,
+  "seoTitle": string,
+  "metaDescription": string,
+  "keywords": string[],
+  "technicalReviewFlags": [{"category":string,"severity":"INFO"|"REVIEW"|"IMPORTANT","message":string}],
+  "sources": [{"organization":string,"title":string,"url":string,"sourceType":string,"sourceCurrency":string,"reliedUponForCurrentCode":boolean,"engineerVerificationRequired":boolean,"notes":string|null}],
+  "codeClaims": [{"claim":string,"classification":"CURRENT_CODE_REQUIREMENT"|"STANDARD_OR_METHODOLOGY"|"ENGINEERING_BEST_PRACTICE"|"GENERAL_TECHNICAL_EXPLANATION"|"CURRENT_CODE_VERIFICATION_REQUIRED","provision":string|null,"sourceUrl":string|null,"sourceCurrency":string,"verificationStatus":"VERIFIED"|"ENGINEER_REVIEW_REQUIRED"|"NOT_VERIFIED","notes":string|null}]
+}
+
+ARTICLE TOPIC
+Commercial kitchen exhaust and make-up air in Ontario: practical coordination checks before permit submission
+
+FIXED AUTHORITATIVE SOURCE PACKET
+[
+    {
+        "organization":  "Government of Ontario / e-Laws",
+        "title":  "O. Reg. 163/24: Building Code",
+        "url":  "https://www.ontario.ca/laws/regulation/240163",
+        "sourceCurrency":  "Benchmark research check: consolidated page reported last amendment O. Reg. 119/26 and adoption of NBC 2020 First Printing as amended by Ontario Amendments dated April 21, 2026.",
+        "facts":  [
+                      "Ontario Regulation 163/24 is the current Building Code regulation framework used for this benchmark.",
+                      "The regulation adopts the National Building Code of Canada 2020, First Printing, together with Ontario amendments.",
+                      "The old O. Reg. 332/12 framework survives only for the regulation\u0027s stated transition cases; it must not be presented as the general current Ontario Building Code.",
+                      "This source packet does not verify a specific commercial-kitchen exhaust airflow, make-up-air percentage, hood geometry, duct construction requirement, clearance, discharge separation, fire-suppression requirement, or clause/article number. Any such current-code claim requires current-code verification before publication."
+                  ]
+    },
+    {
+        "organization":  "Government of Ontario",
+        "title":  "Ontario\u0027s Building Code",
+        "url":  "https://www.ontario.ca/page/ontarios-building-code",
+        "sourceCurrency":  "Official Ontario Building Code information page available at benchmark preparation.",
+        "facts":  [
+                      "Ontario directs users to the current Building Code Compendium and advises checking that the downloaded compendium is the latest version.",
+                      "A high-level Ontario information page is not enough evidence for a detailed clause, airflow value, separation distance, or other numeric current-code requirement."
+                  ]
+    },
+    {
+        "organization":  "ASHRAE",
+        "title":  "ANSI/ASHRAE Standard 154-2022 - Ventilation for Commercial Cooking Operations",
+        "url":  "https://www.ashrae.org/technical-resources/standards-and-guidelines/titles-purposes-and-scopes",
+        "sourceCurrency":  "ASHRAE titles, purposes and scopes page identified Standard 154-2022 as the published standard at benchmark preparation.",
+        "facts":  [
+                      "ASHRAE identifies Standard 154-2022 as Ventilation for Commercial Cooking Operations.",
+                      "Its stated purpose is to provide design criteria for the performance of commercial cooking ventilation systems.",
+                      "This packet intentionally does not reproduce the standard text and does not establish any specific ASHRAE airflow rate, hood factor, replacement-air percentage, or mandatory design value. Specific requirements from the standard must not be invented."
+                  ]
+    }
+]
