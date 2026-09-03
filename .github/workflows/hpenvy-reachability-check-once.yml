@@ -1,0 +1,39 @@
+name: HP Envy Reachability Check Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-reachability-check-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Check HP Envy reachability
+        shell: bash
+        run: |
+          set +e
+          echo '=== TAILSCALE PEER ==='
+          tailscale status | grep -E '100[.]71[.]26[.]69|hpenvy' || true
+          echo '=== TAILSCALE PING ==='
+          tailscale ping --timeout=5s --c=1 100.71.26.69 || true
+          echo '=== TCP PORTS ==='
+          for p in 22 80 443 8500; do
+            if timeout 4 bash -c "</dev/tcp/100.71.26.69/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
