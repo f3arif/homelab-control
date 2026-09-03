@@ -130,6 +130,16 @@ try{
   if($ExpectedSha -and $remoteSha -ne $ExpectedSha){throw "Agent source sync returned unexpected remoteSha: actual=$remoteSha expected=$ExpectedSha"}
   $changed=[bool]$syncResult.changed
 
+
+# Narrow Blog runtime persistence hook. The helper is SYSTEM-only and
+# fail-closed: it requires a clean canonical Blog checkout and existing
+# successful .next build before it may recreate the exact Blog Manager task.
+# Failure is isolated from source sync and is mirrored by the helper itself.
+$blogRuntimeEnsure=Join-Path $InstallRoot 'afz-openai-agent\Ensure-AFZ-BlogManager-Runtime.ps1'
+if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
+  try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
+}
+
   $allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
   $wrapper=Join-Path $InstallRoot 'afz-openai-agent\Start-AFZ-OpenAI-Agent.ps1'
   $control=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Agent-Control.ps1'
