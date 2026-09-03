@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "project": "qwenridge16k-readonly-quality-audit",
+  "job_id": "qwenridge16k-afz-website-20260902-r2-qa01",
+  "source_job_id": "qwenridge16k-afz-website-20260902-r2",
+  "project_root": "C:\\Projects\\Qwen38-Ridge16K-AFZ-Website-Test-20260902-r2",
+  "no_model_calls": true,
+  "site_mutation_allowed": false,
+  "required_routes": [
+    "/",
+    "/services",
+    "/projects",
+    "/about",
+    "/contact"
+  ],
+  "capture_desktop": true,
+  "capture_mobile": true,
+  "publish_branch": "h3-direct-results"
+}

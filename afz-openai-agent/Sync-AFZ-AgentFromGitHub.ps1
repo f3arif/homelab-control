@@ -196,6 +196,39 @@ function Invoke-H3HermesQwenOneShot {
   }
 }
 
+function Start-Ridge16KQualityAuditOneShot {
+  param([string]$SyncedSha)
+  $jobId='qwenridge16k-afz-website-20260902-r2-qa01'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-qwenridge16k-quality-audit.json'
+  $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-QwenRidge16K-QualityAudit.ps1'
+  $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-qwenridge16k-qa-request'
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+
+  if(Test-Path -LiteralPath $marker -PathType Leaf){
+    try{return Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-activated';jobId=$jobId;marker=$marker;syncedSha=$SyncedSha}}
+  }
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return [ordered]@{ok=$true;status='request-missing-not-armed';jobId=$jobId;syncedSha=$SyncedSha}}
+  if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;syncedSha=$SyncedSha}}
+
+  try{
+    $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+    $routes=@($r.required_routes|ForEach-Object {[string]$_})
+    $expected=@('/','/services','/projects','/about','/contact')
+    if([int]$r.schema -ne 1 -or [string]$r.project -ne 'qwenridge16k-readonly-quality-audit' -or [string]$r.job_id -ne $jobId -or [string]$r.source_job_id -ne 'qwenridge16k-afz-website-20260902-r2' -or [string]$r.project_root -ne 'C:\Projects\Qwen38-Ridge16K-AFZ-Website-Test-20260902-r2' -or -not [bool]$r.no_model_calls -or [bool]$r.site_mutation_allowed -or $routes.Count -ne 5){
+      return [ordered]@{ok=$false;status='request-contract-invalid';jobId=$jobId;syncedSha=$SyncedSha}
+    }
+    foreach($route in $expected){if($routes -notcontains $route){return [ordered]@{ok=$false;status='request-route-contract-invalid';jobId=$jobId;route=$route;syncedSha=$SyncedSha}}}
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
+    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+    $o=[ordered]@{ok=$true;status='bootstrap-started';jobId=$jobId;expectedSha=$SyncedSha;bootstrapPid=$p.Id;marker=$marker;activatedAt=(Get-Date -Format o);modelCalls=0;siteMutationAllowed=$false}
+    $o|ConvertTo-Json -Depth 10 -Compress|Set-Content -LiteralPath $marker -Encoding UTF8
+    return $o
+  }catch{
+    return [ordered]@{ok=$false;status='activation-exception';jobId=$jobId;syncedSha=$SyncedSha;error=$_.Exception.Message}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -252,6 +285,9 @@ try{
   # cannot replay this job. H3 also independently guards model_call_attempted.
   $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha
 
+  # Read-only Ridge16K r2 visual/content QA. The typed request forbids model calls and site mutation.
+  $ridge16KQAActivation=Start-Ridge16KQualityAuditOneShot -SyncedSha $resolvedSha
+
   # Recovery is deliberately separate from v1 activation. It runs only as SYSTEM
   # and the helper itself permits transport re-entry solely for the proven pre-H3
   # private-key Permission denied failure. The H3 launcher remains authoritative
@@ -279,6 +315,7 @@ try{
   $out['h3GenericWorkerRecovery']=$recovery
   $out['h3HermesQwenActivation']=$h3HermesQwenActivation
   $out['qwen35BA3BActivation']=$qwen35BActivation
+  $out['qwenRidge16KQAActivation']=$ridge16KQAActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
   $out|ConvertTo-Json -Depth 30 -Compress
