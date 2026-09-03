@@ -32,6 +32,10 @@ $h3HermesRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesAgent-I
 $h3HermesRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'
 $h3HermesStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-agent'
 $h3HermesLastAttempt=[DateTime]::MinValue
+$h3HermesRegistryLivenessRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-RegistryLivenessAudit.ps1'
+$h3HermesRegistryLivenessRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-registry-liveness-audit.json'
+$h3HermesRegistryLivenessStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-registry-liveness'
+$h3HermesRegistryLivenessLastAttempt=[DateTime]::MinValue
 $h3DockerPreflightRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-DockerDesktop-Preflight.ps1'
 $h3DockerPreflightRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-docker-desktop-preflight.json'
 $h3DockerPreflightStateRoot=Join-Path $stateRoot 'jobs\h3-docker-desktop-preflight'
@@ -249,6 +253,31 @@ function Handle-H3DockerDesktopPreflight{
   }catch{Log "H3_DOCKER_PREFLIGHT_ERROR $($_.Exception.Message)"}
 }
 
+function Handle-H3HermesRegistryLivenessRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesRegistryLivenessRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or -not [bool]$req.enabled -or [string]$req.action -ne 'audit-registry-liveness'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if(-not [bool]$req.read_only -or [string]$req.mutation -ne 'none'){return}
+    if([bool]$req.restart_gateway -or [bool]$req.change_provider -or [bool]$req.run_model_generation -or [bool]$req.mutate_ollama -or [bool]$req.change_network){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $statePath=Join-Path $h3HermesRegistryLivenessStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
+    }
+    $now=Get-Date
+    if(($now-$script:h3HermesRegistryLivenessLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesRegistryLivenessLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesRegistryLivenessRunner -InstallRoot $InstallRoot -RequestPath $h3HermesRegistryLivenessRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_HERMES_REGISTRY_LIVENESS classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_REGISTRY_LIVENESS_ERROR $($_.Exception.Message)"}
+}
 function Test-H3HermesPdfAuxPending{
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
   $stateRootPdf=Join-Path $stateRoot 'jobs\h3-hermes-pdf-runtime-audit'
@@ -391,6 +420,7 @@ try{
       Handle-JellyfinVisibilityRequest
       Handle-HPEnvySurfsharkRequest
       Handle-H3DockerDesktopPreflight
+      Handle-H3HermesRegistryLivenessRequest
       Handle-H3HermesRequest
       Handle-FamilyPttPhase1ApkRequest
       $lastError=''
