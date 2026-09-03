@@ -17,7 +17,7 @@ concurrency:
 jobs:
   recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -44,19 +44,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! nc -z -w 3 100.106.186.118 22; then
-            echo 'H3 SSH not currently reachable; requesting existing Pi WoL service once.'
-            curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3
-            echo
+          if nc -z -w 3 100.106.186.118 22; then
+            echo 'H3_SSH_REACHABLE=PASS already-online'
+            exit 0
           fi
-          for attempt in $(seq 1 30); do
+
+          echo 'H3 SSH offline; trying existing Pi WoL service opportunistically.'
+          if curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3; then
+            echo
+            echo 'PI_WOL_REQUEST=PASS'
+          else
+            echo 'PI_WOL_REQUEST=UNAVAILABLE'
+          fi
+
+          echo 'Sending H3 WoL from always-on HP Envy LAN host.'
+          wol_script=$(cat <<'REMOTE'
+          import socket,time
+          mac='4C:ED:FB:3F:B0:9E'
+          raw=bytes.fromhex(mac.replace(':',''))
+          packet=b'\xff'*6 + raw*16
+          sent=[]
+          for dest in [('192.168.50.255',9),('192.168.50.255',7)]:
+              s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+              s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1)
+              try:
+                  for _ in range(5):
+                      s.sendto(packet,dest)
+                      time.sleep(0.25)
+                  sent.append(f'{dest[0]}:{dest[1]}')
+              finally:
+                  s.close()
+          print('HPENVY_H3_WOL_SENT='+','.join(sent))
+          REMOTE
+          )
+          printf '%s\n' "$wol_script" | timeout 30s tailscale ssh coolyo@100.71.26.69 'python3 -'
+
+          for attempt in $(seq 1 48); do
             if nc -z -w 3 100.106.186.118 22; then
               echo "H3_SSH_REACHABLE=PASS attempt=$attempt"
               exit 0
             fi
             sleep 5
           done
-          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          echo 'H3_SSH_REACHABLE=FAIL_AFTER_HPENVY_WOL' >&2
           exit 1
 
       - name: Launch exact-SHA guarded H3 recovery
