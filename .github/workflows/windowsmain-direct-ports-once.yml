@@ -1,0 +1,45 @@
+name: Windows-main Direct Ports Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windowsmain-direct-ports-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe read-only direct control surfaces
+        shell: bash
+        run: |
+          set +e
+          for p in 8787 8790 8796 8797; do
+            if timeout 3 bash -c "</dev/tcp/100.70.25.8/$p" 2>/dev/null; then
+              echo "WM_TCP_${p}=OPEN"
+            else
+              echo "WM_TCP_${p}=CLOSED_OR_FILTERED"
+            fi
+          done
+          for target in \
+            'http://100.70.25.8:8787/api/status' \
+            'http://100.70.25.8:8790/api/status' \
+            'http://100.70.25.8:8790/health' \
+            'http://100.70.25.8:8796/health' \
+            'http://100.70.25.8:8797/health'; do
+            echo "GET_BEGIN=$target"
+            curl --silent --show-error --connect-timeout 3 --max-time 6 --write-out '\nHTTP_CODE=%{http_code}\n' "$target" || true
+            echo "GET_END=$target"
+          done
