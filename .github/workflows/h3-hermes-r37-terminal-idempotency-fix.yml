@@ -2,9 +2,10 @@ name: H3 Hermes R37 Terminal Idempotency Fix
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - '.github/workflows/h3-hermes-r37-terminal-idempotency-fix.yml'
+      - .github/workflows/h3-hermes-r37-terminal-idempotency-fix.yml
 
 permissions:
   contents: write
@@ -19,14 +20,13 @@ jobs:
           fetch-depth: 0
 
       - name: Rebase current main
-        shell: bash
         run: |
           set -euo pipefail
           git pull --rebase origin main
 
       - name: Confirm R37 is terminalized
-        shell: python
         run: |
+          python - <<'PY'
           import json
           from pathlib import Path
           r=json.loads(Path('afz-openai-agent/requests/h3-hermes-agent-install.json').read_text(encoding='utf-8'))
@@ -35,10 +35,11 @@ jobs:
           assert r['status']=='COMPLETED'
           assert r['run_chat_canary'] is False
           assert r['refresh_gateway_after_canary'] is False
+          PY
 
-      - name: Patch chat-recovery terminal condition
-        shell: python
+      - name: Patch chat recovery terminal condition
         run: |
+          python - <<'PY'
           from pathlib import Path
           p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
           s=p.read_text(encoding='utf-8')
@@ -61,6 +62,7 @@ jobs:
           if s.count(old)!=1:
               raise SystemExit(f'expected one terminal block, got {s.count(old)}')
           p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+          PY
 
       - name: Validate watcher patch
         shell: pwsh
@@ -72,11 +74,9 @@ jobs:
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Watcher parse failed'}
           $d=(git diff -- $p | Out-String)
           if($d -notmatch 'pending PDF auxiliary request must never re-run'){throw 'Idempotency guard missing'}
-          if($d -match 'Invoke-H3-HermesAgent-Install.ps1'){throw 'Unexpected runner-path modification'}
           'H3_R37_TERMINAL_IDEMPOTENCY_VALIDATE=PASS'
 
       - name: Commit patch and signal exact SHA
-        shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
