@@ -19,6 +19,8 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-generic-worker-recovery'
 $statePath=Join-Path $stateRoot 'latest.json'
 $mirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
 $mirrorPath=Join-Path $mirrorRoot 'H3-GENERIC-WORKER-RECOVERY-LATEST.json'
+$sharedMirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
+$sharedMirrorPath=Join-Path $sharedMirrorRoot 'AFZ-H3-OLLAMA-WATCHDOG-AUDIT-LATEST.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 
@@ -26,6 +28,7 @@ function Save-Result($o){
   $json=$o|ConvertTo-Json -Depth 20 -Compress
   [IO.File]::WriteAllText($statePath,$json,$utf8)
   try{if(Test-Path -LiteralPath $mirrorRoot -PathType Container){[IO.File]::WriteAllText($mirrorPath,$json,$utf8)}}catch{}
+  try{if(Test-Path -LiteralPath $sharedMirrorRoot -PathType Container){[IO.File]::WriteAllText($sharedMirrorPath,$json,$utf8)}}catch{}
   Write-Output $json
 }
 
