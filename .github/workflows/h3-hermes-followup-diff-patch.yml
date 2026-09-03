@@ -1,4 +1,4 @@
-name: H3 Hermes Followup Diff Patch
+name: H3 Hermes Followup Normalize Patch
 
 on:
   push:
@@ -19,14 +19,14 @@ jobs:
           fetch-depth: 0
       - name: Patch helper
         shell: powershell
-        run: .\afz-openai-agent\Patch-H3-Hermes-FollowupDiffTelemetry.ps1
+        run: .\afz-openai-agent\Patch-H3-Hermes-FollowupMalformedEnv.ps1
       - name: Commit helper
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm 'afz-openai-agent/Patch-H3-Hermes-FollowupDiffTelemetry.ps1'
+          git rm 'afz-openai-agent/Patch-H3-Hermes-FollowupMalformedEnv.ps1'
           git add 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
-          git commit -m 'Report sanitized H3 Hermes adapter diff on hash mismatch'
+          git commit -m 'Normalize malformed H3 Hermes Telegram follow-up env names'
           git push origin HEAD:main
