@@ -36,7 +36,7 @@ if f'function {fname}' not in s:
 '''
     s = s.replace(anchor, fn + anchor, 1)
 else:
-    # Re-arm only this recovery carrier.  v1 may already exist from the failed
+    # Re-arm only this recovery carrier. v1 may already exist from the failed
     # transport attempt; v2 permits one new carrier launch while the H3 recovery
     # script still independently forbids a 35B replay and guards Ridge.
     start = s.index(f'function {fname}')
@@ -60,6 +60,32 @@ if call not in s:
         raise SystemExit('sync invocation anchor missing')
     s = s.replace(anchor, anchor + "\n\n  # Post-return recovery: never replays 35B; Ridge may run only if prior state proves it unattempted.\n  " + call, 1)
 
+# Non-fatal, read-only observability of the recovery activation/carrier. This
+# helper only reads windows-main marker/task/result state and mirrors it to the
+# existing AFZ Results folder; it performs no model or H3 action.
+diag_var = '$afzBlogComparisonRecoveryTransportDiagnostic'
+diag_block = r'''
+
+  $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='not-run';syncedSha=$resolvedSha;readOnly=$true}
+  try{
+    $diagHelper=Join-Path $InstallRoot 'afz-openai-agent\Publish-AFZBlogRecoveryTransportState.ps1'
+    if(Test-Path -LiteralPath $diagHelper -PathType Leaf){
+      $diagRaw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $diagHelper -SyncedSha $resolvedSha | Select-Object -Last 1
+      $diagCode=$LASTEXITCODE
+      if($diagRaw -is [string]){try{$diagParsed=$diagRaw|ConvertFrom-Json}catch{$diagParsed=[ordered]@{status='invalid-json';raw=[string]$diagRaw}}}else{$diagParsed=$diagRaw}
+      $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=($diagCode -eq 0);status=$(if($diagCode -eq 0){'captured'}else{'helper-failed'});exit=$diagCode;result=$diagParsed;syncedSha=$resolvedSha;readOnly=$true}
+    }else{
+      $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='helper-missing';path=$diagHelper;syncedSha=$resolvedSha;readOnly=$true}
+    }
+  }catch{
+    $afzBlogComparisonRecoveryTransportDiagnostic=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message;syncedSha=$resolvedSha;readOnly=$true}
+  }
+'''
+if diag_var not in s:
+    if s.count(call) != 1:
+        raise SystemExit('recovery invocation count mismatch for diagnostic insertion')
+    s = s.replace(call, call + diag_block, 1)
+
 out = "$out['afzBlogModelComparisonRecoveryActivation']=$afzBlogComparisonRecoveryActivation"
 if out not in s:
     anchor = "$out['afzBlogModelComparisonActivation']=$afzBlogComparisonActivation"
@@ -67,13 +93,21 @@ if out not in s:
         raise SystemExit('sync output anchor missing')
     s = s.replace(anchor, anchor + "\n  " + out, 1)
 
+diag_out = "$out['afzBlogModelComparisonRecoveryTransportDiagnostic']=$afzBlogComparisonRecoveryTransportDiagnostic"
+if diag_out not in s:
+    if s.count(out) != 1:
+        raise SystemExit('recovery output count mismatch for diagnostic output')
+    s = s.replace(out, out + "\n  " + diag_out, 1)
+
 # Preserve the safety contract while proving only the recovery marker advanced.
 for required in (
     'replay35B=$false',
     'ridgeOnlyIfUnattempted=$true',
     "$jobId+'-activation-v2.json'",
+    'Publish-AFZBlogRecoveryTransportState.ps1',
+    "readOnly=$true",
 ):
     if required not in s:
-        raise SystemExit(f'missing guarded recovery marker: {required}')
+        raise SystemExit(f'missing guarded recovery/diagnostic marker: {required}')
 
 p.write_text(s, encoding='utf-8')
