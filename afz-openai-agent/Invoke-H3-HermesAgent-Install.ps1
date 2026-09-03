@@ -22,6 +22,7 @@ if([bool]$req.restart_desktop_backend -or [bool]$req.restart_electron_ui -or [bo
 if(-not [bool]$req.publish_result -or -not [bool]$req.emergency_diagnostic_ack){throw 'H3 Hermes provider repair publish policy mismatch.'}
 $runChatCanary=($req.PSObject.Properties.Name -contains 'run_chat_canary' -and [bool]$req.run_chat_canary)
 $refreshGatewayAfterCanary=($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary' -and [bool]$req.refresh_gateway_after_canary)
+$priorityChatRecovery=($runChatCanary -and $refreshGatewayAfterCanary)
 if(-not $runChatCanary -or -not $refreshGatewayAfterCanary){throw 'H3 Hermes r32 chat/gateway recovery guards mismatch.'}
 
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
@@ -39,6 +40,7 @@ foreach($required in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $requir
 # guarded and non-fatal to provider liveness recovery.
 # Invoke-H3-Hermes-PdfRuntimeAudit.ps1 / h3-hermes-pdf-runtime-audit.json
 # Invoke-H3-Hermes-TelegramFollowupRepair.ps1 / h3-hermes-telegram-followup-repair.json
+if(-not $priorityChatRecovery){
 foreach($hook in @(
   [ordered]@{script='Invoke-H3-Hermes-PdfRuntimeAudit.ps1';request='h3-hermes-pdf-runtime-audit.json'},
   [ordered]@{script='Invoke-H3-Hermes-TelegramFollowupRepair.ps1';request='h3-hermes-telegram-followup-repair.json'}
@@ -50,6 +52,7 @@ foreach($hook in @(
       & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hp -InstallRoot $InstallRoot -RequestPath $rp *> $null
     }
   }catch{}
+}
 }
 
 function Save-Result($result){

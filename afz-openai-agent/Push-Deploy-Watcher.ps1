@@ -319,7 +319,7 @@ function Handle-H3HermesRequest{
     if(Test-Path -LiteralPath $statePath -PathType Leaf){
       try{
         $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
-        if([bool]$existing.ok -and [string]$existing.classification -eq 'HERMES_READY_LOCAL_OLLAMA_64K' -and -not $pdfAuxPending){return}
+        if([bool]$existing.ok -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY') -and -not $pdfAuxPending){return}
         if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED' -and -not $pdfAuxPending){return}
       }catch{}
     }
