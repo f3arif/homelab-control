@@ -229,6 +229,38 @@ function Start-Ridge16KQualityAuditOneShot {
   }
 }
 
+function Start-AFZBlogModelComparisonOneShot {
+  param([string]$SyncedSha)
+  $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-afz-blog-model-comparison.json'
+  $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparison.ps1'
+  $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-request'
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  $utf8=New-Object Text.UTF8Encoding($false)
+  New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
+  if(Test-Path -LiteralPath $marker -PathType Leaf){
+    try{return Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json}catch{return [ordered]@{ok=$true;status='already-activated';jobId=$jobId;marker=$marker;syncedSha=$SyncedSha}}
+  }
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return [ordered]@{ok=$false;status='request-missing';jobId=$jobId;syncedSha=$SyncedSha}}
+  if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;syncedSha=$SyncedSha}}
+  try{
+    $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+    $models=@($r.models|ForEach-Object{[string]$_})
+    if([int]$r.schema -ne 1 -or [string]$r.project -ne 'afz-blog-local-model-comparison' -or [string]$r.job_id -ne $jobId -or [string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN' -or [int]$r.context -ne 16384 -or -not [bool]$r.no_think -or [int]$r.max_model_calls_per_model -ne 1 -or [bool]$r.publish_article -or [bool]$r.production_db_mutation -or $models.Count -ne 2 -or $models[0] -ne 'qwen3.6:35b-a3b' -or $models[1] -ne 'qwen3.8-ridge:27b-16k'){
+      return [ordered]@{ok=$false;status='request-contract-invalid';jobId=$jobId;syncedSha=$SyncedSha}
+    }
+    $o=[ordered]@{ok=$true;status='activation-starting';jobId=$jobId;syncedSha=$SyncedSha;marker=$marker;maxModelCallsPerModel=1;publishArticle=$false;productionDbMutation=$false;activatedAt=(Get-Date -Format o)}
+    [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
+    $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
+    $o['status']='bootstrap-started';$o['bootstrapPid']=$p.Id
+    [IO.File]::WriteAllText($marker,($o|ConvertTo-Json -Depth 10 -Compress),$utf8)
+    return $o
+  }catch{
+    return [ordered]@{ok=$false;status='activation-exception';jobId=$jobId;syncedSha=$SyncedSha;error=$_.Exception.Message;marker=$marker}
+  }
+}
+
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
@@ -285,6 +317,9 @@ try{
   # cannot replay this job. H3 also independently guards model_call_attempted.
   $qwen35BActivation=Start-Qwen35BOneShot -SyncedSha $resolvedSha
 
+  # Isolated AFZ blog article model comparison; one call max per model, no publish/DB mutation.
+  $afzBlogComparisonActivation=Start-AFZBlogModelComparisonOneShot -SyncedSha $resolvedSha
+
   # Read-only Ridge16K r2 visual/content QA. The typed request forbids model calls and site mutation.
   $ridge16KQAActivation=Start-Ridge16KQualityAuditOneShot -SyncedSha $resolvedSha
 
@@ -315,6 +350,7 @@ try{
   $out['h3GenericWorkerRecovery']=$recovery
   $out['h3HermesQwenActivation']=$h3HermesQwenActivation
   $out['qwen35BA3BActivation']=$qwen35BActivation
+  $out['afzBlogModelComparisonActivation']=$afzBlogComparisonActivation
   $out['qwenRidge16KQAActivation']=$ridge16KQAActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
