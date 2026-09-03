@@ -1,4 +1,4 @@
-# trigger-valid-binder-20260903T0435Z
+# watcher-only-trigger-20260903T0437Z
 name: H3 Hermes Registry Liveness Bind
 
 on:
@@ -19,23 +19,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run validated read-only liveness binder
+      - name: Generate validated read-only liveness binding
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           & '.\afz-openai-agent\Bind-H3-Hermes-RegistryLiveness.ps1'
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
 
-      - name: Commit binding and retire one-shot binder
+      - name: Commit watcher binding only
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm '.github/workflows/h3-hermes-registry-liveness-bind.yml'
-          git rm 'afz-openai-agent/Bind-H3-Hermes-RegistryLiveness.ps1'
-          git add 'afz-openai-agent/Push-Deploy-Watcher.ps1' '.github/workflows/h3-hermes-agent-validate.yml'
-          git commit -m 'Bind read-only H3 Hermes registry liveness audit'
+          git restore -- '.github/workflows/h3-hermes-agent-validate.yml'
+          git add 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+          $changed=(git diff --cached --name-only)
+          if(($changed -join "`n") -ne 'afz-openai-agent/Push-Deploy-Watcher.ps1'){throw "unexpected staged files: $($changed -join ',')"}
+          git commit -m 'Bind read-only H3 Hermes registry liveness watcher'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
