@@ -26,12 +26,17 @@ $h3GatewayReloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-her
 $h3GatewayReloadStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-gateway-reload'
 $h3GatewayReloadMarker=Join-Path $h3GatewayReloadStateRoot 'wrapper-request.json'
 $h3GatewayReloadAttempt=Join-Path $h3GatewayReloadStateRoot 'wrapper-attempt.json'
+$h3ToolDispatchHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-ToolDispatchRepair.ps1'
+$h3ToolDispatchRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-tool-dispatch-repair.json'
+$h3ToolDispatchStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-tool-dispatch'
+$h3ToolDispatchMarker=Join-Path $h3ToolDispatchStateRoot 'wrapper-request.json'
+$h3ToolDispatchAttempt=Join-Path $h3ToolDispatchStateRoot 'wrapper-attempt.json'
 $hpenvyWakeHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Wake.ps1'
 $hpenvyWakeRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-wake.json'
 $hpenvyWakeStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-wake'
 $hpenvyWakeAttempt=Join-Path $hpenvyWakeStateRoot 'wrapper-attempt.json'
 $log='C:\ProgramData\AFZ\OpenAIAgent\logs\control-wrapper.log'
-New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,$h3GatewayReloadStateRoot,$hpenvyWakeStateRoot,(Split-Path $log -Parent)|Out-Null
+New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,$h3GatewayReloadStateRoot,$h3ToolDispatchStateRoot,$hpenvyWakeStateRoot,(Split-Path $log -Parent)|Out-Null
 function WLog([string]$m){try{Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) $m" -Encoding UTF8}catch{}}
 
 # Fixed-target, idempotent HP Envy WOL hook. The helper accepts only the known HP Envy
@@ -120,6 +125,27 @@ try{
     }
   }
 }catch{WLog "h3 hermes native gateway reload wrapper error=$($_.Exception.Message)"}
+
+# Guarded one-shot H3 Hermes execute/verify correction. This reverses the
+# accidental disabling of tool-use/task-completion guidance without changing
+# the provider/model, Ollama, network, or active gateway process.
+try{
+  if((Test-Path -LiteralPath $h3ToolDispatchRequest -PathType Leaf) -and (Test-Path -LiteralPath $h3ToolDispatchHelper -PathType Leaf)){
+    $r=Get-Content -LiteralPath $h3ToolDispatchRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=[string]$r.id;$status=([string]$r.status).Trim().ToUpperInvariant();$action=([string]$r.action).Trim().ToLowerInvariant()
+    $already=$false
+    if(Test-Path -LiteralPath $h3ToolDispatchMarker -PathType Leaf){try{$m=Get-Content -LiteralPath $h3ToolDispatchMarker -Raw|ConvertFrom-Json;$already=([string]$m.id -eq $id -and [int]$m.exitCode -eq 0)}catch{}}
+    if($status -eq 'ACTIVE' -and $action -eq 'repair-local-tool-dispatch' -and $id -match '^h3-hermes-tool-dispatch-repair-[A-Za-z0-9._-]+$' -and -not $already){
+      WLog "h3 hermes execute-verify repair start id=$id"
+      $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3ToolDispatchHelper -InstallRoot $InstallRoot -RequestPath $h3ToolDispatchRequest 2>&1|Out-String).Trim()
+      $code=$LASTEXITCODE
+      $attempt=[ordered]@{id=$id;attemptedAt=(Get-Date -Format o);exitCode=$code;output=$raw}
+      $attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3ToolDispatchAttempt -Encoding UTF8
+      if($code -eq 0){$attempt|ConvertTo-Json -Depth 12|Set-Content -LiteralPath $h3ToolDispatchMarker -Encoding UTF8}
+      WLog "h3 hermes execute-verify repair finish id=$id exit=$code"
+    }
+  }
+}catch{WLog "h3 hermes execute-verify wrapper error=$($_.Exception.Message)"}
 
 if(-not(Test-Path -LiteralPath $core -PathType Leaf)){throw "Preserved AFZ control core missing: $core"}
 WLog 'launching preserved AFZ control core'
