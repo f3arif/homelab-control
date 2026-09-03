@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# HOTRELOAD_CANARY=20260901T0410Z h3-docker-preflight-binding
+# HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
