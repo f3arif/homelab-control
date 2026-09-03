@@ -97,6 +97,70 @@ function Get-WorkerProcesses {
     Select-Object ProcessId,ParentProcessId,Name,CommandLine)
 }
 
+# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1
+function Get-OllamaWatchdogReadOnlyAudit {
+  $watchdogTaskName='AFZ H3 Ollama Liveness'
+  $taskO=Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+  $taskInfoO=$(if($taskO){Get-ScheduledTaskInfo -TaskName $watchdogTaskName -ErrorAction SilentlyContinue}else{$null})
+  $actionsO=@()
+  $triggersO=@()
+  $principalO=$null
+  if($taskO){
+    $actionsO=@($taskO.Actions|ForEach-Object{[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments;workingDirectory=[string]$_.WorkingDirectory}})
+    $triggersO=@($taskO.Triggers|ForEach-Object{[ordered]@{enabled=[bool]$_.Enabled;startBoundary=[string]$_.StartBoundary;endBoundary=[string]$_.EndBoundary;repetitionInterval=[string]$_.Repetition.Interval;repetitionDuration=[string]$_.Repetition.Duration;executionTimeLimit=[string]$_.ExecutionTimeLimit}})
+    $principalO=[ordered]@{userId=[string]$taskO.Principal.UserId;logonType=[string]$taskO.Principal.LogonType;runLevel=[string]$taskO.Principal.RunLevel}
+  }
+
+  $ollamaProcesses=@(Get-CimInstance Win32_Process -Filter "Name='ollama.exe'" -ErrorAction SilentlyContinue|ForEach-Object{
+    [ordered]@{processId=[int]$_.ProcessId;parentProcessId=[int]$_.ParentProcessId;commandLine=[string]$_.CommandLine;creationDate=[string]$_.CreationDate;executablePath=[string]$_.ExecutablePath}
+  })
+
+  $listeners=@()
+  try{$listeners=@(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction Stop|ForEach-Object{[ordered]@{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;owningProcess=[int]$_.OwningProcess;state=[string]$_.State}})}catch{}
+
+  $modelsReachable=$false
+  $modelListed=$false
+  $modelIds=@()
+  $modelsError=$null
+  try{
+    $m=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -Method Get -TimeoutSec 4
+    $modelIds=@($m.data|ForEach-Object{[string]$_.id})
+    $modelsReachable=$true
+    $modelListed=('qwen3.6:35b-a3b' -in $modelIds)
+  }catch{$modelsError=$_.Exception.GetType().FullName}
+
+  $nativePsReachable=$false
+  $loadedModels=@()
+  $nativePsError=$null
+  try{
+    $ps=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/ps' -Method Get -TimeoutSec 4
+    $loadedModels=@($ps.models|ForEach-Object{[ordered]@{name=[string]$_.name;model=[string]$_.model;size=[int64]$_.size;sizeVram=[int64]$_.size_vram;expiresAt=[string]$_.expires_at}})
+    $nativePsReachable=$true
+  }catch{$nativePsError=$_.Exception.GetType().FullName}
+
+  $recentEvents=@()
+  $eventReadError=$null
+  try{
+    $since=(Get-Date).AddHours(-3)
+    $recentEvents=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$since} -MaxEvents 150 -ErrorAction Stop |
+      Where-Object {([string]$_.ProviderName -match '(?i)ollama|nvidia|cuda') -or ([string]$_.Message -match '(?i)ollama|nvidia|cuda|llama')} |
+      Select-Object -First 20 |
+      ForEach-Object{
+        $msg=[string]$_.Message
+        if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
+        [ordered]@{timeCreated=$(if($_.TimeCreated){$_.TimeCreated.ToString('o')}else{$null});providerName=[string]$_.ProviderName;id=[int]$_.Id;levelDisplayName=[string]$_.LevelDisplayName;message=$msg}
+      })
+  }catch{$eventReadError=$_.Exception.GetType().FullName}
+
+  [ordered]@{
+    readOnly=$true;remoteMutation='NONE';taskName=$watchdogTaskName;taskExists=[bool]$taskO;taskState=$(if($taskO){[string]$taskO.State}else{$null});
+    lastTaskResult=$(if($taskInfoO){[int64]$taskInfoO.LastTaskResult}else{$null});lastRunTime=$(if($taskInfoO){$taskInfoO.LastRunTime.ToString('o')}else{$null});nextRunTime=$(if($taskInfoO){$taskInfoO.NextRunTime.ToString('o')}else{$null});numberOfMissedRuns=$(if($taskInfoO){[int64]$taskInfoO.NumberOfMissedRuns}else{$null});
+    principal=$principalO;actions=$actionsO;triggers=$triggersO;ollamaProcessCount=$ollamaProcesses.Count;ollamaProcesses=$ollamaProcesses;listenerCount=$listeners.Count;listeners=$listeners;
+    modelsReachable=$modelsReachable;modelListed=$modelListed;modelIds=$modelIds;modelsError=$modelsError;nativePsReachable=$nativePsReachable;loadedModels=$loadedModels;nativePsError=$nativePsError;
+    recentApplicationEvents=$recentEvents;eventReadError=$eventReadError;capturedAt=(Get-Date -Format o)
+  }
+}
+
 $canonicalWorkerCommand='"C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\AFZ\H3Worker\AFZ-H3-Worker.ps1"'
 $canonicalEscaped=$canonicalWorkerCommand.Replace('"','""')
 $canonicalLauncher=@(
@@ -139,6 +203,7 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
   $hi=Get-Item -LiteralPath $heartbeat -ErrorAction SilentlyContinue
   if($hi){$heartbeatLastWrite=$hi.LastWriteTime.ToString('o');$heartbeatAgeSeconds=[math]::Round(((Get-Date)-$hi.LastWriteTime).TotalSeconds,1)}
 }
+$ollamaWatchdog=Get-OllamaWatchdogReadOnlyAudit
 
 $classification='H3_GENERIC_WORKER_READONLY_UNKNOWN'
 if($workers.Count -gt 0){$classification='H3_GENERIC_WORKER_RUNNING'}
@@ -159,7 +224,7 @@ else{$classification='H3_GENERIC_WORKER_TASK_NOT_RUNNING_START_ELIGIBLE'}
   actions=$actions;principal=$principal;hiddenActionVerified=$hiddenActionOk;principalVerified=$principalOk;
   workerProcessCount=$workers.Count;workerProcesses=$workers;workerScriptExists=$workerScriptExists;workerSha=$workerSha;expectedWorkerSha=$expectedWorkerSha;
   launcherExists=$launcherExists;launcherSha=$launcherSha;canonicalLauncherSha=$canonicalLauncherSha;knownCorruptLauncherSha=$knownCorruptLauncherSha;launcherState=$launcherState;
-  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;capturedAt=(Get-Date -Format o)
+  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;ollamaWatchdog=$ollamaWatchdog;capturedAt=(Get-Date -Format o)
 }|ConvertTo-Json -Depth 12 -Compress
 '@
 
