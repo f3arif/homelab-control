@@ -102,6 +102,7 @@ $hermes=Join-Path $root 'bin\hermes.exe'
 $config=Join-Path $root 'config.yaml'
 $watchdog=Join-Path $root 'afz-ensure-ollama.ps1'
 $watchdogTask='AFZ H3 Ollama Liveness'
+$ollamaServerTask='AFZ H3 Ollama Server'
 $utf8=New-Object Text.UTF8Encoding($false)
 function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 16 -Compress;exit $code}
 function Probe-Ollama {
@@ -129,15 +130,29 @@ if(-not(Test-Path -LiteralPath $config -PathType Leaf)){Emit ([ordered]@{ok=$fal
 # IMPORTANT: no marker short-circuit is permitted here. Every invocation performs
 # a fresh endpoint probe so a prior success can never masquerade as current health.
 $before=Probe-Ollama
-$ollamaExe=$null;$ollamaStarted=$false;$ollamaPid=$null;$ollamaRecycled=$false;$recycledProcessCount=0
+$ollamaExe=Find-Ollama
+if([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=[bool]$before.reachable}) 43}
+# HERMES_R37_TASK_SCHEDULER_OWNS_OLLAMA
+# The server task directly owns ollama.exe. This avoids tying the model server to
+# the lifetime of the SSH-hosted repair PowerShell process. S4U keeps the Faiz
+# user profile/model path while allowing the task to run without an interactive logon.
+$ollamaServerTaskInstalled=$false;$ollamaServerTaskState=$null
+try{
+  $serverAction=New-ScheduledTaskAction -Execute $ollamaExe -Argument 'serve' -WorkingDirectory (Split-Path -Parent $ollamaExe)
+  $serverTrigger=New-ScheduledTaskTrigger -AtStartup
+  $serverSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+  $serverPrincipal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Highest
+  Register-ScheduledTask -TaskName $ollamaServerTask -Action $serverAction -Trigger $serverTrigger -Settings $serverSettings -Principal $serverPrincipal -Force|Out-Null
+  $serverTaskReadback=Get-ScheduledTask -TaskName $ollamaServerTask -ErrorAction Stop
+  $ollamaServerTaskInstalled=$true;$ollamaServerTaskState=[string]$serverTaskReadback.State
+}catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_TASK_INSTALL_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name}) 44}
+$ollamaStarted=$false;$ollamaPid=$null;$ollamaRecycled=$false;$recycledProcessCount=0
 if(-not [bool]$before.reachable){
   Start-Sleep -Seconds 2
   $confirm=Probe-Ollama
   if([bool]$confirm.reachable){$before=$confirm}
 }
 if(-not [bool]$before.reachable){
-  $ollamaExe=Find-Ollama
-  if([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=$false}) 43}
   $stale=@(Get-OllamaServeProcesses)
   if($stale.Count -gt 0){
     foreach($proc in $stale){
@@ -146,9 +161,9 @@ if(-not [bool]$before.reachable){
     if($recycledProcessCount -gt 0){$ollamaRecycled=$true;Start-Sleep -Seconds 2}
   }
   try{
-    $p=Start-Process -FilePath $ollamaExe -ArgumentList @('serve') -WindowStyle Hidden -PassThru
-    $ollamaPid=[int]$p.Id;$ollamaStarted=$true
-  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 44}
+    Start-ScheduledTask -TaskName $ollamaServerTask -ErrorAction Stop
+    $ollamaStarted=$true
+  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_TASK_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount}) 44}
 }
 $live=$before
 if(-not [bool]$live.reachable){
@@ -195,10 +210,14 @@ function Test-AFZOllamaEndpoint {
 if(Test-AFZOllamaEndpoint){exit 0}
 Start-Sleep -Seconds 2
 if(Test-AFZOllamaEndpoint){exit 0}
-`$running=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]`$_.CommandLine) -match '(?i)ollama(?:[.]exe)?\s+serve'})
-foreach(`$proc in `$running){try{Stop-Process -Id ([int]`$proc.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}}
-Start-Sleep -Seconds 2
-try{Start-Process -FilePath '$escapedExe' -ArgumentList @('serve') -WindowStyle Hidden|Out-Null}catch{exit 1}
+try{
+  `$serverTask=Get-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction Stop
+  if([string]`$serverTask.State -eq 'Running'){
+    Stop-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+  }
+  Start-ScheduledTask -TaskName '$ollamaServerTask' -ErrorAction Stop
+}catch{exit 1}
 for(`$i=0;`$i -lt 20;`$i++){
   Start-Sleep -Seconds 2
   if(Test-AFZOllamaEndpoint){exit 0}
@@ -207,10 +226,11 @@ exit 1
 "@
     [IO.File]::WriteAllText($watchdog,$wd,$utf8)
     $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$watchdog+'"')
-    $trigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
-    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
-    $principal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force|Out-Null
+    $startupTrigger=New-ScheduledTaskTrigger -AtStartup
+    $repeatTrigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
+    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+    $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger @($startupTrigger,$repeatTrigger) -Settings $settings -Principal $principal -Force|Out-Null
     # R36: launch the detached Task Scheduler guard immediately. Starting ollama
     # directly inside an SSH-hosted PowerShell process can die with that SSH job;
     # the task is the persistent owner and must be exercised before readiness.
@@ -232,7 +252,7 @@ Emit ([ordered]@{
   providerName='ollama';providerIdentity='custom:ollama';providerConfigured=$true;providerApi=$baseUrl;providerTransport='openai_chat';
   runtimeResolved=$true;runtimeProvider='custom';runtimeBaseUrl=$baseUrl;runtimeApiMode='chat_completions';
   ollamaReachable=$true;selectedModel=$model;modelListed=$true;modelCount=[int]$final.modelCount;contextLength=65536;
-  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;
+  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;ollamaServerTask=$ollamaServerTask;ollamaServerTaskInstalled=$ollamaServerTaskInstalled;ollamaServerTaskState=$ollamaServerTaskState;
   watchdogInstalled=$watchdogInstalled;watchdogTask=$watchdogTask;watchdogTaskState=$watchdogTaskState;watchdogTaskLastResult=$watchdogTaskLastResult;watchdogTaskLastRunTime=$watchdogTaskLastRunTime;watchdogError=$watchdogError;
   modelPullStarted=$false;generationTestStarted=$false;messagingGatewayTouched=$false;networkChanged=$false;observedAt=(Get-Date -Format o)
 }) 0
