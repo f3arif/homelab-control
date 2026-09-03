@@ -1,0 +1,2 @@
+Purpose: force a fresh exact-SHA AFZ agent sync so Hermes r35 top-level model runtime repair reaches Windows-main/H3.
+No runtime action is encoded in this marker.
