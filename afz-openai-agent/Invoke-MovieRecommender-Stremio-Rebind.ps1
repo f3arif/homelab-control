@@ -12,6 +12,7 @@ $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\movierecommender-stremio-rebind'
 $stateFile=Join-Path $stateRoot 'latest.json'
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $diagFile=Join-Path $diagRoot 'AFZ-MovieRecommender-Stremio-Rebind-Latest.json'
+$diagTextFile=Join-Path $diagRoot 'AFZ-MovieRecommender-Stremio-Rebind-Latest.txt'
 $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
@@ -24,7 +25,10 @@ function Write-Json([string]$Path,$Object){
 }
 function Publish-Diagnostic($Object){
   try{
-    if(Test-Path -LiteralPath $diagRoot -PathType Container){Write-Json $diagFile $Object}
+    if(Test-Path -LiteralPath $diagRoot -PathType Container){
+      Write-Json $diagFile $Object
+      Write-Json $diagTextFile $Object
+    }
   }catch{}
 }
 function Invoke-Native([string]$File,[string[]]$ArgumentList,[string]$WorkingDirectory=$projectRoot){
