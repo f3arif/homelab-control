@@ -105,15 +105,15 @@ try{
   if($ps.Code -eq 0){
     foreach($line in $ps.Output){
       if($line -match '18766'){
-        $parts=$line -split '\|',2
+        $parts=@($line -split '\|',2)
         $dockerPortOwners += [pscustomobject]@{name=$parts[0];ports=$(if($parts.Count -gt 1){$parts[1]}else{''})}
       }
     }
   }
-  $tcpOwners=Get-ListenerOwners 18766
+  $tcpOwners=@(Get-ListenerOwners 18766)
   $foreignDocker=@($dockerPortOwners | Where-Object {$_.name -ne 'afz-stremio-catalog'})
-  if($foreignDocker.Count -gt 0){throw ('HOST_PORT_18766_DOCKER_CONFLICT: '+(($foreignDocker | ConvertTo-Json -Compress) -replace '\s+',' '))}
-  if($tcpOwners.Count -gt 0 -and $dockerPortOwners.Count -eq 0){
+  if(@($foreignDocker).Count -gt 0){throw ('HOST_PORT_18766_DOCKER_CONFLICT: '+(($foreignDocker | ConvertTo-Json -Compress) -replace '\s+',' '))}
+  if(@($tcpOwners).Count -gt 0 -and @($dockerPortOwners).Count -eq 0){
     throw ('HOST_PORT_18766_PROCESS_CONFLICT: '+(($tcpOwners | ConvertTo-Json -Compress) -replace '\s+',' '))
   }
 
@@ -185,7 +185,7 @@ try{
   if(-not $catalog -or -not ($catalog.PSObject.Properties.Name -contains 'metas')){throw 'CATALOG_ACCEPTANCE_FAILED'}
 
   $inspect=Invoke-Docker @('inspect','-f','{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}','afz-stremio-catalog')
-  if($inspect.Code -ne 0 -or $inspect.Output.Count -lt 1){throw 'CONTAINER_INSPECT_FAILED'}
+  if($inspect.Code -ne 0 -or @($inspect.Output).Count -lt 1){throw 'CONTAINER_INSPECT_FAILED'}
   $stateLine=[string]$inspect.Output[-1]
   if($stateLine -notmatch '^running\|(healthy|none)$'){throw "CONTAINER_NOT_RUNNING_HEALTHY state=$stateLine"}
 

@@ -2,7 +2,7 @@
   "schema": 1,
   "project": "movierecommender",
   "action": "stremio-rebind",
-  "job_id": "movierecommender-stremio-rebind-18766-20260903-r2",
+  "job_id": "movierecommender-stremio-rebind-18766-20260903-r3",
   "status": "active",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
