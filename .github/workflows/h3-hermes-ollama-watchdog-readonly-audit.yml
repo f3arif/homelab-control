@@ -1,0 +1,166 @@
+name: H3 Hermes Ollama Watchdog Read Only Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-ollama-watchdog-readonly-audit.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: h3-hermes-ollama-watchdog-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase onto current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Add read-only Ollama watchdog telemetry to H3 generic audit
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1')
+          text = p.read_text(encoding='utf-8')
+          marker = '# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1'
+          if marker in text:
+              raise SystemExit('Ollama watchdog read-only audit already present')
+
+          anchor = '''function Get-WorkerProcesses {
+  @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { [string]$_.CommandLine -like ('*'+$workerScript+'*') } |
+    Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+}
+'''
+          audit = r'''
+# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1
+function Get-OllamaWatchdogReadOnlyAudit {
+  $watchdogTaskName='AFZ H3 Ollama Liveness'
+  $taskO=Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+  $taskInfoO=$(if($taskO){Get-ScheduledTaskInfo -TaskName $watchdogTaskName -ErrorAction SilentlyContinue}else{$null})
+  $actionsO=@()
+  $triggersO=@()
+  $principalO=$null
+  if($taskO){
+    $actionsO=@($taskO.Actions|ForEach-Object{[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments;workingDirectory=[string]$_.WorkingDirectory}})
+    $triggersO=@($taskO.Triggers|ForEach-Object{[ordered]@{enabled=[bool]$_.Enabled;startBoundary=[string]$_.StartBoundary;endBoundary=[string]$_.EndBoundary;repetitionInterval=[string]$_.Repetition.Interval;repetitionDuration=[string]$_.Repetition.Duration;executionTimeLimit=[string]$_.ExecutionTimeLimit}})
+    $principalO=[ordered]@{userId=[string]$taskO.Principal.UserId;logonType=[string]$taskO.Principal.LogonType;runLevel=[string]$taskO.Principal.RunLevel}
+  }
+
+  $ollamaProcesses=@(Get-CimInstance Win32_Process -Filter "Name='ollama.exe'" -ErrorAction SilentlyContinue|ForEach-Object{
+    [ordered]@{processId=[int]$_.ProcessId;parentProcessId=[int]$_.ParentProcessId;commandLine=[string]$_.CommandLine;creationDate=[string]$_.CreationDate;executablePath=[string]$_.ExecutablePath}
+  })
+
+  $listeners=@()
+  try{$listeners=@(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction Stop|ForEach-Object{[ordered]@{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;owningProcess=[int]$_.OwningProcess;state=[string]$_.State}})}catch{}
+
+  $modelsReachable=$false
+  $modelListed=$false
+  $modelIds=@()
+  $modelsError=$null
+  try{
+    $m=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -Method Get -TimeoutSec 4
+    $modelIds=@($m.data|ForEach-Object{[string]$_.id})
+    $modelsReachable=$true
+    $modelListed=('qwen3.6:35b-a3b' -in $modelIds)
+  }catch{$modelsError=$_.Exception.GetType().FullName}
+
+  $nativePsReachable=$false
+  $loadedModels=@()
+  $nativePsError=$null
+  try{
+    $ps=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/ps' -Method Get -TimeoutSec 4
+    $loadedModels=@($ps.models|ForEach-Object{[ordered]@{name=[string]$_.name;model=[string]$_.model;size=[int64]$_.size;sizeVram=[int64]$_.size_vram;expiresAt=[string]$_.expires_at}})
+    $nativePsReachable=$true
+  }catch{$nativePsError=$_.Exception.GetType().FullName}
+
+  $recentEvents=@()
+  $eventReadError=$null
+  try{
+    $since=(Get-Date).AddHours(-3)
+    $recentEvents=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$since} -MaxEvents 150 -ErrorAction Stop |
+      Where-Object {([string]$_.ProviderName -match '(?i)ollama|nvidia|cuda') -or ([string]$_.Message -match '(?i)ollama|nvidia|cuda|llama')} |
+      Select-Object -First 20 |
+      ForEach-Object{
+        $msg=[string]$_.Message
+        if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
+        [ordered]@{timeCreated=$(if($_.TimeCreated){$_.TimeCreated.ToString('o')}else{$null});providerName=[string]$_.ProviderName;id=[int]$_.Id;levelDisplayName=[string]$_.LevelDisplayName;message=$msg}
+      })
+  }catch{$eventReadError=$_.Exception.GetType().FullName}
+
+  [ordered]@{
+    readOnly=$true;remoteMutation='NONE';taskName=$watchdogTaskName;taskExists=[bool]$taskO;taskState=$(if($taskO){[string]$taskO.State}else{$null});
+    lastTaskResult=$(if($taskInfoO){[int64]$taskInfoO.LastTaskResult}else{$null});lastRunTime=$(if($taskInfoO){$taskInfoO.LastRunTime.ToString('o')}else{$null});nextRunTime=$(if($taskInfoO){$taskInfoO.NextRunTime.ToString('o')}else{$null});numberOfMissedRuns=$(if($taskInfoO){[int64]$taskInfoO.NumberOfMissedRuns}else{$null});
+    principal=$principalO;actions=$actionsO;triggers=$triggersO;ollamaProcessCount=$ollamaProcesses.Count;ollamaProcesses=$ollamaProcesses;listenerCount=$listeners.Count;listeners=$listeners;
+    modelsReachable=$modelsReachable;modelListed=$modelListed;modelIds=$modelIds;modelsError=$modelsError;nativePsReachable=$nativePsReachable;loadedModels=$loadedModels;nativePsError=$nativePsError;
+    recentApplicationEvents=$recentEvents;eventReadError=$eventReadError;capturedAt=(Get-Date -Format o)
+  }
+}
+'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'Expected one worker-process anchor, got {text.count(anchor)}')
+          text = text.replace(anchor, anchor + audit, 1)
+
+          anchor2 = '''$heartbeatLastWrite=$null
+$heartbeatAgeSeconds=$null
+if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
+  $hi=Get-Item -LiteralPath $heartbeat -ErrorAction SilentlyContinue
+  if($hi){$heartbeatLastWrite=$hi.LastWriteTime.ToString('o');$heartbeatAgeSeconds=[math]::Round(((Get-Date)-$hi.LastWriteTime).TotalSeconds,1)}
+}
+'''
+          replacement2 = anchor2 + '''$ollamaWatchdog=Get-OllamaWatchdogReadOnlyAudit
+'''
+          if text.count(anchor2) != 1:
+              raise SystemExit(f'Expected one heartbeat anchor, got {text.count(anchor2)}')
+          text = text.replace(anchor2, replacement2, 1)
+
+          old3 = '''  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;capturedAt=(Get-Date -Format o)
+'''
+          new3 = '''  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;ollamaWatchdog=$ollamaWatchdog;capturedAt=(Get-Date -Format o)
+'''
+          if text.count(old3) != 1:
+              raise SystemExit(f'Expected one output anchor, got {text.count(old3)}')
+          text = text.replace(old3, new3, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Parse and enforce read-only audit contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'H3 Ollama watchdog audit parse failed'}
+          $c=Get-Content $p -Raw
+          foreach($required in @('HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1','Get-ScheduledTaskInfo','Get-NetTCPConnection','/v1/models','/api/ps','Get-WinEvent','remoteMutation=''NONE''')){if(-not $c.Contains($required)){throw "Missing read-only invariant: $required"}}
+          $segment=($c -split '# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1',2)[1]
+          foreach($forbidden in @('Stop-Process','Start-Process','Start-ScheduledTask','Stop-ScheduledTask','Set-ScheduledTask','Register-ScheduledTask','New-NetFirewallRule','Remove-NetFirewallRule','ollama pull','/api/generate')){if($segment.Contains($forbidden)){throw "Forbidden mutation in audit segment: $forbidden"}}
+          'H3_OLLAMA_WATCHDOG_READONLY_AUDIT=PASS'
+
+      - name: Commit audit and publish exact deploy signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1
+          git commit -m 'Add read-only H3 Ollama watchdog telemetry'
+          patch_sha=$(git rev-parse HEAD)
+          printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m 'Signal H3 Ollama watchdog read-only audit'
+          git push origin HEAD:main
+          echo "H3_OLLAMA_WATCHDOG_AUDIT_SHA=$patch_sha"
