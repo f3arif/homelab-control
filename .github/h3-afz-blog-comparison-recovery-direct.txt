@@ -1,0 +1,6 @@
+target=h3
+job=afz-blog-qwen35b-vs-ridge27b-20260902-r1
+action=recover-saved-35b-then-run-ridge-only-if-unattempted
+replay_35b=false
+publish_article=false
+production_db_mutation=false
