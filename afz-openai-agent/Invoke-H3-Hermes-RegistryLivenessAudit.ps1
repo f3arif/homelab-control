@@ -70,6 +70,13 @@ function Save-Result($result,[string]$transport){
     indeterminateCount=$(if($result.PSObject.Properties.Name -contains 'indeterminateCount'){$result.indeterminateCount}else{$null})
     registryLastWriteUtc=$(if($result.PSObject.Properties.Name -contains 'registryLastWriteUtc'){[string]$result.registryLastWriteUtc}else{$null})
     entries=$safeEntries;gatewayProcesses=$safeGateway
+    ollamaReachable=$(if($result.PSObject.Properties.Name -contains 'ollamaReachable'){[bool]$result.ollamaReachable}else{$false})
+    ollamaModelListed=$(if($result.PSObject.Properties.Name -contains 'ollamaModelListed'){[bool]$result.ollamaModelListed}else{$false})
+    ollamaModelCount=$(if($result.PSObject.Properties.Name -contains 'ollamaModelCount'){$result.ollamaModelCount}else{$null})
+    ollamaError=$(if($result.PSObject.Properties.Name -contains 'ollamaError'){[string]$result.ollamaError}else{$null})
+    ollamaServeProcesses=$(if($result.PSObject.Properties.Name -contains 'ollamaServeProcesses'){@($result.ollamaServeProcesses)}else{@()})
+    ollamaWatchdog=$(if($result.PSObject.Properties.Name -contains 'ollamaWatchdog'){$result.ollamaWatchdog}else{$null})
+    modelConfig=$(if($result.PSObject.Properties.Name -contains 'modelConfig'){$result.modelConfig}else{$null})
     providerTouched=$false;modelGenerationStarted=$false;ollamaMutationStarted=$false;networkChanged=$false;gatewayRestarted=$false;registryMutated=$false
     error=$(if($result.PSObject.Properties.Name -contains 'error'){[string]$result.error}else{$null})
     observedAt=(Get-Date -Format o)
