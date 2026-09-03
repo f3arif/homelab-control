@@ -35,6 +35,16 @@ jobs:
         run: |
           set -u
           echo 'WINDOWS_MAIN_CONTROL_HEALTH_BEGIN'
+          if tailscale ping --timeout=5s --c=1 100.70.25.8; then
+            echo 'WINDOWS_MAIN_TAILSCALE_PING=PASS'
+          else
+            echo 'WINDOWS_MAIN_TAILSCALE_PING=FAIL'
+          fi
+          if nc -z -w 3 100.70.25.8 8797; then
+            echo 'WINDOWS_MAIN_TCP8797_REACHABLE=PASS'
+          else
+            echo 'WINDOWS_MAIN_TCP8797_REACHABLE=FAIL'
+          fi
           if health=$(curl --silent --show-error --fail \
             --connect-timeout 3 --max-time 12 \
             http://100.70.25.8:8797/health 2>&1); then
