@@ -59,16 +59,21 @@ jobs:
               print(f'TAILNET_PEER host={host} online={str(online).lower()} ips={ips}')
           PY
 
-      - name: Wake H3 if needed and prove SSH
+      - name: Prove native H3 Tailscale SSH or wake
         shell: bash
         run: |
           set -u
-          if nc -z -w 3 100.106.186.118 22; then
-            echo 'H3_SSH_REACHABLE=PASS already-online'
+          probe_h3() {
+            timeout 20s tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "if ($env:COMPUTERNAME -eq ''DESKTOP-H3R6CQN'') { Write-Output ''H3_NATIVE_TS_SSH=PASS''; exit 0 } else { exit 41 }"'
+          }
+
+          echo 'Trying native Tailscale SSH directly; raw TCP :22 is not used as a gate.'
+          if probe_h3; then
             exit 0
           fi
+          echo 'H3_NATIVE_TS_SSH=UNAVAILABLE_INITIAL'
 
-          echo 'H3 SSH offline; trying existing Pi WoL service opportunistically.'
+          echo 'Trying existing Pi WoL service opportunistically.'
           if curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3; then
             echo
             echo 'PI_WOL_REQUEST=PASS'
@@ -103,14 +108,14 @@ jobs:
             echo "HPENVY_WOL_RELAY=UNAVAILABLE exit=$code"
           fi
 
-          for attempt in $(seq 1 36); do
-            if nc -z -w 3 100.106.186.118 22; then
-              echo "H3_SSH_REACHABLE=PASS attempt=$attempt"
+          for attempt in $(seq 1 12); do
+            sleep 10
+            if probe_h3; then
+              echo "H3_NATIVE_TS_SSH_RECOVERED attempt=$attempt"
               exit 0
             fi
-            sleep 5
           done
-          echo 'H3_SSH_REACHABLE=FAIL_NO_AVAILABLE_WAKE_RELAY' >&2
+          echo 'H3_NATIVE_TS_SSH=FAIL_NO_AVAILABLE_PATH' >&2
           exit 1
 
       - name: Launch exact-SHA guarded H3 recovery
