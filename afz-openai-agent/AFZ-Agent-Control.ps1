@@ -26,9 +26,24 @@ $h3GatewayReloadRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-her
 $h3GatewayReloadStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-gateway-reload'
 $h3GatewayReloadMarker=Join-Path $h3GatewayReloadStateRoot 'wrapper-request.json'
 $h3GatewayReloadAttempt=Join-Path $h3GatewayReloadStateRoot 'wrapper-attempt.json'
+$hpenvyWakeHelper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-HPEnvy-Wake.ps1'
+$hpenvyWakeRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\hpenvy-wake.json'
+$hpenvyWakeStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hpenvy-wake'
+$hpenvyWakeAttempt=Join-Path $hpenvyWakeStateRoot 'wrapper-attempt.json'
 $log='C:\ProgramData\AFZ\OpenAIAgent\logs\control-wrapper.log'
-New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,$h3GatewayReloadStateRoot,(Split-Path $log -Parent)|Out-Null
+New-Item -ItemType Directory -Force -Path $stateRoot,$h3RegistryStateRoot,$h3TelegramAuditStateRoot,$h3GatewayReloadStateRoot,$hpenvyWakeStateRoot,(Split-Path $log -Parent)|Out-Null
 function WLog([string]$m){try{Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) $m" -Encoding UTF8}catch{}}
+
+# Fixed-target, idempotent HP Envy WOL hook. The helper accepts only the known HP Envy
+# MAC/LAN target and records success by request id, so control restarts cannot loop WOL.
+try{
+  if((Test-Path -LiteralPath $hpenvyWakeRequest -PathType Leaf) -and (Test-Path -LiteralPath $hpenvyWakeHelper -PathType Leaf)){
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hpenvyWakeHelper -InstallRoot $InstallRoot -RequestPath $hpenvyWakeRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    [ordered]@{attemptedAt=(Get-Date -Format o);exitCode=$code;output=$raw}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $hpenvyWakeAttempt -Encoding UTF8
+    WLog "hpenvy wake hook exit=$code"
+  }
+}catch{WLog "hpenvy wake wrapper error=$($_.Exception.Message)"}
 
 # Existing AFZ Blog migration one-shot binding.
 try{
