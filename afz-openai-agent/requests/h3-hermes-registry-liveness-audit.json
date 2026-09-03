@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "h3-hermes-registry-liveness-audit-20260903-r2",
+  "enabled": true,
+  "action": "audit-registry-liveness",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "read_only": true,
+  "mutation": "none",
+  "restart_gateway": false,
+  "change_provider": false,
+  "run_model_generation": false,
+  "mutate_ollama": false,
+  "change_network": false
+}
