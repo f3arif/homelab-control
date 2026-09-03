@@ -17,7 +17,7 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 function Save([bool]$Ok,[string]$Status,[string]$Message,$Extra=$null){$o=[ordered]@{ok=$Ok;status=$Status;message=$Message;jobId=$JobId;expectedSha=$ExpectedSha;mode=$Mode;target='DESKTOP-H3R6CQN';modelReplay35B=$false;ridgeCallAllowedOnlyIfUnattempted=$true;updatedAt=(Get-Date -Format o)};if($Extra){foreach($p in $Extra.PSObject.Properties){$o[$p.Name]=$p.Value}};[IO.File]::WriteAllText($resultFile,($o|ConvertTo-Json -Depth 20 -Compress),$utf8)}
 function ReadResult{if(Test-Path $resultFile){try{return Get-Content $resultFile -Raw|ConvertFrom-Json}catch{}};return $null}
-function Capture([string]$File,[string[]]$Args,[int]$Timeout=180){$tag=[guid]::NewGuid().ToString('N');$o=Join-Path $env:TEMP ($tag+'.out');$e=Join-Path $env:TEMP ($tag+'.err');try{$p=Start-Process -FilePath $File -ArgumentList $Args -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e;if(-not $p.WaitForExit($Timeout*1000)){try{$p.Kill()}catch{};throw "timeout ${Timeout}s"};return [pscustomobject]@{ExitCode=[int]$p.ExitCode;StdOut=$(if(Test-Path $o){Get-Content $o -Raw}else{''});StdErr=$(if(Test-Path $e){Get-Content $e -Raw}else{''})}}finally{Remove-Item $o,$e -Force -ErrorAction SilentlyContinue}}
+function Capture([string]$File,[string[]]$ArgumentList,[int]$Timeout=180){$tag=[guid]::NewGuid().ToString('N');$o=Join-Path $env:TEMP ($tag+'.out');$e=Join-Path $env:TEMP ($tag+'.err');try{$p=Start-Process -FilePath $File -ArgumentList $ArgumentList -PassThru -NoNewWindow -RedirectStandardOutput $o -RedirectStandardError $e;if(-not $p.WaitForExit($Timeout*1000)){try{$p.Kill()}catch{};throw "timeout ${Timeout}s"};return [pscustomobject]@{ExitCode=[int]$p.ExitCode;StdOut=$(if(Test-Path $o){Get-Content $o -Raw}else{''});StdErr=$(if(Test-Path $e){Get-Content $e -Raw}else{''})}}finally{Remove-Item $o,$e -Force -ErrorAction SilentlyContinue}}
 function Wake-H3{$mac='4C-ED-FB-3F-B0-9E';$bytes=$mac -split '[:-]'|ForEach-Object{[Convert]::ToByte($_,16)};$packet=New-Object byte[] 102;0..5|ForEach-Object{$packet[$_]=0xFF};for($i=1;$i -le 16;$i++){[Array]::Copy($bytes,0,$packet,6+(($i-1)*6),6)};$c=New-Object Net.Sockets.UdpClient;try{$c.EnableBroadcast=$true;foreach($round in 1..4){foreach($port in @(9,7)){$ep=New-Object Net.IPEndPoint ([Net.IPAddress]::Parse('192.168.50.255')),$port;[void]$c.Send($packet,$packet.Length,$ep)};Start-Sleep -Milliseconds 400}}finally{$c.Dispose()}}
 
 if($Mode -eq 'Bootstrap'){
@@ -59,8 +59,8 @@ try {
 "@
   $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remote))
   $ssh=(Get-Command ssh.exe -ErrorAction Stop).Source
-  $args=@('-i',$key,'-o','BatchMode=yes','-o','ConnectTimeout=12','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),'Faiz@100.106.186.118','powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
-  $r=Capture $ssh $args 180
+  $sshArgs=@('-i',$key,'-o','BatchMode=yes','-o','ConnectTimeout=12','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),'Faiz@100.106.186.118','powershell.exe','-NoProfile','-NonInteractive','-EncodedCommand',$encoded)
+  $r=Capture $ssh $sshArgs 180
   if($r.ExitCode -ne 0){throw "H3 recovery SSH failed exit=$($r.ExitCode) stderr=$($r.StdErr) stdout=$($r.StdOut)"}
   $line=@(($r.StdOut -split '\r?\n')|Where-Object{$_ -match '^\{.*\}$'}|Select-Object -Last 1);if(-not $line){throw "No H3 recovery launch JSON. stdout=$($r.StdOut)"}
   $extra=$line|ConvertFrom-Json;if(-not [bool]$extra.ok){throw 'H3 recovery launcher returned ok=false.'}
