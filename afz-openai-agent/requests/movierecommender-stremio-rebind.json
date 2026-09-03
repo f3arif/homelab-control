@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "project": "movierecommender",
+  "action": "stremio-rebind",
+  "job_id": "movierecommender-stremio-rebind-18766-20260903-r1",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "desired_host_port": 18766,
+  "container_port": 8766,
+  "allow_build": false,
+  "rollback_on_failure": true
+}
