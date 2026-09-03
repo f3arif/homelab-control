@@ -141,7 +141,7 @@ function Invoke-GuardedRecoveryV4($Probe){
   if(-not $eligible){return [ordered]@{ok=$true;status='not-eligible';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
   if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){return [ordered]@{ok=$false;status='invalid-synced-sha';jobId=$jobId;mutation='NONE'}}
 
-  $bootstrap=Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
+  $bootstrap=Join-Path $PSScriptRoot 'Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;mutation='NONE'}}
 
   $armed=[ordered]@{
