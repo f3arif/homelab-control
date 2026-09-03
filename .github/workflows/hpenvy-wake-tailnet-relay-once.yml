@@ -1,0 +1,74 @@
+name: HP Envy Wake Tailnet Relay Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-wake-tailnet-relay-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Enable subnet routes and inspect relays
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --accept-routes=true
+          echo '=== TAILSCALE STATUS ==='
+          tailscale status
+          echo '=== RELAY PINGS ==='
+          for ip in 100.70.25.8 100.91.50.9 100.106.186.118 100.99.242.89 100.71.26.69; do
+            echo "--- $ip ---"
+            tailscale ping --timeout=3s --c=1 "$ip" || true
+          done
+          echo '=== ROUTE TO HP ENVY LAN ==='
+          ip route get 192.168.50.185 || true
+      - name: Send fixed HP Envy magic packets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import socket,time,json
+          mac='8c:dc:d4:87:9d:19'
+          m=bytes.fromhex(mac.replace(':',''))
+          packet=b'\xff'*6+m*16
+          targets=['192.168.50.185','192.168.50.255','255.255.255.255']
+          ports=[9,7]
+          sent=[]
+          for target in targets:
+              for port in ports:
+                  for attempt in range(1,4):
+                      s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                      s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1)
+                      try:
+                          n=s.sendto(packet,(target,port))
+                          sent.append({'target':target,'port':port,'attempt':attempt,'bytes':n})
+                      except Exception as e:
+                          sent.append({'target':target,'port':port,'attempt':attempt,'error':repr(e)})
+                      finally:
+                          s.close()
+                      time.sleep(.15)
+          print(json.dumps({'classification':'HPENVY_MAGIC_PACKET_SENT','mac':mac,'packetBytes':len(packet),'attempts':sent},indent=2))
+          PY
+      - name: Observe HP Envy return
+        shell: bash
+        run: |
+          set +e
+          for n in $(seq 1 12); do
+            echo "=== wake observation $n ==="
+            tailscale ping --timeout=3s --c=1 100.71.26.69 && echo 'HPENVY_TAILSCALE=UP' && exit 0
+            sleep 5
+          done
+          echo 'HPENVY_TAILSCALE=STILL_DOWN'
+          exit 0
