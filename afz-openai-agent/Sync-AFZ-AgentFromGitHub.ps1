@@ -289,6 +289,22 @@ function Start-AFZBlogModelComparisonRecoveryOneShot {
 if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){
   $resolvedSha=$ExpectedSha.Trim().ToLowerInvariant()
   if($resolvedSha -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA'}
+
+  # MONOTONIC_STALE_EXACT_SHA_UNPIN_V1
+  # The updater downloads this wrapper fresh on every pass. If a long-lived
+  # watcher is still passing an older exact SHA, advance only when the current
+  # deploy signal is a valid SHA and GitHub proves it descends from the requested
+  # SHA. Never move sideways, backwards, or to an unproven ref.
+  try{
+    $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $signalRaw=(Invoke-WebRequest -Uri ('https://raw.githubusercontent.com/f3arif/homelab-control/main/.github/afz-agent-deploy-signal.txt?nocache='+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 20).Content
+    $signalSha=([string]$signalRaw).Trim().ToLowerInvariant()
+    if($signalSha -match '^[0-9a-f]{40}$' -and $signalSha -ne $resolvedSha){
+      $pair=($resolvedSha+'...'+$signalSha)
+      $cmp=Invoke-RestMethod -Uri ('https://api.github.com/repos/f3arif/homelab-control/compare/'+$pair+'?nocache='+$nonce) -Headers $headers -TimeoutSec 30
+      if(([string]$cmp.status).ToLowerInvariant() -eq 'ahead'){$resolvedSha=$signalSha}
+    }
+  }catch{}
 }else{
   $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $ref=Invoke-RestMethod -Uri ('https://api.github.com/repos/f3arif/homelab-control/git/ref/heads/main?nocache='+$nonce) -Headers $headers -TimeoutSec 30
