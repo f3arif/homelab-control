@@ -17,7 +17,7 @@ concurrency:
 jobs:
   recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -54,10 +54,37 @@ jobs:
               host=(p.get('HostName') or '').lower()
               dns=(p.get('DNSName') or '').lower()
               if any(x in host or x in dns for x in wanted):
-                  rows.append((p.get('HostName'),bool(p.get('Online')),','.join(p.get('TailscaleIPs') or [])))
-          for host,online,ips in sorted(rows,key=lambda x:(x[0] or '')):
-              print(f'TAILNET_PEER host={host} online={str(online).lower()} ips={ips}')
+                  rows.append({
+                      'host':p.get('HostName'),
+                      'online':bool(p.get('Online')),
+                      'active':bool(p.get('Active')),
+                      'ips':','.join(p.get('TailscaleIPs') or []),
+                      'relay':p.get('Relay'),
+                      'curAddr':p.get('CurAddr'),
+                      'lastSeen':p.get('LastSeen')
+                  })
+          for r in sorted(rows,key=lambda x:(x['host'] or '')):
+              print('TAILNET_PEER '+ ' '.join(f'{k}={r[k]}' for k in ('host','online','active','ips','relay','curAddr','lastSeen')))
           PY
+
+      - name: Diagnose tailnet data plane
+        shell: bash
+        run: |
+          set +e
+          echo '=== TAILSCALE NETCHECK ==='
+          timeout 20s tailscale netcheck
+          echo "NETCHECK_EXIT=$?"
+          for target in \
+            100.106.186.118 \
+            100.70.25.8 \
+            100.71.26.69 \
+            100.91.50.9
+          do
+            echo "=== TAILSCALE PING $target ==="
+            timeout 15s tailscale ping --timeout=5s -c 2 "$target"
+            echo "TAILSCALE_PING_EXIT target=$target exit=$?"
+          done
+          exit 0
 
       - name: Prove native H3 Tailscale SSH or wake
         shell: bash
@@ -67,7 +94,7 @@ jobs:
             timeout 20s tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "if ($env:COMPUTERNAME -eq ''DESKTOP-H3R6CQN'') { Write-Output ''H3_NATIVE_TS_SSH=PASS''; exit 0 } else { exit 41 }"'
           }
 
-          echo 'Trying native Tailscale SSH directly; raw TCP :22 is not used as a gate.'
+          echo 'Trying native Tailscale SSH directly.'
           if probe_h3; then
             exit 0
           fi
@@ -108,7 +135,7 @@ jobs:
             echo "HPENVY_WOL_RELAY=UNAVAILABLE exit=$code"
           fi
 
-          for attempt in $(seq 1 12); do
+          for attempt in 1 2 3; do
             sleep 10
             if probe_h3; then
               echo "H3_NATIVE_TS_SSH_RECOVERED attempt=$attempt"
