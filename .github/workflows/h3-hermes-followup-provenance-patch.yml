@@ -1,0 +1,32 @@
+name: H3 Hermes Followup Provenance Patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-followup-provenance-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch and parse helper
+        shell: powershell
+        run: .\afz-openai-agent\Patch-H3-Hermes-FollowupProvenance.ps1
+      - name: Commit helper only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm 'afz-openai-agent/Patch-H3-Hermes-FollowupProvenance.ps1'
+          git add 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+          git commit -m 'Report H3 Hermes adapter provenance on hash mismatch'
+          git push origin HEAD:main
