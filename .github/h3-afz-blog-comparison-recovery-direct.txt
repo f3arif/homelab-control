@@ -7,4 +7,5 @@ production_db_mutation=false
 transport=native-tailscale-ssh-first
 wake_fallback=pi-then-hpenvy
 tailnet_inventory=true
-attempt=4
+data_plane_diagnostics=true
+attempt=5
