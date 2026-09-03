@@ -6,12 +6,14 @@ on:
     paths:
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
+      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-SessionRegistryRepair.ps1'
       - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
       - 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json'
+      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'
       - 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json'
       - 'afz-openai-agent/requests/h3-hermes-pdf-runtime-audit.json'
       - 'afz-openai-agent/requests/h3-hermes-gateway-reload.json'
@@ -57,6 +59,13 @@ jobs:
           }
           if($t.change_network){throw 'telegram forbidden network mutation'}
 
+          $f=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json' -Raw | ConvertFrom-Json
+          if($f.schema -ne 1 -or $f.action -ne 'repair-telegram-document-followup' -or $f.status -ne 'ACTIVE'){throw 'followup schema/action/status'}
+          if($f.target -ne 'h3' -or $f.host -ne 'DESKTOP-H3R6CQN'){throw 'followup target'}
+          if(([string]$f.expected_adapter_sha256) -notmatch '^[0-9a-f]{64}$'){throw 'followup adapter hash'}
+          if([double]$f.followup_delay_seconds -lt 2 -or [double]$f.followup_delay_seconds -gt 15){throw 'followup delay'}
+          if(-not $f.restart_gateway -or $f.change_config -or $f.change_provider -or $f.mutate_ollama -or $f.change_network -or $f.run_model_generation){throw 'followup safety'}
+
           $d=Get-Content 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json' -Raw | ConvertFrom-Json
           if($d.schema -ne 1 -or $d.action -ne 'repair-local-tool-dispatch' -or $d.status -ne 'ACTIVE'){throw 'dispatch schema/action/status'}
           if($d.target -ne 'h3' -or $d.host -ne 'DESKTOP-H3R6CQN'){throw 'dispatch target'}
@@ -94,6 +103,7 @@ jobs:
           $scripts=@(
             'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',
+            'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-GatewayReload.ps1',
@@ -109,8 +119,15 @@ jobs:
           }
 
           $install=Get-Content 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' -Raw
-          foreach($required in @('EMERGENCY_DIAGNOSTIC_ACK_ONLY','AFZ-H3-HERMES-DOCKER-LATEST.txt','127.0.0.1:11434/v1','qwen3.6:35b-a3b','Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json')){
+          foreach($required in @('EMERGENCY_DIAGNOSTIC_ACK_ONLY','AFZ-H3-HERMES-DOCKER-LATEST.txt','127.0.0.1:11434/v1','qwen3.6:35b-a3b','Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json','Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json')){
             if(-not $install.Contains($required)){throw "Install runner missing: $required"}
+          }
+          $followup=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1' -Raw
+          foreach($required in @('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_REPAIR_VERIFIED','HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS','FOLLOWUP_CANARY_PASS','expected_adapter_sha256','Invoke-H3-Hermes-GatewayReload.ps1')){
+            if(-not $followup.Contains($required)){throw "Follow-up helper missing: $required"}
+          }
+          foreach($forbidden in @('/api/generate','ollama pull','docker.sock')){
+            if($followup.Contains($forbidden)){throw "Forbidden follow-up helper content: $forbidden"}
           }
           $dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw
           foreach($required in @('agent.tool_use_enforcement','agent.task_completion_guidance','agent.parallel_tool_call_guidance','HERMES_LOCAL_TOOL_DISPATCH_REPAIR_VERIFIED','platform_toolsets','Invoke-H3-Hermes-GatewayReload.ps1')){
