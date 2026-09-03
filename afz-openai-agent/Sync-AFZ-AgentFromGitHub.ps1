@@ -380,6 +380,16 @@ try{Unregister-ScheduledTask -TaskName $refresh -Confirm:$false -ErrorAction Sil
     $deferredPushWatcherRefresh=[ordered]@{ok=$false;status='schedule-failed';mutation='DEFERRED_WATCHER_RESTART_ATTEMPTED';error=$_.Exception.Message}
   }
 
+# MOVIERECOMMENDER_CATALOG_AUDIT_SYNC_HOOK_V1
+# Fixed read-only one-shot. Core sync has already installed the typed runner and
+# request at this point. Run it before unrelated post-sync hooks can block.
+$movieCatalogAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-MovieRecommender-Catalog-Audit.ps1'
+if(Test-Path -LiteralPath $movieCatalogAuditRunner -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $movieCatalogAuditRunner -InstallRoot $InstallRoot *> $null
+  }catch{}
+}
+
 # AFZ_BLOG_RUNTIME_SYNC_HOOK
 # The updater downloads this wrapper fresh on every pass. This narrow hook
 # therefore makes Blog runtime persistence independent of a stale updater AST.
