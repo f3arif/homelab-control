@@ -38,11 +38,14 @@ jobs:
           echo '--- tailscale ping windows-main ---'
           timeout 15s tailscale ping --timeout=5s 100.70.25.8
           echo "tailscale_ping_exit=$?"
-          for port in 22 445 3389 5985 5986 8796 8797; do
+          for port in 22 445 3389 5985 5986 8790 8796 8797; do
             echo "--- tcp $port ---"
             timeout 4s bash -c "</dev/tcp/100.70.25.8/$port" 2>&1
             echo "tcp_${port}_exit=$?"
           done
+          echo '--- direct fabric health 8790 ---'
+          curl --silent --show-error --connect-timeout 3 --max-time 8 http://100.70.25.8:8790/health
+          echo
           echo '--- control health 8797 ---'
           curl --silent --show-error --connect-timeout 3 --max-time 8 http://100.70.25.8:8797/health
           echo
