@@ -170,9 +170,26 @@ if(-not(Test-Path -LiteralPath $adapter -PathType Leaf)){Emit ([ordered]@{ok=$fa
 if(-not(Test-Path -LiteralPath $python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_PYTHON_MISSING';mutation='NONE'}) 42}
 $before=(Get-FileHash -LiteralPath $adapter -Algorithm SHA256).Hash.ToLowerInvariant()
 $text=[IO.File]::ReadAllText($adapter)
-$already=($text.Contains('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS') -and $text.Contains('_document_followup_pending') -and $text.Contains('not (getattr(msg, "caption", None) or "").strip()'))
 $backup=$null
 $mutation='NONE'
+$malformedFollowup=($text.Contains('HERMES_TELEGRAM_TEXT_BATCH_SPLIT_6.0_SECONDS') -and $text.Contains('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_6.0_SECONDS') -and $text.Contains('_document_followup_pending') -and $text.Contains('not (getattr(msg, "caption", None) or "").strip()'))
+if($before -eq '7bd2d6ee20275175131606728a5334a4af0210bd4fcb61fff69b3e7c28ae2667' -and $malformedFollowup){
+  $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backup="$adapter.afz-pre-followup-env-normalize-$stamp.bak"
+  Copy-Item -LiteralPath $adapter -Destination $backup -Force
+  try{
+    if(([regex]::Matches($text,[regex]::Escape('HERMES_TELEGRAM_TEXT_BATCH_SPLIT_6.0_SECONDS'))).Count -ne 1){throw 'Malformed split-delay marker count mismatch.'}
+    if(([regex]::Matches($text,[regex]::Escape('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_6.0_SECONDS'))).Count -ne 1){throw 'Malformed document-followup marker count mismatch.'}
+    $normalized=$text.Replace('HERMES_TELEGRAM_TEXT_BATCH_SPLIT_6.0_SECONDS','HERMES_TELEGRAM_TEXT_BATCH_SPLIT_DELAY_SECONDS').Replace('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_6.0_SECONDS','HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS')
+    [IO.File]::WriteAllText($adapter,$normalized,(New-Object Text.UTF8Encoding($false)))
+    $text=[IO.File]::ReadAllText($adapter)
+    $mutation='TELEGRAM_ADAPTER_DOCUMENT_FOLLOWUP_ENV_NORMALIZATION'
+  }catch{
+    try{Copy-Item -LiteralPath $backup -Destination $adapter -Force}catch{}
+    Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_ENV_NORMALIZATION_FAILED';mutation='ROLLED_BACK';beforeSha256=$before;errorType=$_.Exception.GetType().Name}) 47
+  }
+}
+$already=($text.Contains('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS') -and $text.Contains('_document_followup_pending') -and $text.Contains('not (getattr(msg, "caption", None) or "").strip()'))
 if(-not $already){
   if($before -ne '__EXPECTED_SHA__'){
     $gitHead=$null
