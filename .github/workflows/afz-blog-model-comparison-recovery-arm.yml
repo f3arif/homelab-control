@@ -63,7 +63,8 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'),[ref]$tokens,[ref]$errors)
           if($errors.Count){throw ($errors.Message -join '; ')}
           $s=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
-          foreach($n in @('Start-AFZBlogModelComparisonRecoveryOneShot','replay35B=$false','ridgeOnlyIfUnattempted=$true','activation-v2.json','afzBlogModelComparisonRecoveryActivation')){if(-not $s.Contains($n)){throw "patched sync marker missing: $n"}}
+          foreach($n in @('Start-AFZBlogModelComparisonRecoveryOneShot','replay35B=$false','ridgeOnlyIfUnattempted=$true','afzBlogModelComparisonRecoveryActivation')){if(-not $s.Contains($n)){throw "patched sync marker missing: $n"}}
+          if(-not($s.Contains('activation-v2.json') -or $s.Contains('activation-v3.json'))){throw 'patched sync recovery activation marker is neither v2 nor v3'}
 
       - name: Commit guarded recovery arm
         shell: bash
