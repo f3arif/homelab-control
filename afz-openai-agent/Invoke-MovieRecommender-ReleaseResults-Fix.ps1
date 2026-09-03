@@ -105,18 +105,8 @@ try{
   }
   $afterHash=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
 
-  $endpointProbe=Invoke-Native -File 'docker.exe' -ArgumentList @('context','inspect','--format','{{.Endpoints.docker.Host}}') -TimeoutSec 30 -WorkingDirectory $projectRoot
-  if($endpointProbe.Code -ne 0){throw "DOCKER_CONTEXT_INSPECT_FAILED exit=$($endpointProbe.Code)"}
-  $endpoint=(($endpointProbe.Stdout -split '\r?\n') | Where-Object {$_} | Select-Object -First 1).Trim()
-  if(-not $endpoint){throw 'DOCKER_ENDPOINT_EMPTY'}
-
-  $tempConfig=Join-Path $env:TEMP ('afz-movie-docker-'+[guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Force -Path $tempConfig | Out-Null
-  [IO.File]::WriteAllText((Join-Path $tempConfig 'config.json'),'{}',$utf8)
-  $env:DOCKER_CONFIG=$tempConfig
-  $env:DOCKER_HOST=$endpoint
+  # Keep the installed Docker CLI/Compose plugin configuration intact. No pulls are allowed.
   $dockerEnvPrepared=$true
-
   $ver=Invoke-Docker @('version','--format','{{.Server.Version}}') 30
   if($ver.Code -ne 0){throw "DOCKER_ENGINE_UNAVAILABLE exit=$($ver.Code)"}
   $cfg=Invoke-Docker @('compose','config','--services') 30
