@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "job_id": "afz-blog-qwen35b-vs-ridge27b-20260902-r1",
+  "action": "recover_saved_35b_then_run_unattempted_ridge",
+  "replay_35b": false,
+  "ridge_only_if_prior_state_unattempted": true,
+  "publish_article": false,
+  "production_db_mutation": false,
+  "validated_recovery_commit": "661af7a67027da7b4a9c2dbd12049993e4f268c7"
+}
