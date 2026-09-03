@@ -15,5 +15,6 @@
   ],
   "capture_desktop": true,
   "capture_mobile": true,
-  "publish_branch": "h3-direct-results"
+  "publish_branch": "h3-direct-results",
+  "arm_revision": 1
 }
