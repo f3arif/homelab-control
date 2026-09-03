@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           git pull --rebase origin main
 
-      - name: Confirm R37 remains active
+      - name: Confirm R37 is terminalized
         shell: python
         run: |
           import json
@@ -32,23 +32,26 @@ jobs:
           p=Path('afz-openai-agent/requests/h3-hermes-agent-install.json')
           r=json.loads(p.read_text(encoding='utf-8'))
           assert r['id']=='h3-hermes-chat-gateway-recovery-20260903-r37'
-          assert r['action']=='install-and-configure'
-          assert r['status']=='ACTIVE'
+          assert r['action']=='completed'
+          assert r['status']=='COMPLETED'
           assert r['target']=='h3' and r['host']=='DESKTOP-H3R6CQN'
-          assert r['run_chat_canary'] is True
-          assert r['refresh_gateway_after_canary'] is True
+          assert r['run_chat_canary'] is False
+          assert r['refresh_gateway_after_canary'] is False
 
-      - name: Change only watcher hot-reload marker
+      - name: Make chat recovery terminal independent of PDF auxiliary state
         shell: python
         run: |
           from pathlib import Path
           p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
           s=p.read_text(encoding='utf-8')
-          old='# HOTRELOAD_CANARY=20260901T0410Z h3-docker-preflight-binding'
-          new='# HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery'
-          if s.count(old)!=1:
-              raise SystemExit(f'expected exactly one old marker, got {s.count(old)}')
-          p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+          old1='        if([bool]$existing.ok -and -not $pdfAuxPending){'
+          new1='        if([bool]$existing.ok){'
+          old2="          }elseif([string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}"
+          new2="          }elseif(-not $pdfAuxPending -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}"
+          if s.count(old1)!=1 or s.count(old2)!=1:
+              raise SystemExit(f'unexpected terminal block counts: {s.count(old1)}, {s.count(old2)}')
+          s=s.replace(old1,new1,1).replace(old2,new2,1)
+          p.write_text(s,encoding='utf-8',newline='\n')
 
       - name: Validate watcher syntax and scope
         shell: pwsh
@@ -59,10 +62,11 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Watcher parse failed'}
           $dText=((git diff -- $p)|Out-String)
-          if($dText -notmatch 'HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery'){throw 'New marker missing'}
+          if($dText -notmatch 'if\(\[bool\]\$existing\.ok\)\{'){throw 'Chat terminal success guard missing'}
+          if($dText -notmatch 'elseif\(-not \$pdfAuxPending'){throw 'PDF auxiliary isolation guard missing'}
           $num=((git diff --numstat -- $p)|Out-String).Trim()
-          if($num -notmatch '^1\s+1\s+'){throw "Watcher change is not exactly one-line replacement: $num"}
-          'H3_R37_WATCHER_HOTRELOAD_VALIDATE=PASS'
+          if($num -notmatch '^2\s+2\s+'){throw "Watcher change is not exactly two-line replacement: $num"}
+          'H3_R37_TERMINAL_IDEMPOTENCY_VALIDATE=PASS'
 
       - name: Commit patch and signal exact SHA
         shell: bash
@@ -71,10 +75,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add afz-openai-agent/Push-Deploy-Watcher.ps1
-          git commit -m 'Hot-reload watcher for Hermes r37 recovery'
+          git commit -m 'Make successful Hermes chat recovery terminal'
           patch_sha=$(git rev-parse HEAD)
           printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
           git add .github/afz-agent-deploy-signal.txt
-          git commit -m 'Signal Hermes r37 watcher hot-reload'
+          git commit -m 'Signal Hermes terminal idempotency fix'
           git push origin HEAD:main
-          echo "H3_R37_WATCHER_HOTRELOAD_SHA=$patch_sha"
+          echo "H3_R37_TERMINAL_IDEMPOTENCY_SHA=$patch_sha"
