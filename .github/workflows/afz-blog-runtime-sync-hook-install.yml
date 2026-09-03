@@ -1,0 +1,74 @@
+name: AFZ Blog Runtime Sync Hook Install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-blog-runtime-sync-hook-install.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: afz-blog-runtime-sync-hook-install
+  cancel-in-progress: false
+
+jobs:
+  install-hook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install guarded SYSTEM sync hook
+        shell: python
+        run: |
+          from pathlib import Path
+          import textwrap
+          p = Path('afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1')
+          text = p.read_text(encoding='utf-8-sig')
+          sentinel = "AFZ_BLOG_RUNTIME_SYNC_HOOK"
+          if sentinel in text:
+              print('Blog runtime sync hook already present; no patch needed.')
+              raise SystemExit(0)
+          marker = "  # Missing-only repair of the canonical one-minute SYSTEM fallback updater.\n"
+          if text.count(marker) != 1:
+              raise SystemExit(f'Expected one sync insertion marker, found {text.count(marker)}')
+          block = textwrap.dedent(r'''
+            # AFZ_BLOG_RUNTIME_SYNC_HOOK
+            # The updater downloads this wrapper fresh on every pass. This narrow hook
+            # therefore makes Blog runtime persistence independent of a stale updater AST.
+            # The helper itself is SYSTEM-only and fail-closed on Git/build/task state.
+            $blogRuntimeEnsure=Join-Path $InstallRoot 'afz-openai-agent\Ensure-AFZ-BlogManager-Runtime.ps1'
+            if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
+              try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
+            }
+
+          ''')
+          text = text.replace(marker, block + marker, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'AFZ_BLOG_RUNTIME_SYNC_HOOK' afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
+          git diff --check
+
+      - name: Commit patch if changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1; then
+            echo 'No change required.'
+            exit 0
+          fi
+          git config user.name 'AFZ Automation'
+          git config user.email '77086535+f3arif@users.noreply.github.com'
+          git add afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
+          git commit -m 'Run guarded Blog runtime ensure from fresh sync wrapper'
+          git pull --rebase origin main
+          git push origin HEAD:main
