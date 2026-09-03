@@ -1,0 +1,127 @@
+name: H3 Hermes Telegram Followup Live Bind R2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-telegram-followup-live-bind-r2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Extend bounded adapter verification window
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1')
+          s=p.read_text(encoding='utf-8')
+          old='$patchResult=Invoke-RemoteScript -Script $remote -TimeoutMs 90000'
+          new='$patchResult=Invoke-RemoteScript -Script $remote -TimeoutMs 240000'
+          if s.count(old)!=1:
+              raise SystemExit(f'expected one 90s patch timeout, got {s.count(old)}')
+          p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+          PY
+
+      - name: Bind typed Telegram followup request to watcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          s=p.read_text(encoding='utf-8')
+          marker="$h3HermesLastAttempt=[DateTime]::MinValue\n"
+          add="""$h3HermesLastAttempt=[DateTime]::MinValue
+          $h3HermesTelegramFollowupRunner=Join-Path $InstallRoot 'afz-openai-agent\\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+          $h3HermesTelegramFollowupRequest=Join-Path $InstallRoot 'afz-openai-agent\\requests\\h3-hermes-telegram-followup-repair.json'
+          $h3HermesTelegramFollowupStateRoot=Join-Path $stateRoot 'jobs\\h3-hermes-telegram-followup'
+          $h3HermesTelegramFollowupLastAttempt=[DateTime]::MinValue
+          """.replace('          ','')
+          if s.count(marker)!=1:
+              raise SystemExit(f'variable marker count={s.count(marker)}')
+          s=s.replace(marker,add,1)
+          fn_marker='function Handle-H3HermesRequest{\n'
+          fn=r'''function Handle-H3HermesTelegramFollowupRequest{
+            if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRunner -PathType Leaf)){return}
+            if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRequest -PathType Leaf)){return}
+            try{
+              $req=Get-Content -LiteralPath $h3HermesTelegramFollowupRequest -Raw -Encoding UTF8|ConvertFrom-Json
+              $id=([string]$req.id).Trim()
+              if([int]$req.schema -ne 1 -or [string]$req.action -ne 'repair-telegram-document-followup' -or [string]$req.status -ne 'ACTIVE'){return}
+              if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+              if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+              if(-not [bool]$req.restart_gateway -or [bool]$req.change_config -or [bool]$req.change_provider -or [bool]$req.mutate_ollama -or [bool]$req.change_network -or [bool]$req.run_model_generation){return}
+              $statePath=Join-Path $h3HermesTelegramFollowupStateRoot ($id+'.json')
+              if(Test-Path -LiteralPath $statePath -PathType Leaf){
+                try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
+              }
+              $now=Get-Date
+              if(($now-$script:h3HermesTelegramFollowupLastAttempt).TotalSeconds -lt 60){return}
+              $script:h3HermesTelegramFollowupLastAttempt=$now
+              $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesTelegramFollowupRunner -InstallRoot $InstallRoot -RequestPath $h3HermesTelegramFollowupRequest 2>&1|Out-String).Trim()
+              $code=$LASTEXITCODE
+              $classification='NO_CLASSIFICATION'
+              if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+              Log "H3_HERMES_TELEGRAM_FOLLOWUP classification=$classification exit=$code source=$(Current-Sha)"
+            }catch{Log "H3_HERMES_TELEGRAM_FOLLOWUP_ERROR $($_.Exception.Message)"}
+          }
+
+          function Handle-H3HermesRequest{
+          '''.replace('          ','')
+          if s.count(fn_marker)!=1:
+              raise SystemExit(f'function marker count={s.count(fn_marker)}')
+          s=s.replace(fn_marker,fn,1)
+          loop_marker='      Handle-H3HermesRegistryLivenessRequest\n      Handle-H3HermesRequest\n'
+          loop_new='      Handle-H3HermesRegistryLivenessRequest\n      Handle-H3HermesTelegramFollowupRequest\n      Handle-H3HermesRequest\n'
+          if s.count(loop_marker)!=1:
+              raise SystemExit(f'loop marker count={s.count(loop_marker)}')
+          s=s.replace(loop_marker,loop_new,1)
+          p.write_text(s,encoding='utf-8',newline='\n')
+          PY
+
+      - name: Validate PowerShell and scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @('afz-openai-agent/Push-Deploy-Watcher.ps1','afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$p :: $($_.Message)"};throw "Parse failed: $p"}
+          }
+          $w=Get-Content 'afz-openai-agent/Push-Deploy-Watcher.ps1' -Raw
+          $r=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1' -Raw
+          if($w -notmatch 'Handle-H3HermesTelegramFollowupRequest'){throw 'Typed followup handler missing'}
+          if($r -notmatch 'TimeoutMs 240000'){throw '240s bounded timeout missing'}
+          'H3_TELEGRAM_FOLLOWUP_LIVE_BIND_R2_VALIDATE=PASS'
+
+      - name: Commit bind and signal exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1 afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1
+          git commit -m 'Bind live Hermes Telegram document followup repair'
+          patch_sha=$(git rev-parse HEAD)
+          printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m 'Signal live Hermes Telegram followup repair'
+          git push origin HEAD:main
+          echo "H3_TELEGRAM_FOLLOWUP_LIVE_BIND_R2_SHA=$patch_sha"
