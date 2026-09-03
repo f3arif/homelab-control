@@ -1,0 +1,36 @@
+name: H3 Hermes Telegram Followup Bind V4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-telegram-followup-bind-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bind:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run guarded binder
+        shell: powershell
+        run: .\afz-openai-agent\Bind-H3-Hermes-TelegramFollowup.ps1
+      - name: Stage generated validator outside workflow directory
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Copy-Item '.github/workflows/h3-hermes-agent-validate.yml' 'afz-openai-agent/h3-hermes-agent-validate.generated.yml' -Force
+      - name: Commit validated carrier and generated validator
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' 'afz-openai-agent/h3-hermes-agent-validate.generated.yml'
+          git commit -m 'Stage guarded H3 Telegram follow-up carrier and validator'
+          git push origin HEAD:main
