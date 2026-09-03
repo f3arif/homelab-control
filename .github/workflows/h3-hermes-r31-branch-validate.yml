@@ -1,0 +1,35 @@
+name: H3 Hermes R31 Branch Validate
+
+on:
+  push:
+    branches: [fix/hermes-provider-fresh-liveness-r31]
+    paths:
+      - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+      - 'afz-openai-agent/requests/h3-hermes-agent-install.json'
+      - '.github/workflows/h3-hermes-r31-branch-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and validate r31
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
+          if($r.id -ne 'h3-hermes-ollama-provider-fresh-liveness-20260903-r31'){throw 'wrong request id'}
+          if($r.provider_identity -ne 'custom:ollama' -or $r.base_url -ne 'http://127.0.0.1:11434/v1' -or $r.base_model -ne 'qwen3.6:35b-a3b'){throw 'route contract'}
+          if($r.mutate_ollama -or $r.run_generation_test -or $r.expose_api){throw 'safety contract'}
+          $text=Get-Content $p -Raw
+          foreach($required in @('fresh endpoint probe','HERMES_OLLAMA_FRESH_LIVENESS_READY','AFZ H3 Ollama Liveness','providers.ollama.transport','AFZ-H3-HERMES-DOCKER-LATEST.txt')){if(-not $text.Contains($required)){throw "missing $required"}}
+          foreach($forbidden in @('/api/generate','ollama pull','docker.sock')){if($text.Contains($forbidden)){throw "forbidden $forbidden"}}
+          'R31=PASS'
