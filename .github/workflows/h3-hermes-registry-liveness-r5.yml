@@ -1,0 +1,46 @@
+name: H3 Hermes Registry Liveness R5
+
+on:
+  push:
+    paths:
+      - '.github/workflows/h3-hermes-registry-liveness-r5.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebase current main
+        run: |
+          set -euo pipefail
+          git config user.name 'f3arif'
+          git config user.email '77086535+f3arif@users.noreply.github.com'
+          git pull --rebase origin main
+      - name: Apply read-only audit extension
+        run: python scripts/patch-hermes-registry-liveness-r5.py
+      - name: Validate read-only contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @('afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1','afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "Parse failed: $p"}
+          }
+          $remote=Get-Content 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1' -Raw
+          foreach($required in @('HERMES_R5_READONLY_RUNTIME_AUDIT','ollamaReachable','ollamaWatchdog','modelConfig')){if(-not $remote.Contains($required)){throw "Missing $required"}}
+          $req=Get-Content 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json' -Raw|ConvertFrom-Json
+          if(-not $req.read_only -or $req.mutation -ne 'none' -or $req.restart_gateway -or $req.change_provider -or $req.run_model_generation -or $req.mutate_ollama -or $req.change_network){throw 'Read-only request contract violated'}
+          if($req.id -ne 'h3-hermes-registry-liveness-audit-20260903-r5'){throw 'Fresh r5 request id missing'}
+      - name: Commit read-only audit
+        run: |
+          set -euo pipefail
+          git add afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1 afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1 afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json
+          git commit -m 'Audit Hermes Ollama persistence without mutation'
+          git push origin HEAD:main
+          echo "AUDIT_SHA=$(git rev-parse HEAD)"
