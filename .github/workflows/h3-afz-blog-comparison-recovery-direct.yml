@@ -1,0 +1,79 @@
+name: H3 AFZ Blog Comparison Recovery Direct
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-afz-blog-comparison-recovery-direct.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-afz-blog-comparison-recovery-direct
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate guarded recovery signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          f='.github/h3-afz-blog-comparison-recovery-direct.txt'
+          grep -Fx 'target=h3' "$f"
+          grep -Fx 'job=afz-blog-qwen35b-vs-ridge27b-20260902-r1' "$f"
+          grep -Fx 'action=recover-saved-35b-then-run-ridge-only-if-unattempted' "$f"
+          grep -Fx 'replay_35b=false' "$f"
+          grep -Fx 'publish_article=false' "$f"
+          grep -Fx 'production_db_mutation=false' "$f"
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Wake H3 if needed and prove SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! nc -z -w 3 100.106.186.118 22; then
+            echo 'H3 SSH not currently reachable; requesting existing Pi WoL service once.'
+            curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3
+            echo
+          fi
+          for attempt in $(seq 1 30); do
+            if nc -z -w 3 100.106.186.118 22; then
+              echo "H3_SSH_REACHABLE=PASS attempt=$attempt"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          exit 1
+
+      - name: Launch exact-SHA guarded H3 recovery
+        env:
+          AFZ_SHA: ${{ github.sha }}
+          JOB_ID: afz-blog-qwen35b-vs-ridge27b-20260902-r1
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/tools/Launch-H3-AFZBlog-ModelComparisonRecovery.ps1"
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing -Headers @{'Cache-Control'='no-cache'} '$url').Content; \$tmp=Join-Path \$env:TEMP 'AFZ-Blog-Recovery-Direct-${AFZ_SHA}.ps1'; [IO.File]::WriteAllText(\$tmp,\$script,(New-Object Text.UTF8Encoding(\$false))); try { & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \$tmp -ExpectedSha '${AFZ_SHA}' -JobId '${JOB_ID}'; exit \$LASTEXITCODE } finally { Remove-Item \$tmp -Force -ErrorAction SilentlyContinue }\""
+          timeout 120s tailscale ssh Faiz@100.106.186.118 "$remote"
+
+      - name: Record launch contract
+        shell: bash
+        run: |
+          echo '35B replay: forbidden'
+          echo 'Ridge call: allowed only if H3 prior state proves attempted=false'
+          echo 'Article publish: disabled'
+          echo 'Production DB mutation: disabled'
