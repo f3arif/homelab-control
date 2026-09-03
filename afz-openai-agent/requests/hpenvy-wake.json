@@ -1,0 +1,11 @@
+{
+  "id": "hpenvy-wake-20260903T1000",
+  "status": "ACTIVE",
+  "action": "wake-fixed-target",
+  "target": "hpenvy",
+  "mac": "8c:dc:d4:87:9d:19",
+  "lanIp": "192.168.50.185",
+  "broadcasts": ["192.168.50.255", "255.255.255.255"],
+  "ports": [9, 7],
+  "repeat": 3
+}
