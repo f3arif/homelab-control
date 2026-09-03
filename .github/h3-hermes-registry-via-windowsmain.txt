@@ -1,5 +1,11 @@
-request=h3-hermes-session-registry-repair-20260902-r1
+request=h3-hermes-ollama-provider-fresh-liveness-20260903-r31
 target=windows-main->h3
 control=http://100.70.25.8:8797/api/push-deploy
-backup_before_mutation=true
-only_exact_empty_legacy_schema=true
+purpose=force-exact-sha-sync-and-run-r31
+provider=custom:ollama
+endpoint=http://127.0.0.1:11434/v1
+model=qwen3.6:35b-a3b
+model_pull=false
+generation_test=false
+network_change=false
+requested_at=2026-09-03T12:58:00-04:00
