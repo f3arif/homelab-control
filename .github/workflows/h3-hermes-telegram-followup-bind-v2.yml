@@ -1,0 +1,141 @@
+name: H3 Hermes Telegram Followup Bind V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-telegram-followup-bind-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bind:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate staged helper and request
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $helper='afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $helper),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}
+          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json' -Raw|ConvertFrom-Json
+          if($r.schema -ne 1 -or $r.action -ne 'repair-telegram-document-followup' -or $r.status -ne 'ACTIVE'){throw 'followup schema/action/status'}
+          if($r.target -ne 'h3' -or $r.host -ne 'DESKTOP-H3R6CQN'){throw 'followup target'}
+          if(([string]$r.expected_adapter_sha256) -notmatch '^[0-9a-f]{64}$'){throw 'followup adapter hash'}
+          if([double]$r.followup_delay_seconds -lt 2 -or [double]$r.followup_delay_seconds -gt 15){throw 'followup delay'}
+          if(-not $r.restart_gateway -or $r.change_config -or $r.change_provider -or $r.mutate_ollama -or $r.change_network -or $r.run_model_generation){throw 'followup safety'}
+
+      - name: Patch carrier and validator with newline-independent markers
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $utf8=New-Object Text.UTF8Encoding($false)
+          function Replace-One([string]$Text,[string]$Old,[string]$New,[string]$Name){
+            if(([regex]::Matches($Text,[regex]::Escape($Old))).Count -ne 1){throw "$Name marker mismatch"}
+            return $Text.Replace($Old,$New)
+          }
+
+          $installPath='afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
+          $it=[IO.File]::ReadAllText($installPath)
+          if(-not $it.Contains('Invoke-H3-Hermes-TelegramFollowupRepair.ps1')){
+            $marker='function Save-Result($result){'
+            $insert=@'
+# Guarded Telegram document-followup repair preflight. It patches only the
+# Telegram adapter's attachment-only batching behavior, runs a local canary,
+# and then uses the existing guarded native gateway restart helper.
+$followupRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+$followupRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-followup-repair.json'
+try{
+  if((Test-Path -LiteralPath $followupRelay -PathType Leaf) -and (Test-Path -LiteralPath $followupRequest -PathType Leaf)){
+    $followupReq=Get-Content -LiteralPath $followupRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $followupId=([string]$followupReq.id).Trim()
+    $followupDone=$false
+    if($followupId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
+      $followupStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-followup' ($followupId+'.json')
+      if(Test-Path -LiteralPath $followupStatePath -PathType Leaf){try{$followupState=Get-Content -LiteralPath $followupStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$followupDone=[bool]$followupState.ok}catch{}}
+      if(-not $followupDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $followupRelay -InstallRoot $InstallRoot -RequestPath $followupRequest *> $null}
+    }
+  }
+}catch{}
+
+'@
+            $it=Replace-One $it $marker ($insert+$marker) 'install binding'
+            [IO.File]::WriteAllText($installPath,$it,$utf8)
+          }
+
+          $vPath='.github/workflows/h3-hermes-agent-validate.yml'
+          $v=[IO.File]::ReadAllText($vPath)
+          if(-not $v.Contains("      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'")){
+            $old="      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'"
+            $v=Replace-One $v $old ($old+"`n      - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'") 'validator helper path'
+          }
+          if(-not $v.Contains("      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'")){
+            $old="      - 'afz-openai-agent/requests/h3-hermes-telegram-attachment-audit.json'"
+            $v=Replace-One $v $old ($old+"`n      - 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json'") 'validator request path'
+          }
+          if(-not $v.Contains("throw 'followup schema/action/status'")){
+            $old="          `$d=Get-Content 'afz-openai-agent/requests/h3-hermes-tool-dispatch-repair.json' -Raw | ConvertFrom-Json"
+            $block=@'
+          $f=Get-Content 'afz-openai-agent/requests/h3-hermes-telegram-followup-repair.json' -Raw | ConvertFrom-Json
+          if($f.schema -ne 1 -or $f.action -ne 'repair-telegram-document-followup' -or $f.status -ne 'ACTIVE'){throw 'followup schema/action/status'}
+          if($f.target -ne 'h3' -or $f.host -ne 'DESKTOP-H3R6CQN'){throw 'followup target'}
+          if(([string]$f.expected_adapter_sha256) -notmatch '^[0-9a-f]{64}$'){throw 'followup adapter hash'}
+          if([double]$f.followup_delay_seconds -lt 2 -or [double]$f.followup_delay_seconds -gt 15){throw 'followup delay'}
+          if(-not $f.restart_gateway -or $f.change_config -or $f.change_provider -or $f.mutate_ollama -or $f.change_network -or $f.run_model_generation){throw 'followup safety'}
+
+'@
+            $v=Replace-One $v $old ($block+$old) 'typed validator'
+          }
+          $scriptOld="            'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',"
+          if(-not $v.Contains("            'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',")){
+            $v=Replace-One $v $scriptOld ($scriptOld+"`n            'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',") 'parse list'
+          }
+          $oldRequired="'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json'"
+          $newRequired="'Invoke-H3-Hermes-PdfRuntimeAudit.ps1','h3-hermes-pdf-runtime-audit.json','Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json'"
+          if(-not $v.Contains($newRequired)){$v=Replace-One $v $oldRequired $newRequired 'install required'}
+          if(-not $v.Contains('$followup=Get-Content')){
+            $old="          `$dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw"
+            $block=@'
+          $followup=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1' -Raw
+          foreach($required in @('HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_REPAIR_VERIFIED','HERMES_TELEGRAM_DOCUMENT_FOLLOWUP_DELAY_SECONDS','FOLLOWUP_CANARY_PASS','expected_adapter_sha256','Invoke-H3-Hermes-GatewayReload.ps1')){
+            if(-not $followup.Contains($required)){throw "Follow-up helper missing: $required"}
+          }
+          foreach($forbidden in @('/api/generate','ollama pull','docker.sock')){if($followup.Contains($forbidden)){throw "Forbidden follow-up helper content: $forbidden"}}
+'@
+            $v=Replace-One $v $old ($block+$old) 'helper validator'
+          }
+          [IO.File]::WriteAllText($vPath,$v,$utf8)
+
+      - name: Parse and assert integrated state
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @('afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1','afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("${p}: "+$_.Message)};exit 1}
+          }
+          $i=Get-Content 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' -Raw
+          $v=Get-Content '.github/workflows/h3-hermes-agent-validate.yml' -Raw
+          foreach($m in @('Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json','h3-hermes-telegram-followup')){if(-not $i.Contains($m)){throw "install binding missing: $m"}}
+          foreach($m in @('Invoke-H3-Hermes-TelegramFollowupRepair.ps1','h3-hermes-telegram-followup-repair.json','followup schema/action/status','FOLLOWUP_CANARY_PASS')){if(-not $v.Contains($m)){throw "validator binding missing: $m"}}
+          'FOLLOWUP_BIND=PASS'
+
+      - name: Commit validated binding and retire temporary workflows
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm '.github/workflows/h3-hermes-telegram-followup-bind.yml' '.github/workflows/h3-hermes-telegram-followup-bind-v2.yml'
+          git add 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1' '.github/workflows/h3-hermes-agent-validate.yml'
+          git commit -m 'Bind guarded H3 Telegram document follow-up repair'
+          git push origin HEAD:main
