@@ -1,0 +1,38 @@
+name: HP Envy Wake Probe Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-wake-probe-once.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe Pi wake service for HP Envy route
+        shell: bash
+        run: |
+          set -u
+          echo 'PI_WAKE_PROBE_BEGIN'
+          for p in / /health /status/h3 /status/lenovo /status/hpenvy; do
+            echo "--- $p ---"
+            curl -sS -i --connect-timeout 3 --max-time 8 "http://100.91.50.9:8087${p}" || true
+            echo
+          done
+          echo '--- OPTIONS /wake/hpenvy ---'
+          curl -sS -i -X OPTIONS --connect-timeout 3 --max-time 8 "http://100.91.50.9:8087/wake/hpenvy" || true
+          echo
+          echo 'PI_WAKE_PROBE_END'
