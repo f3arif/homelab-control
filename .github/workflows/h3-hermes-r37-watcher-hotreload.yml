@@ -58,9 +58,10 @@ jobs:
           $tokens=$null;$errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Watcher parse failed'}
-          $d=git diff -- $p
-          if($d -notmatch 'HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery'){throw 'New marker missing'}
-          if((git diff --numstat -- $p) -notmatch '^1\s+1\s+'){throw 'Watcher change is not exactly one-line replacement'}
+          $dText=((git diff -- $p)|Out-String)
+          if($dText -notmatch 'HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery'){throw 'New marker missing'}
+          $num=((git diff --numstat -- $p)|Out-String).Trim()
+          if($num -notmatch '^1\s+1\s+'){throw "Watcher change is not exactly one-line replacement: $num"}
           'H3_R37_WATCHER_HOTRELOAD_VALIDATE=PASS'
 
       - name: Commit patch and signal exact SHA
