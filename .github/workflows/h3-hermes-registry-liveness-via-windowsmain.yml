@@ -1,0 +1,65 @@
+name: H3 Hermes Registry Liveness via Windows-main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Invoke-H3-Hermes-RegistryLivenessAudit.ps1'
+      - 'afz-openai-agent/Read-H3-Hermes-RegistryLiveness.ps1'
+      - 'afz-openai-agent/requests/h3-hermes-registry-liveness-audit.json'
+      - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - '.github/workflows/h3-hermes-registry-liveness-via-windowsmain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-hermes-registry-liveness-via-windowsmain
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Force exact-SHA source sync on Windows-main
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 3 --max-time 15 \
+            -H 'Content-Type: application/json' \
+            -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy
+
+      - name: Confirm Windows-main exact SHA after wrapper restart
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
+              echo "$health"
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              if [ "$commit" = "${AFZ_SHA,,}" ]; then
+                echo "Windows-main exact source confirmed: $commit"
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo "Windows-main did not confirm exact liveness-audit SHA" >&2
+          exit 1
