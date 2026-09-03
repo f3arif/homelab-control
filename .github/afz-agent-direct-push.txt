@@ -1,11 +1,9 @@
 AFZ direct agent source recovery
-reason=afz-blog-comparison-saved-35b-postreturn-recovery
+reason=hpenvy-unreachable-send-fixed-target-wol
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-guarded-h3-blog-comparison-recovery
-job=afz-blog-qwen35b-vs-ridge27b-20260902-r1
-replay_35b=false
-ridge_only_if_prior_state_unattempted=true
-publish_article=false
-production_db_mutation=false
-requested_at=2026-09-02T23:47:00-04:00
+operation=source-sync-and-one-shot-hpenvy-wol
+hpenvy_mac=8c:dc:d4:87:9d:19
+hpenvy_lan_ip=192.168.50.185
+arbitrary_shell=false
+requested_at=2026-09-03T10:17:00-04:00
