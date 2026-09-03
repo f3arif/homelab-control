@@ -380,6 +380,16 @@ try{Unregister-ScheduledTask -TaskName $refresh -Confirm:$false -ErrorAction Sil
     $deferredPushWatcherRefresh=[ordered]@{ok=$false;status='schedule-failed';mutation='DEFERRED_WATCHER_RESTART_ATTEMPTED';error=$_.Exception.Message}
   }
 
+# MOVIERECOMMENDER_RELEASE_RESULTS_FIX_SYNC_HOOK_V1
+# Fixed-target, one-shot, rollback-capable repair of Seerr releases.results
+# normalization. Runs before the read-only catalog audit.
+$movieReleaseFixRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-MovieRecommender-ReleaseResults-Fix.ps1'
+if(Test-Path -LiteralPath $movieReleaseFixRunner -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $movieReleaseFixRunner -InstallRoot $InstallRoot *> $null
+  }catch{}
+}
+
 # MOVIERECOMMENDER_CATALOG_AUDIT_SYNC_HOOK_V1
 # Fixed read-only one-shot. Core sync has already installed the typed runner and
 # request at this point. Run it before unrelated post-sync hooks can block.

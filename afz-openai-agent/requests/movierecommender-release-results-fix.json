@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "project": "movierecommender",
+  "action": "fix-release-results-normalization",
+  "job_id": "movierecommender-release-results-fix-20260903-r1",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "host_port": 18766,
+  "container_port": 8766,
+  "source_file": "C:\\docker\\movie-recommender\\stremio_catalog.py",
+  "allow_global_docker_config_change": false,
+  "rollback_on_failure": true
+}
