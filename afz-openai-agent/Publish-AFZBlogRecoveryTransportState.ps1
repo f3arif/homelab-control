@@ -6,10 +6,11 @@ Set-StrictMode -Version 2.0
 
 $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
 $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
-$marker=Join-Path $markerRoot ($jobId+'-activation-v3.json')
+$v3Marker=Join-Path $markerRoot ($jobId+'-activation-v3.json')
 $v4Marker=Join-Path $markerRoot ($jobId+'-activation-v4.json')
+$v5Marker=Join-Path $markerRoot ($jobId+'-activation-v5.json')
 $carrierResult='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery\'+$jobId+'.json'
-$taskName='AFZ H3 AFZ Blog Recovery Transport'
+$transportTaskName='AFZ H3 AFZ Blog Recovery Transport'
 $sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $sharedDiagPath=Join-Path $sharedDiagRoot 'AFZ-BLOG-COMPARISON-RECOVERY-TRANSPORT-LATEST.txt'
 $termDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
@@ -18,13 +19,12 @@ $utf8=New-Object Text.UTF8Encoding($false)
 
 function Read-SafeJson([string]$Path){
   if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
-  try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return [pscustomobject]@{readError=$_.Exception.Message}}
+  try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return [pscustomobject]@{readError=$_.Exception.Message;path=$Path}}
 }
-
 function Write-SafeJson([string]$Path,$Value){
   $parent=Split-Path $Path -Parent
   if($parent -and -not(Test-Path -LiteralPath $parent -PathType Container)){New-Item -ItemType Directory -Force -Path $parent|Out-Null}
-  [IO.File]::WriteAllText($Path,($Value|ConvertTo-Json -Depth 20 -Compress),$utf8)
+  [IO.File]::WriteAllText($Path,($Value|ConvertTo-Json -Depth 30 -Compress),$utf8)
 }
 
 function Invoke-H3ReadOnlyProbe {
@@ -46,7 +46,7 @@ $stdoutPath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\recovery.stdout.log'
 $stderrPath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\recovery.stderr.log'
 $projectRoot='C:\Projects\AFZ-Blog-Model-Comparison-20260902-r1'
 function ReadJson([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return $null}}
-function Tail([string]$Path,[int]$Max=3000){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{$t=[IO.File]::ReadAllText($Path);if($t.Length -gt $Max){return $t.Substring($t.Length-$Max)};return $t}catch{return $null}}
+function Tail([string]$Path,[int]$Max=4000){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{$t=[IO.File]::ReadAllText($Path);if($t.Length -gt $Max){return $t.Substring($t.Length-$Max)};return $t}catch{return $null}}
 function ModelState($State,[string]$Name){
   $v=$null
   if($State -and $State.PSObject.Properties.Name -contains 'models'){
@@ -54,13 +54,15 @@ function ModelState($State,[string]$Name){
   }
   if(-not $v){return [ordered]@{present=$false;attempted=$false;status=$null}}
   $o=[ordered]@{present=$true;attempted=$(if($v.PSObject.Properties.Name -contains 'attempted'){[bool]$v.attempted}else{$false});status=$(if($v.PSObject.Properties.Name -contains 'status'){[string]$v.status}else{$null})}
-  foreach($n in @('started_at','completed_at','finished_at','done_reason','output_tokens','output_tokens_per_second','wall_seconds','recovered_from_saved_response','recovery_kind')){if($v.PSObject.Properties.Name -contains $n){$o[$n]=$v.$n}}
+  foreach($n in @('started_at','completed_at','finished_at','done_reason','output_tokens','output_tokens_per_second','wall_seconds','prompt_tokens','prompt_tokens_per_second','strict_json_valid','schema_valid','article_word_count','word_target_met','recovered_from_saved_response','recovery_kind','curl_exit','error')){if($v.PSObject.Properties.Name -contains $n){$o[$n]=$v.$n}}
   return $o
 }
 $state=ReadJson $statePath
 $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $info=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
 $ollama=@(Get-Process -ErrorAction SilentlyContinue|Where-Object{$_.ProcessName -match '^ollama($|_)'}|ForEach-Object{[ordered]@{pid=[int]$_.Id;name=[string]$_.ProcessName}})
+$ollamaApiReady=$false;$ollamaModels=@();$ollamaApiError=$null
+try{$tags=Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5 -ErrorAction Stop;$ollamaApiReady=$true;$ollamaModels=@($tags.models|ForEach-Object{[string]$_.name})}catch{$ollamaApiError=$_.Exception.Message}
 $o=[ordered]@{
   ok=$true;host=$env:COMPUTERNAME;readOnly=$true;mutation='NONE'
   stateExists=(Test-Path -LiteralPath $statePath -PathType Leaf)
@@ -74,18 +76,21 @@ $o=[ordered]@{
   qwen35bSavedResponseExists=(Test-Path -LiteralPath (Join-Path $projectRoot 'qwen35b-a3b-ollama-response.json') -PathType Leaf)
   recoveryTaskExists=($null -ne $task)
   recoveryTaskState=$(if($task){[string]$task.State}else{'missing'})
+  recoveryTaskPrincipalUser=$(if($task){[string]$task.Principal.UserId}else{$null})
+  recoveryTaskLogonType=$(if($task){[string]$task.Principal.LogonType}else{$null})
   recoveryTaskLastRun=$(if($info -and $info.LastRunTime -gt [datetime]'2000-01-01'){$info.LastRunTime.ToString('o')}else{$null})
   recoveryTaskLastResult=$(if($info){[int]$info.LastTaskResult}else{$null})
   ollamaProcesses=$ollama
+  ollamaApiReady=$ollamaApiReady
+  ollamaModels=$ollamaModels
+  ollamaApiError=$ollamaApiError
   stdoutTail=(Tail $stdoutPath)
   stderrTail=(Tail $stderrPath)
   observedAt=(Get-Date -Format o)
 }
-[Console]::Out.WriteLine(($o|ConvertTo-Json -Depth 12 -Compress))
+[Console]::Out.WriteLine(($o|ConvertTo-Json -Depth 15 -Compress))
 '@
 
-  # Keep the remote command tiny. The full read-only probe travels over stdin,
-  # avoiding Windows' command-line length limit while preserving zero mutation.
   $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 read-only probe stdin empty.''};Invoke-Expression $script'
   $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
 
@@ -100,7 +105,7 @@ $o=[ordered]@{
     try{
       [IO.File]::WriteAllText($inFile,$remote,$utf8)
       $p=Start-Process -FilePath $ssh -ArgumentList $sshArgs -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
-      if(-not $p.WaitForExit(25000)){
+      if(-not $p.WaitForExit(30000)){
         try{$p.Kill()}catch{}
         return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_TIMEOUT';transport=$Transport;mutation='NONE'}
       }
@@ -110,9 +115,7 @@ $o=[ordered]@{
       foreach($line in @($stdout -split "`r?`n"|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})){try{$parsed=$line|ConvertFrom-Json}catch{}}
       if($parsed){$parsed|Add-Member -NotePropertyName transport -NotePropertyValue $Transport -Force;return $parsed}
       return [pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_INVALID_RESULT';transport=$Transport;exit=[int]$p.ExitCode;error=$(if($stderr){$stderr}else{$stdout});mutation='NONE'}
-    }finally{
-      Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
-    }
+    }finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
   }
 
   $probe=Invoke-ProbeTarget 'Faiz@100.106.186.118' 'tailscale-system-ssh' @()
@@ -120,12 +123,20 @@ $o=[ordered]@{
   return $probe
 }
 
-function Invoke-GuardedRecoveryV4($Probe){
-  if(Test-Path -LiteralPath $v4Marker -PathType Leaf){
-    $prior=Read-SafeJson $v4Marker
+function Invoke-GuardedRecoveryV5($Probe,$V4,$Carrier){
+  if(Test-Path -LiteralPath $v5Marker -PathType Leaf){
+    $prior=Read-SafeJson $v5Marker
     if($prior){return $prior}
-    return [ordered]@{ok=$true;status='already-armed';jobId=$jobId;marker=$v4Marker;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
+    return [ordered]@{ok=$true;status='already-armed';jobId=$jobId;marker=$v5Marker;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
   }
+  if(-not $V4 -or [string]$V4.status -ne 'recovery-bootstrap-started'){return [ordered]@{ok=$true;status='v4-proof-missing';mutation='NONE'}}
+  if(-not $Carrier -or -not [bool]$Carrier.ok -or [string]$Carrier.status -ne 'launched'){return [ordered]@{ok=$true;status='v4-carrier-proof-missing';mutation='NONE'}}
+  if([string]$Carrier.expectedSha -ne [string]$V4.syncedSha){return [ordered]@{ok=$true;status='v4-carrier-sha-mismatch';mutation='NONE'}}
+
+  $carrierAt=$null;$taskLast=$null
+  try{$carrierAt=[datetime]::Parse([string]$Carrier.updatedAt)}catch{}
+  try{$taskLast=[datetime]::Parse([string]$Probe.recoveryTaskLastRun)}catch{}
+  $v4TaskDidNotAdvance=($carrierAt -and $taskLast -and $taskLast -lt $carrierAt)
 
   $eligible=(
     $Probe -and [bool]$Probe.ok -and
@@ -133,78 +144,75 @@ function Invoke-GuardedRecoveryV4($Probe){
     [bool]$Probe.qwen35bSavedResponseExists -and
     $Probe.ridge27b -and -not [bool]$Probe.ridge27b.attempted -and
     -not [bool]$Probe.ridgeSavedResponseExists -and
-    @($Probe.ollamaProcesses).Count -eq 0 -and
     [bool]$Probe.recoveryTaskExists -and
     [string]$Probe.recoveryTaskState -eq 'Ready' -and
-    [int]$Probe.recoveryTaskLastResult -ne 0
+    $v4TaskDidNotAdvance
   )
-  if(-not $eligible){return [ordered]@{ok=$true;status='not-eligible';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
+  if(-not $eligible){return [ordered]@{ok=$true;status='not-eligible';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true;v4TaskDidNotAdvance=$v4TaskDidNotAdvance}}
   if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){return [ordered]@{ok=$false;status='invalid-synced-sha';jobId=$jobId;mutation='NONE'}}
 
   $bootstrap=Join-Path $PSScriptRoot 'Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;mutation='NONE'}}
 
   $armed=[ordered]@{
-    ok=$true;status='armed';jobId=$jobId;marker=$v4Marker;syncedSha=$SyncedSha
+    ok=$true;status='armed';jobId=$jobId;marker=$v5Marker;syncedSha=$SyncedSha
     modelReplay35B=$false;ridgeOnlyIfUnattempted=$true
     authoritativeProof=[ordered]@{
       qwen35bAttempted=[bool]$Probe.qwen35b.attempted
       qwen35bSavedResponseExists=[bool]$Probe.qwen35bSavedResponseExists
       ridge27bAttempted=[bool]$Probe.ridge27b.attempted
       ridgeSavedResponseExists=[bool]$Probe.ridgeSavedResponseExists
-      ollamaProcessCount=@($Probe.ollamaProcesses).Count
       recoveryTaskState=[string]$Probe.recoveryTaskState
-      recoveryTaskLastResult=[int]$Probe.recoveryTaskLastResult
+      recoveryTaskLastRun=[string]$Probe.recoveryTaskLastRun
+      v4CarrierUpdatedAt=[string]$Carrier.updatedAt
+      v4TaskDidNotAdvance=$v4TaskDidNotAdvance
+      ollamaApiReady=[bool]$Probe.ollamaApiReady
+      ridgeModelAdvertised=(@($Probe.ollamaModels) -contains 'qwen3.8-ridge:27b-16k')
       observedAt=[string]$Probe.observedAt
     }
     armedAt=(Get-Date -Format o)
   }
-  Write-SafeJson $v4Marker $armed
-
+  Write-SafeJson $v5Marker $armed
   try{
     $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bootstrap`" -ExpectedSha `"$SyncedSha`" -JobId `"$jobId`""
     $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden -PassThru
-    $armed.status='recovery-bootstrap-started'
-    $armed.bootstrapPid=[int]$p.Id
-    $armed.startedAt=(Get-Date -Format o)
-    Write-SafeJson $v4Marker $armed
+    $armed.status='recovery-bootstrap-started';$armed.bootstrapPid=[int]$p.Id;$armed.startedAt=(Get-Date -Format o)
+    Write-SafeJson $v5Marker $armed
     return $armed
   }catch{
-    $armed.ok=$false
-    $armed.status='bootstrap-start-failed'
-    $armed.error=$_.Exception.Message
-    $armed.failedAt=(Get-Date -Format o)
-    Write-SafeJson $v4Marker $armed
+    $armed.ok=$false;$armed.status='bootstrap-start-failed';$armed.error=$_.Exception.Message;$armed.failedAt=(Get-Date -Format o)
+    Write-SafeJson $v5Marker $armed
     return $armed
   }
 }
 
-$markerValue=Read-SafeJson $marker
-$carrierValue=Read-SafeJson $carrierResult
-$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-$taskInfo=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
-$h3Probe=$null
-try{$h3Probe=Invoke-H3ReadOnlyProbe}catch{$h3Probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
-$v4Action=$null
-try{$v4Action=Invoke-GuardedRecoveryV4 $h3Probe}catch{$v4Action=[pscustomobject]@{ok=$false;status='v4-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
+$v3=Read-SafeJson $v3Marker
+$v4=Read-SafeJson $v4Marker
+$carrier=Read-SafeJson $carrierResult
+$transportTask=Get-ScheduledTask -TaskName $transportTaskName -ErrorAction SilentlyContinue
+$transportInfo=$(if($transportTask){Get-ScheduledTaskInfo -TaskName $transportTaskName -ErrorAction SilentlyContinue}else{$null})
+$probe=$null
+try{$probe=Invoke-H3ReadOnlyProbe}catch{$probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}
+$v5=$null
+try{$v5=Invoke-GuardedRecoveryV5 $probe $v4 $carrier}catch{$v5=[pscustomobject]@{ok=$false;status='v5-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
 
 $out=[ordered]@{
-  schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true;source='windows-main';controlPlane='github';jobId=$jobId
-  syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
-  activationMarker='activation-v3';activationMarkerExists=(Test-Path -LiteralPath $marker -PathType Leaf);activation=$markerValue
-  recoveryV4MarkerExists=(Test-Path -LiteralPath $v4Marker -PathType Leaf);recoveryV4=$v4Action
-  carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrierValue
-  transportTaskExists=($null -ne $task);transportTaskState=$(if($task){[string]$task.State}else{'missing'})
-  transportTaskLastRunTime=$(if($taskInfo -and $taskInfo.LastRunTime -gt [datetime]'2000-01-01'){$taskInfo.LastRunTime.ToString('o')}else{$null})
-  transportTaskLastTaskResult=$(if($taskInfo){[int]$taskInfo.LastTaskResult}else{$null})
-  h3Probe=$h3Probe
+  schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true
+  source='windows-main';controlPlane='github';jobId=$jobId;syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
+  activationV3=$v3;activationV4=$v4
+  recoveryV5MarkerExists=(Test-Path -LiteralPath $v5Marker -PathType Leaf);recoveryV5=$v5
+  carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrier
+  transportTaskExists=($null -ne $transportTask);transportTaskState=$(if($transportTask){[string]$transportTask.State}else{'missing'})
+  transportTaskLastRunTime=$(if($transportInfo -and $transportInfo.LastRunTime -gt [datetime]'2000-01-01'){$transportInfo.LastRunTime.ToString('o')}else{$null})
+  transportTaskLastTaskResult=$(if($transportInfo){[int]$transportInfo.LastTaskResult}else{$null})
+  h3Probe=$probe
   modelReplay35B=$false
-  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if($v4Action -and [string]$v4Action.status -eq 'recovery-bootstrap-started'){$true}else{$false})
+  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if($v5 -and [string]$v5.status -eq 'recovery-bootstrap-started'){$true}else{$false})
   modelActionPerformedByDiagnosticProbe=$false
   observedAt=(Get-Date -Format o)
 }
-$json=$out|ConvertTo-Json -Depth 30
+$json=$out|ConvertTo-Json -Depth 35
 foreach($target in @([pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},[pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath})){
   try{if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}}catch{}
 }
-Write-Output ($out|ConvertTo-Json -Depth 30 -Compress)
+Write-Output ($out|ConvertTo-Json -Depth 35 -Compress)
