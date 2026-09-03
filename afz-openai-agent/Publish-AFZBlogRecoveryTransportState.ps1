@@ -7,7 +7,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
 $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
-$marker='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request\'+$jobId+'-activation-v2.json'
+$marker='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request\'+$jobId+'-activation-v3.json'
 $carrierResult='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery\'+$jobId+'.json'
 $taskName='AFZ H3 AFZ Blog Recovery Transport'
 $sharedDiagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
@@ -34,7 +34,7 @@ $out=[ordered]@{
   controlPlane='github'
   jobId=$jobId
   syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
-  activationMarker='activation-v2'
+  activationMarker='activation-v3'
   activationMarkerExists=(Test-Path -LiteralPath $marker -PathType Leaf)
   activation=$markerValue
   carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf)
