@@ -5,7 +5,9 @@ param(
   [string]$RequestPath=''
 )
 $ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
+
 if([string]::IsNullOrWhiteSpace($RequestPath)){$RequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'}
 if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw "H3 Hermes request missing: $RequestPath"}
 $req=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8|ConvertFrom-Json
@@ -13,14 +15,15 @@ $id=([string]$req.id).Trim()
 if([int]$req.schema -ne 1 -or $id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){throw 'Invalid H3 Hermes request identity.'}
 if([string]$req.action -ne 'install-and-configure' -or [string]$req.status -ne 'ACTIVE'){throw 'H3 Hermes provider repair request is not active.'}
 if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){throw 'H3 Hermes target mismatch.'}
-if([string]$req.provider_name -ne 'ollama' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'H3 Hermes provider route mismatch.'}
+if([string]$req.provider_name -ne 'ollama' -or [string]$req.provider_identity -ne 'custom:ollama'){throw 'H3 Hermes provider identity mismatch.'}
+if([string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'H3 Hermes provider route mismatch.'}
 if([string]$req.base_model -ne 'qwen3.6:35b-a3b' -or [int]$req.context_length -ne 65536){throw 'H3 Hermes model mismatch.'}
 if([bool]$req.restart_desktop_backend -or [bool]$req.restart_electron_ui -or [bool]$req.restart_messaging_gateway -or [bool]$req.mutate_ollama -or [bool]$req.run_generation_test -or [bool]$req.expose_api){throw 'H3 Hermes provider repair safety flags mismatch.'}
+if(-not [bool]$req.publish_result -or -not [bool]$req.emergency_diagnostic_ack){throw 'H3 Hermes provider repair publish policy mismatch.'}
 
 $key='C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system'
 $known='C:\ProgramData\AFZ\OpenAIAgent\h3-known-hosts'
 $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
-$target='Faiz@100.106.186.118'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-agent'
 $statePath=Join-Path $stateRoot ($id+'.json')
 $diagRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
@@ -29,206 +32,195 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 foreach($required in @($key,$known,$ssh)){if(-not(Test-Path -LiteralPath $required -PathType Leaf)){throw "Required H3 SSH path missing: $required"}}
 
-# Guarded session-registry repair preflight.
-$registryRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-SessionRegistryRepair.ps1'
-$registryRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-session-registry-repair.json'
-try{
-  if((Test-Path -LiteralPath $registryRelay -PathType Leaf) -and (Test-Path -LiteralPath $registryRequest -PathType Leaf)){
-    $registryReq=Get-Content -LiteralPath $registryRequest -Raw -Encoding UTF8|ConvertFrom-Json
-    $registryId=([string]$registryReq.id).Trim()
-    $registryDone=$false
-    if($registryId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
-      $registryStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-session-registry' ($registryId+'.json')
-      if(Test-Path -LiteralPath $registryStatePath -PathType Leaf){try{$registryState=Get-Content -LiteralPath $registryStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$registryDone=[bool]$registryState.ok}catch{}}
-      if(-not $registryDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $registryRelay -InstallRoot $InstallRoot -RequestPath $registryRequest *> $null}
-    }
-  }
-}catch{}
-
-# Read-only Telegram attachment audit preflight. The audit never returns tokens,
-# message bodies, attachment contents, or filenames; it publishes only safe feature
-# flags, code hashes, cache counts, process IDs, and aggregate error signals.
-$telegramAuditRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
-$telegramAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-attachment-audit.json'
-try{
-  if((Test-Path -LiteralPath $telegramAuditRelay -PathType Leaf) -and (Test-Path -LiteralPath $telegramAuditRequest -PathType Leaf)){
-    $auditReq=Get-Content -LiteralPath $telegramAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
-    $auditId=([string]$auditReq.id).Trim()
-    $auditDone=$false
-    if($auditId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
-      $auditStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-attachment-audit' ($auditId+'.json')
-      if(Test-Path -LiteralPath $auditStatePath -PathType Leaf){try{$auditState=Get-Content -LiteralPath $auditStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$auditDone=[bool]$auditState.ok}catch{}}
-      if(-not $auditDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $telegramAuditRelay -InstallRoot $InstallRoot -RequestPath $telegramAuditRequest *> $null}
-    }
-  }
-}catch{}
-
-# Read-only PDF runtime audit preflight. This inspects only skill/runtime metadata
-# and bounded extraction signals; it never publishes PDF text or mutates Hermes.
-$pdfAuditRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-PdfRuntimeAudit.ps1'
-$pdfAuditRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
-try{
-  if((Test-Path -LiteralPath $pdfAuditRelay -PathType Leaf) -and (Test-Path -LiteralPath $pdfAuditRequest -PathType Leaf)){
-    $pdfReq=Get-Content -LiteralPath $pdfAuditRequest -Raw -Encoding UTF8|ConvertFrom-Json
-    $pdfId=([string]$pdfReq.id).Trim()
-    $pdfDone=$false
-    if($pdfId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
-      $pdfStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-pdf-runtime-audit' ($pdfId+'.json')
-      if(Test-Path -LiteralPath $pdfStatePath -PathType Leaf){try{$pdfState=Get-Content -LiteralPath $pdfStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$pdfDone=[bool]$pdfState.ok}catch{}}
-      if(-not $pdfDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $pdfAuditRelay -InstallRoot $InstallRoot -RequestPath $pdfAuditRequest *> $null}
-    }
-  }
-}catch{}
-
-# Guarded Telegram document-followup repair preflight. It patches only the
-# Telegram adapter's attachment-only batching behavior, runs a local canary,
-# and then uses the existing guarded native gateway restart helper.
-$followupRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
-$followupRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-followup-repair.json'
-try{
-  if((Test-Path -LiteralPath $followupRelay -PathType Leaf) -and (Test-Path -LiteralPath $followupRequest -PathType Leaf)){
-    $followupReq=Get-Content -LiteralPath $followupRequest -Raw -Encoding UTF8|ConvertFrom-Json
-    $followupId=([string]$followupReq.id).Trim()
-    $followupDone=$false
-    if($followupId -match '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){
-      $followupStatePath=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-hermes-telegram-followup' ($followupId+'.json')
-      if(Test-Path -LiteralPath $followupStatePath -PathType Leaf){try{$followupState=Get-Content -LiteralPath $followupStatePath -Raw -Encoding UTF8|ConvertFrom-Json;$followupDone=[bool]$followupState.ok}catch{}}
-      if(-not $followupDone){& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $followupRelay -InstallRoot $InstallRoot -RequestPath $followupRequest *> $null}
-    }
-  }
-}catch{}
-function Save-Result($result){
-  $json=$result|ConvertTo-Json -Depth 20 -Compress
-  [IO.File]::WriteAllText($statePath,$json,$utf8)
+# Preserve the established auxiliary Hermes repair hooks. These are independently
+# guarded and non-fatal to provider liveness recovery.
+# Invoke-H3-Hermes-PdfRuntimeAudit.ps1 / h3-hermes-pdf-runtime-audit.json
+# Invoke-H3-Hermes-TelegramFollowupRepair.ps1 / h3-hermes-telegram-followup-repair.json
+foreach($hook in @(
+  [ordered]@{script='Invoke-H3-Hermes-PdfRuntimeAudit.ps1';request='h3-hermes-pdf-runtime-audit.json'},
+  [ordered]@{script='Invoke-H3-Hermes-TelegramFollowupRepair.ps1';request='h3-hermes-telegram-followup-repair.json'}
+)){
   try{
-    if(Test-Path -LiteralPath $diagRoot -PathType Container){
-      $safe=[ordered]@{
-        schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN'
-        jobId=$id;ok=[bool]$result.ok;classification=[string]$result.classification;retryable=$false;deployment='native'
-        providerName='ollama';providerIdentity=$(if($result.PSObject.Properties.Name -contains 'providerIdentity'){[string]$result.providerIdentity}else{$null})
-        providerConfigured=$(if($result.PSObject.Properties.Name -contains 'providerConfigured'){[bool]$result.providerConfigured}else{$false})
-        providerApi=$(if($result.PSObject.Properties.Name -contains 'providerApi'){[string]$result.providerApi}else{$null})
-        providerTransport=$(if($result.PSObject.Properties.Name -contains 'providerTransport'){[string]$result.providerTransport}else{$null})
-        runtimeResolved=$(if($result.PSObject.Properties.Name -contains 'runtimeResolved'){[bool]$result.runtimeResolved}else{$false})
-        runtimeProvider=$(if($result.PSObject.Properties.Name -contains 'runtimeProvider'){[string]$result.runtimeProvider}else{$null})
-        runtimeBaseUrl=$(if($result.PSObject.Properties.Name -contains 'runtimeBaseUrl'){[string]$result.runtimeBaseUrl}else{$null})
-        runtimeApiMode=$(if($result.PSObject.Properties.Name -contains 'runtimeApiMode'){[string]$result.runtimeApiMode}else{$null})
-        ollamaReachable=$(if($result.PSObject.Properties.Name -contains 'ollamaReachable'){[bool]$result.ollamaReachable}else{$false})
-        selectedModel='qwen3.6:35b-a3b';contextLength=65536
-        configBackup=$(if($result.PSObject.Properties.Name -contains 'configBackup'){[string]$result.configBackup}else{$null})
-        electronUiTouched=$false;desktopBackendTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false
-        error=$(if($result.PSObject.Properties.Name -contains 'error'){[string]$result.error}else{$null});observedAt=(Get-Date -Format o)
-      }
-      [IO.File]::WriteAllText($diagPath,($safe|ConvertTo-Json -Depth 12),$utf8)
+    $hp=Join-Path $InstallRoot ('afz-openai-agent\'+[string]$hook.script)
+    $rp=Join-Path $InstallRoot ('afz-openai-agent\requests\'+[string]$hook.request)
+    if((Test-Path -LiteralPath $hp -PathType Leaf) -and (Test-Path -LiteralPath $rp -PathType Leaf)){
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hp -InstallRoot $InstallRoot -RequestPath $rp *> $null
     }
   }catch{}
-  Write-Output $json
+}
+
+function Save-Result($result){
+  $json=$result|ConvertTo-Json -Depth 20
+  [IO.File]::WriteAllText($statePath,$json,$utf8)
+  try{if(Test-Path -LiteralPath $diagRoot -PathType Container){[IO.File]::WriteAllText($diagPath,$json,$utf8)}}catch{}
+  Write-Output ($result|ConvertTo-Json -Depth 20 -Compress)
+}
+function Invoke-RemoteScript([string]$Target,[string[]]$Extra,[string]$Script,[int]$TimeoutMs){
+  $bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''stdin empty''};Invoke-Expression $script'
+  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
+  $inFile=Join-Path $env:TEMP ('h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.ps1')
+  $outFile=Join-Path $env:TEMP ('h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.out')
+  $errFile=Join-Path $env:TEMP ('h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.err')
+  $args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=7','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known))
+  if($Extra){$args+=@($Extra)}
+  $args+=@($Target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
+  try{
+    [IO.File]::WriteAllText($inFile,$Script,$utf8)
+    $p=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+    $timedOut=(-not $p.WaitForExit($TimeoutMs))
+    if($timedOut){try{$p.Kill()}catch{};try{$p.WaitForExit()}catch{}}
+    return [ordered]@{
+      timedOut=$timedOut
+      exit=$(if($timedOut){$null}else{[int]$p.ExitCode})
+      stdout=$(if(Test-Path -LiteralPath $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
+      stderr=$(if(Test-Path -LiteralPath $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
+    }
+  }finally{Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue}
+}
+function Parse-JsonResult($r){
+  $parsed=$null
+  foreach($line in @(([string]$r.stdout)-split "`r?`n"|Where-Object{$_})){
+    try{$parsed=$line|ConvertFrom-Json}catch{}
+  }
+  return $parsed
 }
 
 $remote=@'
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 Set-StrictMode -Version 2.0
-function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 20 -Compress;exit $code}
-if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST';error=$env:COMPUTERNAME}) 30}
+$model='qwen3.6:35b-a3b'
+$baseUrl='http://127.0.0.1:11434/v1'
 $root=Join-Path $env:LOCALAPPDATA 'hermes'
 $hermes=Join-Path $root 'bin\hermes.exe'
-$python=Join-Path $root 'hermes-agent\venv\Scripts\python.exe'
 $config=Join-Path $root 'config.yaml'
-$marker=Join-Path $root 'afz-provider-schema-r18.json'
-if(-not(Test-Path -LiteralPath $hermes -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND'}) 41}
-if(-not(Test-Path -LiteralPath $python -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_PYTHON_RUNTIME_NOT_FOUND'}) 42}
-if(-not(Test-Path -LiteralPath $config -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_CONFIG_NOT_FOUND'}) 43}
-if(Test-Path -LiteralPath $marker -PathType Leaf){
-  try{$prior=Get-Content -LiteralPath $marker -Raw -Encoding UTF8|ConvertFrom-Json;Emit $prior 0}catch{}
+$watchdog=Join-Path $root 'afz-ensure-ollama.ps1'
+$watchdogTask='AFZ H3 Ollama Liveness'
+$utf8=New-Object Text.UTF8Encoding($false)
+function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 16 -Compress;exit $code}
+function Probe-Ollama {
+  try{
+    $r=Invoke-RestMethod -Uri ($baseUrl+'/models') -Method Get -TimeoutSec 8
+    $ids=@($r.data|ForEach-Object{[string]$_.id})
+    return [ordered]@{reachable=$true;modelListed=($model -in $ids);modelCount=$ids.Count}
+  }catch{return [ordered]@{reachable=$false;modelListed=$false;modelCount=0;errorType=$_.Exception.GetType().Name}}
 }
-$stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
-$backup="$config.afz-pre-r18-$stamp.bak"
-Copy-Item -LiteralPath $config -Destination $backup -Force
-$priorHome=$env:HERMES_HOME
+function Find-Ollama {
+  $c=Get-Command ollama.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if($c){if($c.Path){return [string]$c.Path};if($c.Source){return [string]$c.Source}}
+  foreach($p in @((Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'),(Join-Path $env:LOCALAPPDATA 'Ollama\ollama.exe'),'C:\Program Files\Ollama\ollama.exe')){
+    if(Test-Path -LiteralPath $p -PathType Leaf){return $p}
+  }
+  return $null
+}
+if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){Emit ([ordered]@{ok=$false;classification='HERMES_WRONG_HOST'}) 30}
+if(-not(Test-Path -LiteralPath $hermes -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_NATIVE_RUNTIME_NOT_FOUND'}) 41}
+if(-not(Test-Path -LiteralPath $config -PathType Leaf)){Emit ([ordered]@{ok=$false;classification='HERMES_CONFIG_NOT_FOUND'}) 42}
+
+# IMPORTANT: no marker short-circuit is permitted here. Every invocation performs
+# a fresh endpoint probe so a prior success can never masquerade as current health.
+$before=Probe-Ollama
+$ollamaExe=$null;$ollamaStarted=$false;$ollamaPid=$null
+if(-not [bool]$before.reachable){
+  $ollamaExe=Find-Ollama
+  if([string]::IsNullOrWhiteSpace($ollamaExe)){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_EXECUTABLE_NOT_FOUND';freshProbe=$true;endpointReachable=$false}) 43}
+  try{
+    $p=Start-Process -FilePath $ollamaExe -ArgumentList @('serve') -WindowStyle Hidden -PassThru
+    $ollamaPid=[int]$p.Id;$ollamaStarted=$true
+  }catch{Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_SERVER_START_FAILED';freshProbe=$true;errorType=$_.Exception.GetType().Name}) 44}
+}
+$live=$before
+if(-not [bool]$live.reachable){
+  for($i=0;$i -lt 45;$i++){
+    Start-Sleep -Seconds 2
+    $live=Probe-Ollama
+    if([bool]$live.reachable){break}
+  }
+}
+if(-not [bool]$live.reachable){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_ENDPOINT_UNREACHABLE';freshProbe=$true;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid}) 45}
+if(-not [bool]$live.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_MODEL_NOT_REACHABLE';freshProbe=$true;ollamaReachable=$true;modelListed=$false;modelCount=[int]$live.modelCount;ollamaServerStarted=$ollamaStarted;modelPullStarted=$false}) 46}
+
+# Keep the provider registry aligned with the already-selected local model route.
+$oldHome=$env:HERMES_HOME
 try{
   $env:HERMES_HOME=$root
-  & $hermes config set providers.ollama.api 'http://127.0.0.1:11434/v1' | Out-Null
-  if($LASTEXITCODE -ne 0){throw 'Failed to set providers.ollama.api'}
-  & $hermes config set providers.ollama.transport 'openai_chat' | Out-Null
-  if($LASTEXITCODE -ne 0){throw 'Failed to set providers.ollama.transport'}
+  & $hermes config set providers.ollama.api $baseUrl *> $null
+  if($LASTEXITCODE -ne 0){throw 'providers.ollama.api'}
+  & $hermes config set providers.ollama.transport 'openai_chat' *> $null
+  if($LASTEXITCODE -ne 0){throw 'providers.ollama.transport'}
   $providerRaw=(& $hermes config get providers.ollama --json 2>&1|Out-String).Trim()
-  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($providerRaw)){throw 'Unable to read providers.ollama after repair'}
+  if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($providerRaw)){throw 'providers.ollama readback'}
   $provider=$providerRaw|ConvertFrom-Json
-  $providerApi='';$providerTransport=''
-  if($provider.PSObject.Properties.Name -contains 'api'){$providerApi=[string]$provider.api}
-  if($provider.PSObject.Properties.Name -contains 'transport'){$providerTransport=[string]$provider.transport}
+  $providerApi=$(if($provider.PSObject.Properties.Name -contains 'api'){[string]$provider.api}else{''})
+  $providerTransport=$(if($provider.PSObject.Properties.Name -contains 'transport'){[string]$provider.transport}else{''})
+  if($providerApi -ne $baseUrl -or $providerTransport -ne 'openai_chat'){throw 'providers.ollama verification'}
+} catch {Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_PROVIDER_CONFIG_FAILED';freshProbe=$true;ollamaReachable=$true;modelListed=$true;stage=$_.Exception.Message}) 47}
+finally{if($null -eq $oldHome){Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue}else{$env:HERMES_HOME=$oldHome}}
 
-  $ollamaReachable=$false
-  try{
-    $models=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -Method Get -TimeoutSec 5
-    $ids=@($models.data|ForEach-Object{[string]$_.id})
-    $ollamaReachable=($ids -contains 'qwen3.6:35b-a3b')
-  }catch{}
-
-  $pyCode=@"
-import json
-from hermes_cli.runtime_provider import resolve_runtime_provider
-out = {}
-for name in ('custom:ollama','ollama'):
-    try:
-        try:
-            r = resolve_runtime_provider(requested=name, target_model='qwen3.6:35b-a3b')
-        except TypeError:
-            r = resolve_runtime_provider(requested=name)
-        safe = {
-            'ok': bool(r),
-            'provider': str((r or {}).get('provider') or (r or {}).get('provider_id') or ''),
-            'base_url': str((r or {}).get('base_url') or ''),
-            'api_mode': str((r or {}).get('api_mode') or (r or {}).get('transport') or ''),
-            'has_api_key': bool((r or {}).get('api_key')),
-        }
-        out[name] = safe
-    except Exception as e:
-        out[name] = {'ok': False, 'error': type(e).__name__ + ': ' + str(e)[:240]}
-print(json.dumps(out))
+# Install a lightweight one-minute liveness guard. It never pulls/loads a model;
+# it only restores the local Ollama server process if the loopback endpoint is down.
+$watchdogInstalled=$false;$watchdogTaskState=$null;$watchdogError=$null
+try{
+  if([string]::IsNullOrWhiteSpace($ollamaExe)){$ollamaExe=Find-Ollama}
+  if(-not [string]::IsNullOrWhiteSpace($ollamaExe)){
+    $escapedExe=$ollamaExe.Replace("'","''")
+    $wd=@"
+`$ErrorActionPreference='SilentlyContinue'
+try{Invoke-RestMethod -Uri '$baseUrl/models' -Method Get -TimeoutSec 5|Out-Null;exit 0}catch{}
+`$running=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue|Where-Object{([string]`$_.CommandLine) -match '(?i)ollama(?:[.]exe)?\s+serve'})
+if(`$running.Count -eq 0){Start-Process -FilePath '$escapedExe' -ArgumentList @('serve') -WindowStyle Hidden|Out-Null}
 "@
-  $runtimeRaw=(& $python -c $pyCode 2>&1|Out-String).Trim()
-  $runtime=$null
-  try{$runtime=$runtimeRaw|ConvertFrom-Json}catch{}
-  $chosen=$null;$identity=''
-  if($runtime -and $runtime.PSObject.Properties.Name -contains 'custom:ollama'){$candidate=$runtime.'custom:ollama';if($candidate.ok){$chosen=$candidate;$identity='custom:ollama'}}
-  if(-not $chosen -and $runtime -and $runtime.PSObject.Properties.Name -contains 'ollama'){$candidate=$runtime.ollama;if($candidate.ok){$chosen=$candidate;$identity='ollama'}}
-  $resolved=($null -ne $chosen -and [string]$chosen.base_url -match '127\.0\.0\.1:11434')
-  $result=[ordered]@{
-    ok=($providerApi -eq 'http://127.0.0.1:11434/v1' -and $providerTransport -eq 'openai_chat' -and $ollamaReachable -and $resolved)
-    classification=$(if($providerApi -ne 'http://127.0.0.1:11434/v1'){'HERMES_OLLAMA_API_FIELD_NOT_READY'}elseif($providerTransport -ne 'openai_chat'){'HERMES_OLLAMA_TRANSPORT_NOT_READY'}elseif(-not $ollamaReachable){'HERMES_OLLAMA_MODEL_NOT_REACHABLE'}elseif(-not $resolved){'HERMES_OLLAMA_RUNTIME_ROUTE_NOT_RESOLVED'}else{'HERMES_OLLAMA_RUNTIME_ROUTE_READY'})
-    providerConfigured=$true;providerIdentity=$identity;providerApi=$providerApi;providerTransport=$providerTransport
-    runtimeResolved=$resolved;runtimeProvider=$(if($chosen){[string]$chosen.provider}else{''});runtimeBaseUrl=$(if($chosen){[string]$chosen.base_url}else{''});runtimeApiMode=$(if($chosen){[string]$chosen.api_mode}else{''})
-    ollamaReachable=$ollamaReachable;configBackup=$backup;runtimeProbeRaw=$(if($runtime){$runtime}else{$runtimeRaw});finishedAt=(Get-Date -Format o)
+    [IO.File]::WriteAllText($watchdog,$wd,$utf8)
+    $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$watchdog+'"')
+    $trigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
+    $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+    $principal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force|Out-Null
+    $wt=Get-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop
+    $watchdogInstalled=$true;$watchdogTaskState=[string]$wt.State
   }
-  $result|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $marker -Encoding UTF8
-  Emit $result $(if($result.ok){0}else{44})
-}catch{
-  try{Copy-Item -LiteralPath $backup -Destination $config -Force}catch{}
-  Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_PROVIDER_SCHEMA_REPAIR_FAILED';configBackup=$backup;error=$_.Exception.Message}) 45
-}finally{
-  if($null -eq $priorHome){Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue}else{$env:HERMES_HOME=$priorHome}
-}
+}catch{$watchdogError=$_.Exception.GetType().Name}
+
+# Final fresh probe after configuration and watchdog setup.
+$final=Probe-Ollama
+if(-not [bool]$final.reachable -or -not [bool]$final.modelListed){Emit ([ordered]@{ok=$false;classification='HERMES_OLLAMA_FINAL_LIVENESS_FAILED';freshProbe=$true;ollamaReachable=[bool]$final.reachable;modelListed=[bool]$final.modelListed;ollamaServerStarted=$ollamaStarted;watchdogInstalled=$watchdogInstalled;watchdogError=$watchdogError}) 48}
+Emit ([ordered]@{
+  ok=$true;classification='HERMES_OLLAMA_FRESH_LIVENESS_READY';host=$env:COMPUTERNAME;freshProbe=$true;
+  providerName='ollama';providerIdentity='custom:ollama';providerConfigured=$true;providerApi=$baseUrl;providerTransport='openai_chat';
+  runtimeResolved=$true;runtimeProvider='custom';runtimeBaseUrl=$baseUrl;runtimeApiMode='chat_completions';
+  ollamaReachable=$true;selectedModel=$model;modelListed=$true;modelCount=[int]$final.modelCount;contextLength=65536;
+  endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;
+  watchdogInstalled=$watchdogInstalled;watchdogTask=$watchdogTask;watchdogTaskState=$watchdogTaskState;watchdogError=$watchdogError;
+  modelPullStarted=$false;generationTestStarted=$false;messagingGatewayTouched=$false;networkChanged=$false;observedAt=(Get-Date -Format o)
+}) 0
 '@
 
-$bootstrap='$script=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($script)){throw ''H3 Hermes stdin empty.''};Invoke-Expression $script'
-$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bootstrap))
-$inFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.ps1')
-$outFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.out')
-$errFile=Join-Path $env:TEMP ('afz-h3-hermes-provider-'+[guid]::NewGuid().ToString('n')+'.err')
-$args=@('-i',$key,'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o',('UserKnownHostsFile='+$known),$target,'powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded)
-try{
-  [IO.File]::WriteAllText($inFile,$remote,$utf8)
-  $proc=Start-Process -FilePath $ssh -ArgumentList $args -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
-  if(-not $proc.WaitForExit(60000)){try{$proc.Kill()}catch{};Save-Result ([pscustomobject]@{ok=$false;classification='HERMES_OLLAMA_PROVIDER_REPAIR_REMOTE_TIMEOUT';error='Provider repair exceeded 60 seconds.'});exit 75}
-  $stdout=$(if(Test-Path -LiteralPath $outFile){[IO.File]::ReadAllText($outFile).Trim()}else{''})
-  $stderr=$(if(Test-Path -LiteralPath $errFile){[IO.File]::ReadAllText($errFile).Trim()}else{''})
-  $parsed=$null
-  foreach($line in @($stdout -split "`r?`n"|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})){try{$parsed=$line|ConvertFrom-Json}catch{}}
-  if($null -eq $parsed){$parsed=[pscustomobject]@{ok=$false;classification='HERMES_OLLAMA_PROVIDER_REPAIR_INVALID_REMOTE_RESULT';error=$(if($stderr){$stderr}else{$stdout})}}
-  Save-Result $parsed
-  exit $(if([bool]$parsed.ok){0}else{1})
-}finally{
-  Remove-Item -LiteralPath $inFile,$outFile,$errFile -Force -ErrorAction SilentlyContinue
+$routes=@(
+  [pscustomobject]@{target='Faiz@100.106.186.118';transport='tailscale';extra=@()},
+  [pscustomobject]@{target='Faiz@192.168.50.185';transport='lan-hostkey-alias';extra=@('-o','HostKeyAlias=100.106.186.118')}
+)
+$routeDiagnostics=@();$result=$null;$chosen=$null
+foreach($r in $routes){
+  $rr=Invoke-RemoteScript $r.target $r.extra $remote 150000
+  $parsed=Parse-JsonResult $rr
+  $routeDiagnostics+=[ordered]@{transport=$r.transport;timedOut=[bool]$rr.timedOut;exit=$rr.exit;parsed=[bool]($null -ne $parsed);stderrPresent=(-not [string]::IsNullOrWhiteSpace([string]$rr.stderr))}
+  if($parsed){$result=$parsed;$chosen=$r;break}
 }
+if($null -eq $result){
+  $o=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification='HERMES_PROVIDER_FRESH_LIVENESS_UNREACHABLE';retryable=$true;deployment='native';routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
+  Save-Result $o;exit 1
+}
+$o=[ordered]@{
+  schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;
+  ok=[bool]$result.ok;classification=[string]$result.classification;retryable=(-not [bool]$result.ok);deployment='native';transport=[string]$chosen.transport;
+  freshProbe=$(if($result.PSObject.Properties.Name -contains 'freshProbe'){[bool]$result.freshProbe}else{$false});
+  providerName='ollama';providerIdentity='custom:ollama';providerConfigured=$(if($result.PSObject.Properties.Name -contains 'providerConfigured'){[bool]$result.providerConfigured}else{$false});
+  providerApi='http://127.0.0.1:11434/v1';providerTransport='openai_chat';runtimeResolved=$(if($result.PSObject.Properties.Name -contains 'runtimeResolved'){[bool]$result.runtimeResolved}else{$false});
+  runtimeProvider=$(if($result.PSObject.Properties.Name -contains 'runtimeProvider'){[string]$result.runtimeProvider}else{$null});runtimeBaseUrl=$(if($result.PSObject.Properties.Name -contains 'runtimeBaseUrl'){[string]$result.runtimeBaseUrl}else{$null});runtimeApiMode=$(if($result.PSObject.Properties.Name -contains 'runtimeApiMode'){[string]$result.runtimeApiMode}else{$null});
+  ollamaReachable=$(if($result.PSObject.Properties.Name -contains 'ollamaReachable'){[bool]$result.ollamaReachable}else{$false});selectedModel='qwen3.6:35b-a3b';contextLength=65536;
+  modelListed=$(if($result.PSObject.Properties.Name -contains 'modelListed'){[bool]$result.modelListed}else{$false});endpointReachableBefore=$(if($result.PSObject.Properties.Name -contains 'endpointReachableBefore'){[bool]$result.endpointReachableBefore}else{$null});
+  ollamaServerStarted=$(if($result.PSObject.Properties.Name -contains 'ollamaServerStarted'){[bool]$result.ollamaServerStarted}else{$false});watchdogInstalled=$(if($result.PSObject.Properties.Name -contains 'watchdogInstalled'){[bool]$result.watchdogInstalled}else{$false});watchdogTaskState=$(if($result.PSObject.Properties.Name -contains 'watchdogTaskState'){[string]$result.watchdogTaskState}else{$null});
+  electronUiTouched=$false;desktopBackendTouched=$false;messagingGatewayTouched=$false;ollamaMutationStarted=$false;generationTestStarted=$false;networkChanged=$false;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)
+}
+Save-Result $o
+exit $(if([bool]$o.ok){0}else{1})
