@@ -1,0 +1,9 @@
+request=h3-hermes-ollama-live-recovery-20260903-r1
+target=DESKTOP-H3R6CQN
+model=qwen3.6:35b-a3b
+endpoint=http://127.0.0.1:11434/v1
+action=ensure-server-live-prewarm-chat-refresh-gateway
+model-pull=false
+network-change=false
+provider-change=false
+requested-at=2026-09-03T12:36:00-04:00
