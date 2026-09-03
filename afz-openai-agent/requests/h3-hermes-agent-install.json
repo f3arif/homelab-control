@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-ollama-provider-fresh-liveness-20260903-r31",
+  "id": "h3-hermes-ollama-provider-fresh-liveness-20260903-r32",
   "action": "install-and-configure",
   "status": "ACTIVE",
   "target": "h3",
