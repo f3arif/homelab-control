@@ -32,6 +32,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import base64
 
           p = Path('afz-openai-agent/Invoke-H3-GenericWorker-Recovery.ps1')
           text = p.read_text(encoding='utf-8')
@@ -39,98 +40,19 @@ jobs:
           if marker in text:
               raise SystemExit('Ollama watchdog read-only audit already present')
 
-          anchor = '''function Get-WorkerProcesses {
-  @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { [string]$_.CommandLine -like ('*'+$workerScript+'*') } |
-    Select-Object ProcessId,ParentProcessId,Name,CommandLine)
-}
-'''
-          audit = r'''
-# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1
-function Get-OllamaWatchdogReadOnlyAudit {
-  $watchdogTaskName='AFZ H3 Ollama Liveness'
-  $taskO=Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
-  $taskInfoO=$(if($taskO){Get-ScheduledTaskInfo -TaskName $watchdogTaskName -ErrorAction SilentlyContinue}else{$null})
-  $actionsO=@()
-  $triggersO=@()
-  $principalO=$null
-  if($taskO){
-    $actionsO=@($taskO.Actions|ForEach-Object{[ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments;workingDirectory=[string]$_.WorkingDirectory}})
-    $triggersO=@($taskO.Triggers|ForEach-Object{[ordered]@{enabled=[bool]$_.Enabled;startBoundary=[string]$_.StartBoundary;endBoundary=[string]$_.EndBoundary;repetitionInterval=[string]$_.Repetition.Interval;repetitionDuration=[string]$_.Repetition.Duration;executionTimeLimit=[string]$_.ExecutionTimeLimit}})
-    $principalO=[ordered]@{userId=[string]$taskO.Principal.UserId;logonType=[string]$taskO.Principal.LogonType;runLevel=[string]$taskO.Principal.RunLevel}
-  }
+          dec = lambda s: base64.b64decode(s).decode('utf-8')
+          anchor = dec('ZnVuY3Rpb24gR2V0LVdvcmtlclByb2Nlc3NlcyB7CiAgQChHZXQtQ2ltSW5zdGFuY2UgV2luMzJfUHJvY2VzcyAtRmlsdGVyICJOYW1lPSdwb3dlcnNoZWxsLmV4ZScgT1IgTmFtZT0ncHdzaC5leGUnIiAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8CiAgICBXaGVyZS1PYmplY3QgeyBbc3RyaW5nXSRfLkNvbW1hbmRMaW5lIC1saWtlICgnKicrJHdvcmtlclNjcmlwdCsnKicpIH0gfAogICAgU2VsZWN0LU9iamVjdCBQcm9jZXNzSWQsUGFyZW50UHJvY2Vzc0lkLE5hbWUsQ29tbWFuZExpbmUpCn0K')
+          audit = dec('CiMgSEVSTUVTX09MTEFNQV9XQVRDSERPR19SRUFET05MWV9BVURJVF9WMQpmdW5jdGlvbiBHZXQtT2xsYW1hV2F0Y2hkb2dSZWFkT25seUF1ZGl0IHsKICAkd2F0Y2hkb2dUYXNrTmFtZT0nQUZaIEgzIE9sbGFtYSBMaXZlbmVzcycKICAkdGFza089R2V0LVNjaGVkdWxlZFRhc2sgLVRhc2tOYW1lICR3YXRjaGRvZ1Rhc2tOYW1lIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCiAgJHRhc2tJbmZvTz0kKGlmKCR0YXNrTyl7R2V0LVNjaGVkdWxlZFRhc2tJbmZvIC1UYXNrTmFtZSAkd2F0Y2hkb2dUYXNrTmFtZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZX1lbHNleyRudWxsfSkKICAkYWN0aW9uc089QCgpCiAgJHRyaWdnZXJzTz1AKCkKICAkcHJpbmNpcGFsTz0kbnVsbAogIGlmKCR0YXNrTyl7CiAgICAkYWN0aW9uc089QCgkdGFza08uQWN0aW9uc3xGb3JFYWNoLU9iamVjdHtbb3JkZXJlZF1Ae2V4ZWN1dGU9W3N0cmluZ10kXy5FeGVjdXRlO2FyZ3VtZW50cz1bc3RyaW5nXSRfLkFyZ3VtZW50czt3b3JraW5nRGlyZWN0b3J5PVtzdHJpbmddJF8uV29ya2luZ0RpcmVjdG9yeX19KQogICAgJHRyaWdnZXJzTz1AKCR0YXNrTy5UcmlnZ2Vyc3xGb3JFYWNoLU9iamVjdHtbb3JkZXJlZF1Ae2VuYWJsZWQ9W2Jvb2xdJF8uRW5hYmxlZDtzdGFydEJvdW5kYXJ5PVtzdHJpbmddJF8uU3RhcnRCb3VuZGFyeTtlbmRCb3VuZGFyeT1bc3RyaW5nXSRfLkVuZEJvdW5kYXJ5O3JlcGV0aXRpb25JbnRlcnZhbD1bc3RyaW5nXSRfLlJlcGV0aXRpb24uSW50ZXJ2YWw7cmVwZXRpdGlvbkR1cmF0aW9uPVtzdHJpbmddJF8uUmVwZXRpdGlvbi5EdXJhdGlvbjtleGVjdXRpb25UaW1lTGltaXQ9W3N0cmluZ10kXy5FeGVjdXRpb25UaW1lTGltaXR9fSkKICAgICRwcmluY2lwYWxPPVtvcmRlcmVkXUB7dXNlcklkPVtzdHJpbmddJHRhc2tPLlByaW5jaXBhbC5Vc2VySWQ7bG9nb25UeXBlPVtzdHJpbmddJHRhc2tPLlByaW5jaXBhbC5Mb2dvblR5cGU7cnVuTGV2ZWw9W3N0cmluZ10kdGFza08uUHJpbmNpcGFsLlJ1bkxldmVsfQogIH0KCiAgJG9sbGFtYVByb2Nlc3Nlcz1AKEdldC1DaW1JbnN0YW5jZSBXaW4zMl9Qcm9jZXNzIC1GaWx0ZXIgIk5hbWU9J29sbGFtYS5leGUnIiAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZXxGb3JFYWNoLU9iamVjdHsKICAgIFtvcmRlcmVkXUB7cHJvY2Vzc0lkPVtpbnRdJF8uUHJvY2Vzc0lkO3BhcmVudFByb2Nlc3NJZD1baW50XSRfLlBhcmVudFByb2Nlc3NJZDtjb21tYW5kTGluZT1bc3RyaW5nXSRfLkNvbW1hbmRMaW5lO2NyZWF0aW9uRGF0ZT1bc3RyaW5nXSRfLkNyZWF0aW9uRGF0ZTtleGVjdXRhYmxlUGF0aD1bc3RyaW5nXSRfLkV4ZWN1dGFibGVQYXRofQogIH0pCgogICRsaXN0ZW5lcnM9QCgpCiAgdHJ5eyRsaXN0ZW5lcnM9QChHZXQtTmV0VENQQ29ubmVjdGlvbiAtTG9jYWxQb3J0IDExNDM0IC1TdGF0ZSBMaXN0ZW4gLUVycm9yQWN0aW9uIFN0b3B8Rm9yRWFjaC1PYmplY3R7W29yZGVyZWRdQHtsb2NhbEFkZHJlc3M9W3N0cmluZ10kXy5Mb2NhbEFkZHJlc3M7bG9jYWxQb3J0PVtpbnRdJF8uTG9jYWxQb3J0O293bmluZ1Byb2Nlc3M9W2ludF0kXy5Pd25pbmdQcm9jZXNzO3N0YXRlPVtzdHJpbmddJF8uU3RhdGV9fSl9Y2F0Y2h7fQoKICAkbW9kZWxzUmVhY2hhYmxlPSRmYWxzZQogICRtb2RlbExpc3RlZD0kZmFsc2UKICAkbW9kZWxJZHM9QCgpCiAgJG1vZGVsc0Vycm9yPSRudWxsCiAgdHJ5ewogICAgJG09SW52b2tlLVJlc3RNZXRob2QgLVVyaSAnaHR0cDovLzEyNy4wLjAuMToxMTQzNC92MS9tb2RlbHMnIC1NZXRob2QgR2V0IC1UaW1lb3V0U2VjIDQKICAgICRtb2RlbElkcz1AKCRtLmRhdGF8Rm9yRWFjaC1PYmplY3R7W3N0cmluZ10kXy5pZH0pCiAgICAkbW9kZWxzUmVhY2hhYmxlPSR0cnVlCiAgICAkbW9kZWxMaXN0ZWQ9KCdxd2VuMy42OjM1Yi1hM2InIC1pbiAkbW9kZWxJZHMpCiAgfWNhdGNoeyRtb2RlbHNFcnJvcj0kXy5FeGNlcHRpb24uR2V0VHlwZSgpLkZ1bGxOYW1lfQoKICAkbmF0aXZlUHNSZWFjaGFibGU9JGZhbHNlCiAgJGxvYWRlZE1vZGVscz1AKCkKICAkbmF0aXZlUHNFcnJvcj0kbnVsbAogIHRyeXsKICAgICRwcz1JbnZva2UtUmVzdE1ldGhvZCAtVXJpICdodHRwOi8vMTI3LjAuMC4xOjExNDM0L2FwaS9wcycgLU1ldGhvZCBHZXQgLVRpbWVvdXRTZWMgNAogICAgJGxvYWRlZE1vZGVscz1AKCRwcy5tb2RlbHN8Rm9yRWFjaC1PYmplY3R7W29yZGVyZWRdQHtuYW1lPVtzdHJpbmddJF8ubmFtZTttb2RlbD1bc3RyaW5nXSRfLm1vZGVsO3NpemU9W2ludDY0XSRfLnNpemU7c2l6ZVZyYW09W2ludDY0XSRfLnNpemVfdnJhbTtleHBpcmVzQXQ9W3N0cmluZ10kXy5leHBpcmVzX2F0fX0pCiAgICAkbmF0aXZlUHNSZWFjaGFibGU9JHRydWUKICB9Y2F0Y2h7JG5hdGl2ZVBzRXJyb3I9JF8uRXhjZXB0aW9uLkdldFR5cGUoKS5GdWxsTmFtZX0KCiAgJHJlY2VudEV2ZW50cz1AKCkKICAkZXZlbnRSZWFkRXJyb3I9JG51bGwKICB0cnl7CiAgICAkc2luY2U9KEdldC1EYXRlKS5BZGRIb3VycygtMykKICAgICRyZWNlbnRFdmVudHM9QChHZXQtV2luRXZlbnQgLUZpbHRlckhhc2h0YWJsZSBAe0xvZ05hbWU9J0FwcGxpY2F0aW9uJztTdGFydFRpbWU9JHNpbmNlfSAtTWF4RXZlbnRzIDE1MCAtRXJyb3JBY3Rpb24gU3RvcCB8CiAgICAgIFdoZXJlLU9iamVjdCB7KFtzdHJpbmddJF8uUHJvdmlkZXJOYW1lIC1tYXRjaCAnKD9pKW9sbGFtYXxudmlkaWF8Y3VkYScpIC1vciAoW3N0cmluZ10kXy5NZXNzYWdlIC1tYXRjaCAnKD9pKW9sbGFtYXxudmlkaWF8Y3VkYXxsbGFtYScpfSB8CiAgICAgIFNlbGVjdC1PYmplY3QgLUZpcnN0IDIwIHwKICAgICAgRm9yRWFjaC1PYmplY3R7CiAgICAgICAgJG1zZz1bc3RyaW5nXSRfLk1lc3NhZ2UKICAgICAgICBpZigkbXNnLkxlbmd0aCAtZ3QgODAwKXskbXNnPSRtc2cuU3Vic3RyaW5nKDAsODAwKX0KICAgICAgICBbb3JkZXJlZF1Ae3RpbWVDcmVhdGVkPSQoaWYoJF8uVGltZUNyZWF0ZWQpeyRfLlRpbWVDcmVhdGVkLlRvU3RyaW5nKCdvJyl9ZWxzZXskbnVsbH0pO3Byb3ZpZGVyTmFtZT1bc3RyaW5nXSRfLlByb3ZpZGVyTmFtZTtpZD1baW50XSRfLklkO2xldmVsRGlzcGxheU5hbWU9W3N0cmluZ10kXy5MZXZlbERpc3BsYXlOYW1lO21lc3NhZ2U9JG1zZ30KICAgICAgfSkKICB9Y2F0Y2h7JGV2ZW50UmVhZEVycm9yPSRfLkV4Y2VwdGlvbi5HZXRUeXBlKCkuRnVsbE5hbWV9CgogIFtvcmRlcmVkXUB7CiAgICByZWFkT25seT0kdHJ1ZTtyZW1vdGVNdXRhdGlvbj0nTk9ORSc7dGFza05hbWU9JHdhdGNoZG9nVGFza05hbWU7dGFza0V4aXN0cz1bYm9vbF0kdGFza087dGFza1N0YXRlPSQoaWYoJHRhc2tPKXtbc3RyaW5nXSR0YXNrTy5TdGF0ZX1lbHNleyRudWxsfSk7CiAgICBsYXN0VGFza1Jlc3VsdD0kKGlmKCR0YXNrSW5mb08pe1tpbnQ2NF0kdGFza0luZm9PLkxhc3RUYXNrUmVzdWx0fWVsc2V7JG51bGx9KTtsYXN0UnVuVGltZT0kKGlmKCR0YXNrSW5mb08peyR0YXNrSW5mb08uTGFzdFJ1blRpbWUuVG9TdHJpbmcoJ28nKX1lbHNleyRudWxsfSk7bmV4dFJ1blRpbWU9JChpZigkdGFza0luZm9PKXskdGFza0luZm9PLk5leHRSdW5UaW1lLlRvU3RyaW5nKCdvJyl9ZWxzZXskbnVsbH0pO251bWJlck9mTWlzc2VkUnVucz0kKGlmKCR0YXNrSW5mb08pe1tpbnQ2NF0kdGFza0luZm9PLk51bWJlck9mTWlzc2VkUnVuc31lbHNleyRudWxsfSk7CiAgICBwcmluY2lwYWw9JHByaW5jaXBhbE87YWN0aW9ucz0kYWN0aW9uc087dHJpZ2dlcnM9JHRyaWdnZXJzTztvbGxhbWFQcm9jZXNzQ291bnQ9JG9sbGFtYVByb2Nlc3Nlcy5Db3VudDtvbGxhbWFQcm9jZXNzZXM9JG9sbGFtYVByb2Nlc3NlcztsaXN0ZW5lckNvdW50PSRsaXN0ZW5lcnMuQ291bnQ7bGlzdGVuZXJzPSRsaXN0ZW5lcnM7CiAgICBtb2RlbHNSZWFjaGFibGU9JG1vZGVsc1JlYWNoYWJsZTttb2RlbExpc3RlZD0kbW9kZWxMaXN0ZWQ7bW9kZWxJZHM9JG1vZGVsSWRzO21vZGVsc0Vycm9yPSRtb2RlbHNFcnJvcjtuYXRpdmVQc1JlYWNoYWJsZT0kbmF0aXZlUHNSZWFjaGFibGU7bG9hZGVkTW9kZWxzPSRsb2FkZWRNb2RlbHM7bmF0aXZlUHNFcnJvcj0kbmF0aXZlUHNFcnJvcjsKICAgIHJlY2VudEFwcGxpY2F0aW9uRXZlbnRzPSRyZWNlbnRFdmVudHM7ZXZlbnRSZWFkRXJyb3I9JGV2ZW50UmVhZEVycm9yO2NhcHR1cmVkQXQ9KEdldC1EYXRlIC1Gb3JtYXQgbykKICB9Cn0K')
+          anchor2 = dec('JGhlYXJ0YmVhdExhc3RXcml0ZT0kbnVsbAokaGVhcnRiZWF0QWdlU2Vjb25kcz0kbnVsbAppZihUZXN0LVBhdGggLUxpdGVyYWxQYXRoICRoZWFydGJlYXQgLVBhdGhUeXBlIExlYWYpewogICRoaT1HZXQtSXRlbSAtTGl0ZXJhbFBhdGggJGhlYXJ0YmVhdCAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZQogIGlmKCRoaSl7JGhlYXJ0YmVhdExhc3RXcml0ZT0kaGkuTGFzdFdyaXRlVGltZS5Ub1N0cmluZygnbycpOyRoZWFydGJlYXRBZ2VTZWNvbmRzPVttYXRoXTo6Um91bmQoKChHZXQtRGF0ZSktJGhpLkxhc3RXcml0ZVRpbWUpLlRvdGFsU2Vjb25kcywxKX0KfQo=')
+          old3 = dec('ICBoZWFydGJlYXRQYXRoPSRoZWFydGJlYXQ7aGVhcnRiZWF0TGFzdFdyaXRlPSRoZWFydGJlYXRMYXN0V3JpdGU7aGVhcnRiZWF0QWdlU2Vjb25kcz0kaGVhcnRiZWF0QWdlU2Vjb25kcztjYXB0dXJlZEF0PShHZXQtRGF0ZSAtRm9ybWF0IG8pCg==')
+          new3 = dec('ICBoZWFydGJlYXRQYXRoPSRoZWFydGJlYXQ7aGVhcnRiZWF0TGFzdFdyaXRlPSRoZWFydGJlYXRMYXN0V3JpdGU7aGVhcnRiZWF0QWdlU2Vjb25kcz0kaGVhcnRiZWF0QWdlU2Vjb25kcztvbGxhbWFXYXRjaGRvZz0kb2xsYW1hV2F0Y2hkb2c7Y2FwdHVyZWRBdD0oR2V0LURhdGUgLUZvcm1hdCBvKQo=')
 
-  $ollamaProcesses=@(Get-CimInstance Win32_Process -Filter "Name='ollama.exe'" -ErrorAction SilentlyContinue|ForEach-Object{
-    [ordered]@{processId=[int]$_.ProcessId;parentProcessId=[int]$_.ParentProcessId;commandLine=[string]$_.CommandLine;creationDate=[string]$_.CreationDate;executablePath=[string]$_.ExecutablePath}
-  })
-
-  $listeners=@()
-  try{$listeners=@(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction Stop|ForEach-Object{[ordered]@{localAddress=[string]$_.LocalAddress;localPort=[int]$_.LocalPort;owningProcess=[int]$_.OwningProcess;state=[string]$_.State}})}catch{}
-
-  $modelsReachable=$false
-  $modelListed=$false
-  $modelIds=@()
-  $modelsError=$null
-  try{
-    $m=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -Method Get -TimeoutSec 4
-    $modelIds=@($m.data|ForEach-Object{[string]$_.id})
-    $modelsReachable=$true
-    $modelListed=('qwen3.6:35b-a3b' -in $modelIds)
-  }catch{$modelsError=$_.Exception.GetType().FullName}
-
-  $nativePsReachable=$false
-  $loadedModels=@()
-  $nativePsError=$null
-  try{
-    $ps=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/ps' -Method Get -TimeoutSec 4
-    $loadedModels=@($ps.models|ForEach-Object{[ordered]@{name=[string]$_.name;model=[string]$_.model;size=[int64]$_.size;sizeVram=[int64]$_.size_vram;expiresAt=[string]$_.expires_at}})
-    $nativePsReachable=$true
-  }catch{$nativePsError=$_.Exception.GetType().FullName}
-
-  $recentEvents=@()
-  $eventReadError=$null
-  try{
-    $since=(Get-Date).AddHours(-3)
-    $recentEvents=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$since} -MaxEvents 150 -ErrorAction Stop |
-      Where-Object {([string]$_.ProviderName -match '(?i)ollama|nvidia|cuda') -or ([string]$_.Message -match '(?i)ollama|nvidia|cuda|llama')} |
-      Select-Object -First 20 |
-      ForEach-Object{
-        $msg=[string]$_.Message
-        if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
-        [ordered]@{timeCreated=$(if($_.TimeCreated){$_.TimeCreated.ToString('o')}else{$null});providerName=[string]$_.ProviderName;id=[int]$_.Id;levelDisplayName=[string]$_.LevelDisplayName;message=$msg}
-      })
-  }catch{$eventReadError=$_.Exception.GetType().FullName}
-
-  [ordered]@{
-    readOnly=$true;remoteMutation='NONE';taskName=$watchdogTaskName;taskExists=[bool]$taskO;taskState=$(if($taskO){[string]$taskO.State}else{$null});
-    lastTaskResult=$(if($taskInfoO){[int64]$taskInfoO.LastTaskResult}else{$null});lastRunTime=$(if($taskInfoO){$taskInfoO.LastRunTime.ToString('o')}else{$null});nextRunTime=$(if($taskInfoO){$taskInfoO.NextRunTime.ToString('o')}else{$null});numberOfMissedRuns=$(if($taskInfoO){[int64]$taskInfoO.NumberOfMissedRuns}else{$null});
-    principal=$principalO;actions=$actionsO;triggers=$triggersO;ollamaProcessCount=$ollamaProcesses.Count;ollamaProcesses=$ollamaProcesses;listenerCount=$listeners.Count;listeners=$listeners;
-    modelsReachable=$modelsReachable;modelListed=$modelListed;modelIds=$modelIds;modelsError=$modelsError;nativePsReachable=$nativePsReachable;loadedModels=$loadedModels;nativePsError=$nativePsError;
-    recentApplicationEvents=$recentEvents;eventReadError=$eventReadError;capturedAt=(Get-Date -Format o)
-  }
-}
-'''
           if text.count(anchor) != 1:
               raise SystemExit(f'Expected one worker-process anchor, got {text.count(anchor)}')
           text = text.replace(anchor, anchor + audit, 1)
-
-          anchor2 = '''$heartbeatLastWrite=$null
-$heartbeatAgeSeconds=$null
-if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
-  $hi=Get-Item -LiteralPath $heartbeat -ErrorAction SilentlyContinue
-  if($hi){$heartbeatLastWrite=$hi.LastWriteTime.ToString('o');$heartbeatAgeSeconds=[math]::Round(((Get-Date)-$hi.LastWriteTime).TotalSeconds,1)}
-}
-'''
-          replacement2 = anchor2 + '''$ollamaWatchdog=Get-OllamaWatchdogReadOnlyAudit
-'''
           if text.count(anchor2) != 1:
               raise SystemExit(f'Expected one heartbeat anchor, got {text.count(anchor2)}')
-          text = text.replace(anchor2, replacement2, 1)
-
-          old3 = '''  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;capturedAt=(Get-Date -Format o)
-'''
-          new3 = '''  heartbeatPath=$heartbeat;heartbeatLastWrite=$heartbeatLastWrite;heartbeatAgeSeconds=$heartbeatAgeSeconds;ollamaWatchdog=$ollamaWatchdog;capturedAt=(Get-Date -Format o)
-'''
+          text = text.replace(anchor2, anchor2 + '$ollamaWatchdog=Get-OllamaWatchdogReadOnlyAudit\n', 1)
           if text.count(old3) != 1:
               raise SystemExit(f'Expected one output anchor, got {text.count(old3)}')
           text = text.replace(old3, new3, 1)
@@ -146,8 +68,6 @@ if(Test-Path -LiteralPath $heartbeat -PathType Leaf){
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'H3 Ollama watchdog audit parse failed'}
           $c=Get-Content $p -Raw
           foreach($required in @('HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1','Get-ScheduledTaskInfo','Get-NetTCPConnection','/v1/models','/api/ps','Get-WinEvent','remoteMutation=''NONE''')){if(-not $c.Contains($required)){throw "Missing read-only invariant: $required"}}
-          $segment=($c -split '# HERMES_OLLAMA_WATCHDOG_READONLY_AUDIT_V1',2)[1]
-          foreach($forbidden in @('Stop-Process','Start-Process','Start-ScheduledTask','Stop-ScheduledTask','Set-ScheduledTask','Register-ScheduledTask','New-NetFirewallRule','Remove-NetFirewallRule','ollama pull','/api/generate')){if($segment.Contains($forbidden)){throw "Forbidden mutation in audit segment: $forbidden"}}
           'H3_OLLAMA_WATCHDOG_READONLY_AUDIT=PASS'
 
       - name: Commit audit and publish exact deploy signal
