@@ -4,3 +4,5 @@ action=recover-saved-35b-then-run-ridge-only-if-unattempted
 replay_35b=false
 publish_article=false
 production_db_mutation=false
+wake_fallback=hpenvy-lan-wol
+attempt=2
