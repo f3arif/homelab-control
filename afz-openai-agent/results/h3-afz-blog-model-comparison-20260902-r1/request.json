@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "project": "afz-blog-local-model-comparison",
+  "job_id": "afz-blog-qwen35b-vs-ridge27b-20260902-r1",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "context": 16384,
+  "no_think": true,
+  "max_model_calls_per_model": 1,
+  "num_predict": 6000,
+  "temperature": 0.2,
+  "publish_article": false,
+  "production_db_mutation": false,
+  "models": [
+    "qwen3.6:35b-a3b",
+    "qwen3.8-ridge:27b-16k"
+  ],
+  "topic": "Commercial kitchen exhaust and make-up air in Ontario: practical coordination checks before permit submission",
+  "article_word_target_min": 1100,
+  "article_word_target_max": 1400,
+  "source_packet": [
+    {
+      "organization": "Government of Ontario / e-Laws",
+      "title": "O. Reg. 163/24: Building Code",
+      "url": "https://www.ontario.ca/laws/regulation/240163",
+      "sourceCurrency": "Benchmark research check: consolidated page reported last amendment O. Reg. 119/26 and adoption of NBC 2020 First Printing as amended by Ontario Amendments dated April 21, 2026.",
+      "facts": [
+        "Ontario Regulation 163/24 is the current Building Code regulation framework used for this benchmark.",
+        "The regulation adopts the National Building Code of Canada 2020, First Printing, together with Ontario amendments.",
+        "The old O. Reg. 332/12 framework survives only for the regulation's stated transition cases; it must not be presented as the general current Ontario Building Code.",
+        "This source packet does not verify a specific commercial-kitchen exhaust airflow, make-up-air percentage, hood geometry, duct construction requirement, clearance, discharge separation, fire-suppression requirement, or clause/article number. Any such current-code claim requires current-code verification before publication."
+      ]
+    },
+    {
+      "organization": "Government of Ontario",
+      "title": "Ontario's Building Code",
+      "url": "https://www.ontario.ca/page/ontarios-building-code",
+      "sourceCurrency": "Official Ontario Building Code information page available at benchmark preparation.",
+      "facts": [
+        "Ontario directs users to the current Building Code Compendium and advises checking that the downloaded compendium is the latest version.",
+        "A high-level Ontario information page is not enough evidence for a detailed clause, airflow value, separation distance, or other numeric current-code requirement."
+      ]
+    },
+    {
+      "organization": "ASHRAE",
+      "title": "ANSI/ASHRAE Standard 154-2022 - Ventilation for Commercial Cooking Operations",
+      "url": "https://www.ashrae.org/technical-resources/standards-and-guidelines/titles-purposes-and-scopes",
+      "sourceCurrency": "ASHRAE titles, purposes and scopes page identified Standard 154-2022 as the published standard at benchmark preparation.",
+      "facts": [
+        "ASHRAE identifies Standard 154-2022 as Ventilation for Commercial Cooking Operations.",
+        "Its stated purpose is to provide design criteria for the performance of commercial cooking ventilation systems.",
+        "This packet intentionally does not reproduce the standard text and does not establish any specific ASHRAE airflow rate, hood factor, replacement-air percentage, or mandatory design value. Specific requirements from the standard must not be invented."
+      ]
+    }
+  ],
+  "output_contract": {
+    "format": "single JSON object only; no Markdown fence or commentary outside JSON",
+    "required_fields": [
+      "title",
+      "articleMarkdown",
+      "seoTitle",
+      "metaDescription",
+      "keywords",
+      "technicalReviewFlags",
+      "sources",
+      "codeClaims"
+    ],
+    "claim_classifications": [
+      "CURRENT_CODE_REQUIREMENT",
+      "STANDARD_OR_METHODOLOGY",
+      "ENGINEERING_BEST_PRACTICE",
+      "GENERAL_TECHNICAL_EXPLANATION",
+      "CURRENT_CODE_VERIFICATION_REQUIRED"
+    ],
+    "verification_statuses": [
+      "VERIFIED",
+      "ENGINEER_REVIEW_REQUIRED",
+      "NOT_VERIFIED"
+    ],
+    "review_severities": [
+      "INFO",
+      "REVIEW",
+      "IMPORTANT"
+    ]
+  },
+  "result_branch": "h3-direct-results",
+  "result_path": "afz-openai-agent/results/h3-afz-blog-model-comparison-20260902-r1",
+  "control_repo": "f3arif/faiz-homelab",
+  "control_issue": 31
+}
