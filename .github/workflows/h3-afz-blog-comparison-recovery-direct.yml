@@ -40,10 +40,29 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Wake H3 if needed and prove SSH
+      - name: Inventory relevant tailnet peers
         shell: bash
         run: |
           set -euo pipefail
+          tailscale status --json > /tmp/ts-status.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/ts-status.json'))
+          wanted=('h3','hpenvy','desktop-10skf0m','windows-main','raspberry','pi','lenovo','hplaptop')
+          rows=[]
+          for p in (d.get('Peer') or {}).values():
+              host=(p.get('HostName') or '').lower()
+              dns=(p.get('DNSName') or '').lower()
+              if any(x in host or x in dns for x in wanted):
+                  rows.append((p.get('HostName'),bool(p.get('Online')),','.join(p.get('TailscaleIPs') or [])))
+          for host,online,ips in sorted(rows,key=lambda x:(x[0] or '')):
+              print(f'TAILNET_PEER host={host} online={str(online).lower()} ips={ips}')
+          PY
+
+      - name: Wake H3 if needed and prove SSH
+        shell: bash
+        run: |
+          set -u
           if nc -z -w 3 100.106.186.118 22; then
             echo 'H3_SSH_REACHABLE=PASS already-online'
             exit 0
@@ -57,7 +76,7 @@ jobs:
             echo 'PI_WOL_REQUEST=UNAVAILABLE'
           fi
 
-          echo 'Sending H3 WoL from always-on HP Envy LAN host.'
+          echo 'Trying HP Envy LAN WoL relay.'
           wol_script=$(cat <<'REMOTE'
           import socket,time
           mac='4C:ED:FB:3F:B0:9E'
@@ -77,16 +96,21 @@ jobs:
           print('HPENVY_H3_WOL_SENT='+','.join(sent))
           REMOTE
           )
-          printf '%s\n' "$wol_script" | timeout 30s tailscale ssh coolyo@100.71.26.69 'python3 -'
+          if printf '%s\n' "$wol_script" | timeout 25s tailscale ssh coolyo@100.71.26.69 'python3 -'; then
+            echo 'HPENVY_WOL_RELAY=PASS'
+          else
+            code=$?
+            echo "HPENVY_WOL_RELAY=UNAVAILABLE exit=$code"
+          fi
 
-          for attempt in $(seq 1 48); do
+          for attempt in $(seq 1 36); do
             if nc -z -w 3 100.106.186.118 22; then
               echo "H3_SSH_REACHABLE=PASS attempt=$attempt"
               exit 0
             fi
             sleep 5
           done
-          echo 'H3_SSH_REACHABLE=FAIL_AFTER_HPENVY_WOL' >&2
+          echo 'H3_SSH_REACHABLE=FAIL_NO_AVAILABLE_WAKE_RELAY' >&2
           exit 1
 
       - name: Launch exact-SHA guarded H3 recovery
