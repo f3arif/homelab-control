@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "h3-hermes-registry-liveness-audit-20260903-r3",
+  "id": "h3-hermes-registry-liveness-audit-20260903-r4",
   "enabled": true,
   "action": "audit-registry-liveness",
   "target": "h3",
