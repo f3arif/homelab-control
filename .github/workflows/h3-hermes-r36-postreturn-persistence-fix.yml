@@ -1,0 +1,39 @@
+name: H3 Hermes R36 Post-Return Persistence Fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/h3-hermes-r36-postreturn-persistence-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebase onto current main
+        run: |
+          set -euo pipefail
+          git config user.name 'f3arif'
+          git config user.email '77086535+f3arif@users.noreply.github.com'
+          git pull --rebase origin main
+      - name: Apply persistence patch
+        run: python scripts/patch-hermes-r36.py
+      - name: Validate r36
+        run: |
+          set -euo pipefail
+          grep -q 'HERMES_R36_POST_RETURN_PERSISTENCE' afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1
+          grep -q 'postReturnPersisted=\$true' afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1
+          grep -q 'Start-ScheduledTask -TaskName \$watchdogTask' afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1
+          grep -q 'h3-hermes-chat-gateway-recovery-20260903-r36' afz-openai-agent/requests/h3-hermes-agent-install.json
+      - name: Commit r36 repair
+        run: |
+          set -euo pipefail
+          git add afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1 afz-openai-agent/requests/h3-hermes-agent-install.json
+          git commit -m 'Require Hermes Ollama post-return persistence'
+          git push origin HEAD:main
+          echo "R36_SHA=$(git rev-parse HEAD)"
