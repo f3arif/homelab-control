@@ -1,5 +1,5 @@
 schema=1
-purpose=prospect-engine-utf8-json-post-deploy-readonly-health
+purpose=afz-blog-recovery-transport-readonly-health
 mutation=none
-expected_agent_sha=57aa13386b5f3c6d41fa7886ee34ad28799c19e9
-requested_at=2026-09-02T16:42:00Z
+expected_agent_sha=fc88a029f161c7138296c7479208c3e2fb4dc44b
+requested_at=2026-09-03T04:59:00Z
