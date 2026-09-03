@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/afz-control-health-readonly-signal.txt'
+      - '.github/workflows/afz-control-health-readonly.yml'
 
 permissions:
   contents: read
@@ -32,27 +33,37 @@ jobs:
       - name: Read Windows-main control health
         shell: bash
         run: |
-          set -euo pipefail
-          health=$(curl --silent --show-error --fail \
-            --connect-timeout 3 --max-time 12 \
-            http://100.70.25.8:8797/health)
+          set -u
           echo 'WINDOWS_MAIN_CONTROL_HEALTH_BEGIN'
-          python -m json.tool <<<"$health"
+          if health=$(curl --silent --show-error --fail \
+            --connect-timeout 3 --max-time 12 \
+            http://100.70.25.8:8797/health 2>&1); then
+            echo 'WINDOWS_MAIN_CONTROL_REACHABLE=PASS'
+            python -m json.tool <<<"$health" || printf '%s\n' "$health"
+          else
+            rc=$?
+            echo 'WINDOWS_MAIN_CONTROL_REACHABLE=FAIL'
+            echo "WINDOWS_MAIN_CONTROL_CURL_EXIT=$rc"
+            printf '%s\n' "$health"
+          fi
           echo 'WINDOWS_MAIN_CONTROL_HEALTH_END'
 
       - name: Read H3 reachability only
         shell: bash
         run: |
-          set -euo pipefail
-          echo 'H3_PI_STATUS_BEGIN'
-          curl --silent --show-error --max-time 8 http://100.91.50.9:8087/status/h3 || true
-          echo
-          echo 'H3_PI_STATUS_END'
+          set -u
+          echo 'H3_REACHABILITY_BEGIN'
+          if tailscale ping --timeout=5s --c=1 100.106.186.118; then
+            echo 'H3_TAILSCALE_PING=PASS'
+          else
+            echo 'H3_TAILSCALE_PING=FAIL'
+          fi
           if nc -z -w 3 100.106.186.118 22; then
             echo 'H3_TCP22_REACHABLE=PASS'
           else
             echo 'H3_TCP22_REACHABLE=FAIL'
           fi
+          echo 'H3_REACHABILITY_END'
 
       - name: Enforce read-only workflow contract
         shell: bash
