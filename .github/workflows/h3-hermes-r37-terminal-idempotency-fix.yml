@@ -1,0 +1,91 @@
+name: H3 Hermes R37 Terminal Idempotency Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-r37-terminal-idempotency-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Confirm R37 is terminalized
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          r=json.loads(Path('afz-openai-agent/requests/h3-hermes-agent-install.json').read_text(encoding='utf-8'))
+          assert r['id']=='h3-hermes-chat-gateway-recovery-20260903-r37'
+          assert r['action']=='completed'
+          assert r['status']=='COMPLETED'
+          assert r['run_chat_canary'] is False
+          assert r['refresh_gateway_after_canary'] is False
+
+      - name: Patch chat-recovery terminal condition
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          s=p.read_text(encoding='utf-8')
+          old="""        if([bool]$existing.ok -and -not $pdfAuxPending){
+          $chatRecoveryRequired=(($req.PSObject.Properties.Name -contains 'run_chat_canary') -and [bool]$req.run_chat_canary) -or (($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary') -and [bool]$req.refresh_gateway_after_canary)
+          if($chatRecoveryRequired){
+            if([string]$existing.classification -eq 'HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY'){return}
+          }elseif([string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}
+        }
+"""
+          new="""        if([bool]$existing.ok){
+          $chatRecoveryRequired=(($req.PSObject.Properties.Name -contains 'run_chat_canary') -and [bool]$req.run_chat_canary) -or (($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary') -and [bool]$req.refresh_gateway_after_canary)
+          if($chatRecoveryRequired){
+            # Chat/gateway recovery is independently terminal once its own ready classification is reached.
+            # A pending PDF auxiliary request must never re-run a successful gateway restart loop.
+            if([string]$existing.classification -eq 'HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY'){return}
+          }elseif(-not $pdfAuxPending -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}
+        }
+"""
+          if s.count(old)!=1:
+              raise SystemExit(f'expected one terminal block, got {s.count(old)}')
+          p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+
+      - name: Validate watcher patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent/Push-Deploy-Watcher.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Watcher parse failed'}
+          $d=(git diff -- $p | Out-String)
+          if($d -notmatch 'pending PDF auxiliary request must never re-run'){throw 'Idempotency guard missing'}
+          if($d -match 'Invoke-H3-HermesAgent-Install.ps1'){throw 'Unexpected runner-path modification'}
+          'H3_R37_TERMINAL_IDEMPOTENCY_VALIDATE=PASS'
+
+      - name: Commit patch and signal exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1
+          git commit -m 'Make successful Hermes chat recovery terminal'
+          patch_sha=$(git rev-parse HEAD)
+          printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m 'Signal Hermes terminal idempotency fix'
+          git push origin HEAD:main
+          echo "H3_R37_TERMINAL_IDEMPOTENCY_SHA=$patch_sha"
