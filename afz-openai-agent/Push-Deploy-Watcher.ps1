@@ -32,6 +32,10 @@ $h3HermesRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-HermesAgent-I
 $h3HermesRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-agent-install.json'
 $h3HermesStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-agent'
 $h3HermesLastAttempt=[DateTime]::MinValue
+$h3HermesTelegramFollowupRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
+$h3HermesTelegramFollowupRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-telegram-followup-repair.json'
+$h3HermesTelegramFollowupStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-telegram-followup'
+$h3HermesTelegramFollowupLastAttempt=[DateTime]::MinValue
 $h3HermesRegistryLivenessRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Hermes-RegistryLivenessAudit.ps1'
 $h3HermesRegistryLivenessRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-registry-liveness-audit.json'
 $h3HermesRegistryLivenessStateRoot=Join-Path $stateRoot 'jobs\h3-hermes-registry-liveness'
@@ -305,6 +309,31 @@ function Test-H3HermesPdfAuxPending{
   }catch{return $false}
 }
 
+function Handle-H3HermesTelegramFollowupRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesTelegramFollowupRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'repair-telegram-document-followup' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    if(-not [bool]$req.restart_gateway -or [bool]$req.change_config -or [bool]$req.change_provider -or [bool]$req.mutate_ollama -or [bool]$req.change_network -or [bool]$req.run_model_generation){return}
+    $statePath=Join-Path $h3HermesTelegramFollowupStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
+    }
+    $now=Get-Date
+    if(($now-$script:h3HermesTelegramFollowupLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesTelegramFollowupLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesTelegramFollowupRunner -InstallRoot $InstallRoot -RequestPath $h3HermesTelegramFollowupRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_HERMES_TELEGRAM_FOLLOWUP classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_TELEGRAM_FOLLOWUP_ERROR $($_.Exception.Message)"}
+}
+
 function Handle-H3HermesRequest{
   if(-not(Test-Path -LiteralPath $h3HermesRunner -PathType Leaf)){return}
   if(-not(Test-Path -LiteralPath $h3HermesRequest -PathType Leaf)){return}
@@ -426,6 +455,7 @@ try{
       Handle-HPEnvySurfsharkRequest
       Handle-H3DockerDesktopPreflight
       Handle-H3HermesRegistryLivenessRequest
+      Handle-H3HermesTelegramFollowupRequest
       Handle-H3HermesRequest
       Handle-FamilyPttPhase1ApkRequest
       $lastError=''

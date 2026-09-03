@@ -268,7 +268,7 @@ Emit ([ordered]@{
 }) 0
 '@
 $remote=$remote.Replace('__EXPECTED_SHA__',$expectedSha).Replace('__DELAY__',$delayLiteral).Replace('__PATCH_B64__',$patchB64).Replace('__CANARY_B64__',$canaryB64)
-$patchResult=Invoke-RemoteScript -Script $remote -TimeoutMs 90000
+$patchResult=Invoke-RemoteScript -Script $remote -TimeoutMs 240000
 if(-not $patchResult -or -not [bool]$patchResult.ok){
   $o=[ordered]@{ok=$false;classification=$(if($patchResult){[string]$patchResult.classification}else{'HERMES_TELEGRAM_FOLLOWUP_REMOTE_UNREACHABLE'});patch=$patchResult;gatewayReload=$null;providerTouched=$false;ollamaMutationStarted=$false;networkChanged=$false;modelGenerationStarted=$false;observedAt=(Get-Date -Format o)}
   Save-Result $o
