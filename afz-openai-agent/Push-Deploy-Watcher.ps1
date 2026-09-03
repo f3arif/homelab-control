@@ -319,7 +319,12 @@ function Handle-H3HermesRequest{
     if(Test-Path -LiteralPath $statePath -PathType Leaf){
       try{
         $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
-        if([bool]$existing.ok -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY') -and -not $pdfAuxPending){return}
+        if([bool]$existing.ok -and -not $pdfAuxPending){
+          $chatRecoveryRequired=(($req.PSObject.Properties.Name -contains 'run_chat_canary') -and [bool]$req.run_chat_canary) -or (($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary') -and [bool]$req.refresh_gateway_after_canary)
+          if($chatRecoveryRequired){
+            if([string]$existing.classification -eq 'HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY'){return}
+          }elseif([string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}
+        }
         if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED' -and -not $pdfAuxPending){return}
       }catch{}
     }
