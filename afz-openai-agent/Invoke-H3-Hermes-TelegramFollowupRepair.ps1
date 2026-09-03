@@ -178,6 +178,7 @@ if(-not $already){
     $gitHead=$null
     $adapterTracked=$false
     $adapterDirty=$null
+    $adapterDiff=$null
     try{
       $git=Get-Command git.exe -ErrorAction SilentlyContinue
       if(-not $git){$git=Get-Command git -ErrorAction SilentlyContinue}
@@ -189,10 +190,16 @@ if(-not $already){
           $adapterTracked=($LASTEXITCODE -eq 0)
           $status=((& $git.Source status --porcelain -- 'plugins/platforms/telegram/adapter.py' 2>$null) | Out-String).Trim()
           $adapterDirty=(-not [string]::IsNullOrWhiteSpace($status))
+          if($adapterDirty){
+            $rawDiff=((& $git.Source diff --no-ext-diff --unified=2 -- 'plugins/platforms/telegram/adapter.py' 2>$null) | Out-String).Trim()
+            $safeDiff=[regex]::Replace($rawDiff,'\b\d{5,}:[A-Za-z0-9_-]{20,}\b','<redacted-telegram-token>')
+            if($safeDiff.Length -gt 12000){$safeDiff=$safeDiff.Substring(0,12000)+"`n<diff-truncated>"}
+            $adapterDiff=$safeDiff
+          }
         }finally{Pop-Location}
       }
     }catch{}
-    Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_ADAPTER_HASH_MISMATCH';mutation='NONE';beforeSha256=$before;gitHead=$gitHead;adapterTracked=$adapterTracked;adapterDirty=$adapterDirty}) 43
+    Emit ([ordered]@{ok=$false;classification='HERMES_TELEGRAM_FOLLOWUP_ADAPTER_HASH_MISMATCH';mutation='NONE';beforeSha256=$before;gitHead=$gitHead;adapterTracked=$adapterTracked;adapterDirty=$adapterDirty;adapterDiff=$adapterDiff}) 43
   }
   $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
   $backup="$adapter.afz-pre-document-followup-$stamp.bak"
