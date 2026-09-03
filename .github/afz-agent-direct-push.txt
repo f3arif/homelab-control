@@ -1,9 +1,7 @@
 AFZ direct agent source recovery
-reason=hpenvy-unreachable-send-fixed-target-wol
+reason=h3-hermes-telegram-unresponsive-after-new
 target=windows-main
 authority=github-exact-sha
-operation=source-sync-and-one-shot-hpenvy-wol
-hpenvy_mac=8c:dc:d4:87:9d:19
-hpenvy_lan_ip=192.168.50.185
+operation=source-sync-and-guarded-h3-telegram-gateway-recovery
 arbitrary_shell=false
-requested_at=2026-09-03T10:17:00-04:00
+requested_at=2026-09-03T12:00:00-04:00
