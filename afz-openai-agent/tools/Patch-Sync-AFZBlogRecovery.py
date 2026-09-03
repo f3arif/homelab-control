@@ -13,7 +13,7 @@ if f'function {fname}' not in s:
   $jobId='afz-blog-qwen35b-vs-ridge27b-20260902-r1'
   $bootstrap=Join-Path $InstallRoot 'afz-openai-agent\Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   $markerRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-afz-blog-model-comparison-recovery-request'
-  $marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')
+  $marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')
   $utf8=New-Object Text.UTF8Encoding($false)
   New-Item -ItemType Directory -Force -Path $markerRoot|Out-Null
   if(Test-Path -LiteralPath $marker -PathType Leaf){
@@ -35,6 +35,23 @@ if f'function {fname}' not in s:
 
 '''
     s = s.replace(anchor, fn + anchor, 1)
+else:
+    # Re-arm only this recovery carrier.  v1 may already exist from the failed
+    # transport attempt; v2 permits one new carrier launch while the H3 recovery
+    # script still independently forbids a 35B replay and guards Ridge.
+    start = s.index(f'function {fname}')
+    end_anchor = "if(-not [string]::IsNullOrWhiteSpace($ExpectedSha)){"
+    end = s.index(end_anchor, start)
+    segment = s[start:end]
+    old = "$marker=Join-Path $markerRoot ($jobId+'-activation-v1.json')"
+    new = "$marker=Join-Path $markerRoot ($jobId+'-activation-v2.json')"
+    if old in segment:
+        if segment.count(old) != 1:
+            raise SystemExit('unexpected v1 recovery marker count')
+        segment = segment.replace(old, new, 1)
+        s = s[:start] + segment + s[end:]
+    elif segment.count(new) != 1:
+        raise SystemExit('recovery marker is neither expected v1 nor v2')
 
 call = "$afzBlogComparisonRecoveryActivation=Start-AFZBlogModelComparisonRecoveryOneShot -SyncedSha $resolvedSha"
 if call not in s:
@@ -49,5 +66,14 @@ if out not in s:
     if anchor not in s:
         raise SystemExit('sync output anchor missing')
     s = s.replace(anchor, anchor + "\n  " + out, 1)
+
+# Preserve the safety contract while proving only the recovery marker advanced.
+for required in (
+    'replay35B=$false',
+    'ridgeOnlyIfUnattempted=$true',
+    "$jobId+'-activation-v2.json'",
+):
+    if required not in s:
+        raise SystemExit(f'missing guarded recovery marker: {required}')
 
 p.write_text(s, encoding='utf-8')
