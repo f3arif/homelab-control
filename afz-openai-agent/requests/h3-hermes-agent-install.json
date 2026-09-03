@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "h3-hermes-chat-gateway-recovery-20260903-r35",
-  "action": "install-and-configure",
-  "status": "ACTIVE",
+  "action": "protected-gate-paused",
+  "status": "PAUSED_PROTECTED_GATE",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
   "provider_name": "ollama",
@@ -18,6 +18,6 @@
   "expose_api": false,
   "publish_result": true,
   "emergency_diagnostic_ack": true,
-  "run_chat_canary": true,
-  "refresh_gateway_after_canary": true
+  "run_chat_canary": false,
+  "refresh_gateway_after_canary": false
 }
