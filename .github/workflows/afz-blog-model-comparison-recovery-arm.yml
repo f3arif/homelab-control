@@ -8,6 +8,7 @@ on:
       - 'afz-openai-agent/tools/Launch-H3-AFZBlog-ModelComparisonRecovery.ps1'
       - 'afz-openai-agent/Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
       - 'afz-openai-agent/tools/Patch-Sync-AFZBlogRecovery.py'
+      - 'afz-openai-agent/tools/Patch-AFZBlogRecovery-Parse.py'
       - '.github/workflows/afz-blog-model-comparison-recovery-arm.yml'
 
 permissions:
@@ -25,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Apply deterministic recovery parse patch
+        shell: bash
+        run: python afz-openai-agent/tools/Patch-AFZBlogRecovery-Parse.py
 
       - name: Validate recovery scripts
         shell: pwsh
@@ -63,12 +68,12 @@ jobs:
       - name: Commit guarded recovery arm
         shell: bash
         run: |
-          if git diff --quiet -- afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1; then
-            echo 'Sync already armed.'
+          if git diff --quiet -- afz-openai-agent/tools/Recover-H3-AFZBlog-ModelComparison.ps1 afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1; then
+            echo 'Recovery and sync already current.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
-          git commit -m 'Arm guarded AFZ blog comparison recovery'
+          git add afz-openai-agent/tools/Recover-H3-AFZBlog-ModelComparison.ps1 afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1
+          git commit -m 'Fix and arm guarded AFZ blog comparison recovery'
           git push origin HEAD:main
