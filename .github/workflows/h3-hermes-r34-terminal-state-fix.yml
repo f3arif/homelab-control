@@ -1,0 +1,73 @@
+name: H3 Hermes R34 Terminal State Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hermes-r34-terminal-state-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: h3-hermes-r34-terminal-state-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebase onto current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+
+      - name: Make chat recovery terminal-state aware
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('afz-openai-agent/Push-Deploy-Watcher.ps1')
+          text = p.read_text(encoding='utf-8')
+          old = "        if([bool]$existing.ok -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY') -and -not $pdfAuxPending){return}\n"
+          new = """        if([bool]$existing.ok -and -not $pdfAuxPending){\n          $chatRecoveryRequired=(($req.PSObject.Properties.Name -contains 'run_chat_canary') -and [bool]$req.run_chat_canary) -or (($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary') -and [bool]$req.refresh_gateway_after_canary)\n          if($chatRecoveryRequired){\n            if([string]$existing.classification -eq 'HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY'){return}\n          }elseif([string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}\n        }\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one stale Hermes terminal guard, got {text.count(old)}')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Validate watcher and active recovery request
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='afz-openai-agent/Push-Deploy-Watcher.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r34 parse failed'}
+          $c=Get-Content $path -Raw
+          foreach($required in @('chatRecoveryRequired','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY','run_chat_canary','refresh_gateway_after_canary')){if(-not $c.Contains($required)){throw "Missing r34 invariant: $required"}}
+          $r=Get-Content 'afz-openai-agent/requests/h3-hermes-agent-install.json' -Raw|ConvertFrom-Json
+          if($r.id -ne 'h3-hermes-chat-gateway-recovery-20260903-r33' -or -not $r.run_chat_canary -or -not $r.refresh_gateway_after_canary){throw 'Active Hermes recovery request mismatch'}
+          if($r.mutate_ollama -or $r.expose_api -or $r.restart_desktop_backend -or $r.restart_electron_ui){throw 'Forbidden r34 mutation requested'}
+          'H3_HERMES_R34_TERMINAL_GUARD=PASS'
+
+      - name: Commit watcher fix and publish exact deploy signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add afz-openai-agent/Push-Deploy-Watcher.ps1
+          git commit -m 'Require Hermes chat recovery completion before terminal state'
+          patch_sha=$(git rev-parse HEAD)
+          printf '%s\n' "$patch_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m 'Signal Hermes r34 watcher recovery'
+          git push origin HEAD:main
+          echo "H3_HERMES_R34_PATCH_SHA=$patch_sha"
