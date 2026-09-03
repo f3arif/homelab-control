@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'afz-openai-agent/AFZ-Agent-Control.ps1'
       - 'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1'
       - 'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1'
@@ -70,8 +71,8 @@ jobs:
           if($d.schema -ne 1 -or $d.action -ne 'repair-local-tool-dispatch' -or $d.status -ne 'ACTIVE'){throw 'dispatch schema/action/status'}
           if($d.target -ne 'h3' -or $d.host -ne 'DESKTOP-H3R6CQN'){throw 'dispatch target'}
           if($d.provider -ne 'custom' -or $d.model -ne 'qwen3.6:35b-a3b'){throw 'dispatch provider/model'}
-          if($d.tool_use_enforcement -or $d.task_completion_guidance -or $d.parallel_tool_call_guidance){throw 'dispatch desired flags'}
-          if(-not $d.require_telegram_toolset_not_explicitly_empty -or -not $d.restart_gateway){throw 'dispatch guards'}
+          if(-not $d.tool_use_enforcement -or -not $d.task_completion_guidance -or $d.parallel_tool_call_guidance){throw 'dispatch desired flags'}
+          if(-not $d.require_telegram_toolset_not_explicitly_empty -or $d.restart_gateway){throw 'dispatch guards'}
           if($d.change_provider -or $d.mutate_ollama -or $d.change_network -or $d.run_model_generation){throw 'dispatch forbidden mutation'}
 
           $p=Get-Content 'afz-openai-agent/requests/h3-hermes-pdf-runtime-audit.json' -Raw | ConvertFrom-Json
@@ -101,6 +102,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $scripts=@(
+            'afz-openai-agent/AFZ-Agent-Control.ps1',
             'afz-openai-agent/Invoke-H3-HermesAgent-Install.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-TelegramAttachmentAudit.ps1',
             'afz-openai-agent/Invoke-H3-Hermes-TelegramFollowupRepair.ps1',
@@ -130,9 +132,10 @@ jobs:
             if($followup.Contains($forbidden)){throw "Forbidden follow-up helper content: $forbidden"}
           }
           $dispatch=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-ToolDispatchRepair.ps1' -Raw
-          foreach($required in @('agent.tool_use_enforcement','agent.task_completion_guidance','agent.parallel_tool_call_guidance','HERMES_LOCAL_TOOL_DISPATCH_REPAIR_VERIFIED','platform_toolsets','Invoke-H3-Hermes-GatewayReload.ps1')){
+          foreach($required in @('agent.tool_use_enforcement','agent.task_completion_guidance','agent.parallel_tool_call_guidance','HERMES_LOCAL_EXECUTE_VERIFY_REPAIR_VERIFIED','HERMES_TELEGRAM_TERMINAL_TOOLSET_NOT_CONFIRMED','platform_toolsets','CONFIG_AGENT_GUIDANCE_ONLY')){
             if(-not $dispatch.Contains($required)){throw "Dispatch helper missing: $required"}
           }
+          if($dispatch.Contains("Invoke-H3-Hermes-GatewayReload.ps1")){throw 'Dispatch helper must not restart the active Hermes gateway'}
           $pdf=Get-Content 'afz-openai-agent/Invoke-H3-Hermes-PdfRuntimeAudit.ps1' -Raw
           foreach($required in @('AFZ-H3-HERMES-PDF-RUNTIME-LATEST.txt','HERMES_PDF_DEPENDENCIES_AND_READ_VERIFIED','HERMES_PDF_SKILL_MISSING','HERMES_PDF_DEPENDENCY_MISSING','latestCachedPdfSha256','documentTextReturned','$remoteTemplate','__REPAIR_MODE__','pypdf','reportlab','pdfplumber')){
             if(-not $pdf.Contains($required)){throw "PDF runtime helper missing: $required"}
