@@ -13,7 +13,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 2
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -22,28 +22,26 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Discover Raspberry Pi relay without mutation
+      - name: Read Pi H3 status endpoint without mutation
         shell: bash
         run: |
           set +e
           host=100.91.50.9
-          echo '=== TAILSCALE STATUS ==='
-          tailscale status | grep -E '100[.]91[.]50[.]9|raspi-1' || true
           echo '=== TAILSCALE PING ==='
-          tailscale ping --timeout=5s -c 2 "$host"
+          tailscale ping --timeout=5s -c 1 "$host"
           echo "TAILSCALE_PING_EXIT=$?"
-          echo '=== TCP PORTS ==='
-          for p in 22 80 443 8081 8082 8443; do
-            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
-              echo "TCP_$p=OPEN"
-            else
-              echo "TCP_$p=CLOSED_OR_FILTERED"
-            fi
-          done
-          echo '=== READ-ONLY TAILSCALE SSH HOSTNAME ==='
-          for user in pi faiz root; do
-            echo "SSH_USER=$user"
-            timeout 12s tailscale ssh "$user@$host" hostname 2>&1
-            echo "SSH_${user}_EXIT=$?"
-          done
+          echo '=== TCP 8087 ==='
+          if timeout 4 bash -c "</dev/tcp/$host/8087" 2>/dev/null; then
+            echo 'TCP_8087=OPEN'
+          else
+            echo 'TCP_8087=CLOSED_OR_FILTERED'
+          fi
+          echo '=== GET /status/h3 ==='
+          curl --silent --show-error --include --connect-timeout 4 --max-time 10 "http://$host:8087/status/h3"
+          echo
+          echo "CURL_STATUS_H3_EXIT=$?"
+          echo '=== GET /health ==='
+          curl --silent --show-error --include --connect-timeout 4 --max-time 10 "http://$host:8087/health"
+          echo
+          echo "CURL_HEALTH_EXIT=$?"
           exit 0
