@@ -1,7 +1,6 @@
 schema=1
-purpose=afz-blog-comparison-recovery-readonly-health
+purpose=hermes-r32-control-health
 mutation=none
-job_id=afz-blog-qwen35b-vs-ridge27b-20260902-r1
-source_signal=2886e239f4d945eb307f6a60a61fb49a76a620a1
-qwen35b_replay=false
+job_id=h3-hermes-chat-gateway-recovery-20260903-r32
+source_signal=d40fa713dc8abc7cfa45b64b528407f5d8eb41ff
 probe_only=true
