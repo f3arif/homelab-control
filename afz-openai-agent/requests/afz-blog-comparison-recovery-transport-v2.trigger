@@ -1,0 +1,8 @@
+job=afz-blog-qwen35b-vs-ridge27b-20260902-r1
+transport=windows-main-interactive-ssh
+recovery_marker=activation-v2
+replay_35b=false
+ridge_only_if_unattempted=true
+publish_article=false
+production_db_mutation=false
+source_guard_commit=3a15f080529d1491ea55d15f3e04405808a97b3e
