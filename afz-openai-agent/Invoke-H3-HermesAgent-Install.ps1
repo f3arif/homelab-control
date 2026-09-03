@@ -211,8 +211,16 @@ exit 1
     $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
     $principal=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $watchdogTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force|Out-Null
+    # R36: launch the detached Task Scheduler guard immediately. Starting ollama
+    # directly inside an SSH-hosted PowerShell process can die with that SSH job;
+    # the task is the persistent owner and must be exercised before readiness.
+    Start-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop
+    Start-Sleep -Seconds 3
     $wt=Get-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop
+    $wti=Get-ScheduledTaskInfo -TaskName $watchdogTask -ErrorAction SilentlyContinue
     $watchdogInstalled=$true;$watchdogTaskState=[string]$wt.State
+    $watchdogTaskLastResult=$(if($wti){$wti.LastTaskResult}else{$null})
+    $watchdogTaskLastRunTime=$(if($wti){$wti.LastRunTime.ToString('o')}else{$null})
   }
 }catch{$watchdogError=$_.Exception.GetType().Name}
 
@@ -225,7 +233,7 @@ Emit ([ordered]@{
   runtimeResolved=$true;runtimeProvider='custom';runtimeBaseUrl=$baseUrl;runtimeApiMode='chat_completions';
   ollamaReachable=$true;selectedModel=$model;modelListed=$true;modelCount=[int]$final.modelCount;contextLength=65536;
   endpointReachableBefore=[bool]$before.reachable;ollamaServerStarted=$ollamaStarted;ollamaPid=$ollamaPid;ollamaRecycled=$ollamaRecycled;recycledProcessCount=$recycledProcessCount;
-  watchdogInstalled=$watchdogInstalled;watchdogTask=$watchdogTask;watchdogTaskState=$watchdogTaskState;watchdogError=$watchdogError;
+  watchdogInstalled=$watchdogInstalled;watchdogTask=$watchdogTask;watchdogTaskState=$watchdogTaskState;watchdogTaskLastResult=$watchdogTaskLastResult;watchdogTaskLastRunTime=$watchdogTaskLastRunTime;watchdogError=$watchdogError;
   modelPullStarted=$false;generationTestStarted=$false;messagingGatewayTouched=$false;networkChanged=$false;observedAt=(Get-Date -Format o)
 }) 0
 '@
@@ -265,6 +273,44 @@ if([bool]$result.ok){
     $fail=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification=[string]$recoveryParsed.classification;retryable=$true;deployment='native';transport=[string]$chosen.transport;chatCanaryIssued=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanaryIssued'){[bool]$recoveryParsed.chatCanaryIssued}else{$false});chatCanaryPassed=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanaryPassed'){[bool]$recoveryParsed.chatCanaryPassed}else{$false});gatewayLifecycle=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycle'){[string]$recoveryParsed.gatewayLifecycle}else{$null});routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
     Save-Result $fail;exit 1
   }
+  # HERMES_R36_POST_RETURN_PERSISTENCE
+  # The first SSH session can make Ollama look healthy while its child process is
+  # still tied to the SSH job. Close that session, wait, then open a fresh session
+  # that is strictly read-only with respect to process state and prove both models
+  # and inference remain available. This is the readiness criterion Telegram needs.
+  Start-Sleep -Seconds 12
+  $postReturnProbe=@'
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+Set-StrictMode -Version 2.0
+$model='qwen3.6:35b-a3b'
+$base='http://127.0.0.1:11434/v1'
+$taskName='AFZ H3 Ollama Liveness'
+function Emit($o,[int]$code){$o|ConvertTo-Json -Depth 10 -Compress;exit $code}
+try{
+  $m=Invoke-RestMethod -Uri ($base+'/models') -Method Get -TimeoutSec 8
+  $ids=@($m.data|ForEach-Object{[string]$_.id})
+  if($model -notin $ids){Emit ([ordered]@{ok=$false;classification='HERMES_POST_RETURN_MODEL_MISSING';endpointReachable=$true;modelListed=$false}) 61}
+}catch{Emit ([ordered]@{ok=$false;classification='HERMES_POST_RETURN_ENDPOINT_DOWN';endpointReachable=$false;errorType=$_.Exception.GetType().Name}) 60}
+$payload=@{model=$model;messages=@(@{role='user';content='ping'});max_tokens=1;temperature=0}|ConvertTo-Json -Depth 6 -Compress
+$sw=[Diagnostics.Stopwatch]::StartNew()
+try{
+  $c=Invoke-RestMethod -Uri ($base+'/chat/completions') -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 180
+  $sw.Stop()
+  $chatOk=($null -ne $c -and $null -ne $c.choices -and @($c.choices).Count -gt 0)
+  if(-not $chatOk){Emit ([ordered]@{ok=$false;classification='HERMES_POST_RETURN_CHAT_INVALID';endpointReachable=$true;modelListed=$true;chatSeconds=[math]::Round($sw.Elapsed.TotalSeconds,2)}) 62}
+}catch{$sw.Stop();Emit ([ordered]@{ok=$false;classification='HERMES_POST_RETURN_CHAT_FAILED';endpointReachable=$true;modelListed=$true;chatSeconds=[math]::Round($sw.Elapsed.TotalSeconds,2);errorType=$_.Exception.GetType().Name}) 63}
+$task=$null;$info=$null
+try{$task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop;$info=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}catch{}
+Emit ([ordered]@{ok=$true;classification='HERMES_POST_RETURN_PERSISTENCE_READY';endpointReachable=$true;modelListed=$true;chatPassed=$true;chatSeconds=[math]::Round($sw.Elapsed.TotalSeconds,2);watchdogExists=($null -ne $task);watchdogState=$(if($task){[string]$task.State}else{$null});watchdogLastResult=$(if($info){$info.LastTaskResult}else{$null});watchdogLastRunTime=$(if($info){$info.LastRunTime.ToString('o')}else{$null});observedAt=(Get-Date -Format o)}) 0
+'@
+  $postReturnRun=Invoke-RemoteScript $chosen.target $chosen.extra $postReturnProbe 240000
+  $postReturnParsed=Parse-JsonResult $postReturnRun
+  if($null -eq $postReturnParsed -or -not [bool]$postReturnParsed.ok){
+    $postClass=$(if($postReturnParsed -and $postReturnParsed.PSObject.Properties.Name -contains 'classification'){[string]$postReturnParsed.classification}else{'HERMES_POST_RETURN_PERSISTENCE_INVALID_RESULT'})
+    $fail=[ordered]@{schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id;ok=$false;classification=$postClass;retryable=$true;deployment='native';transport=[string]$chosen.transport;postReturnTimedOut=[bool]$postReturnRun.timedOut;postReturnExit=$postReturnRun.exit;postReturnPersisted=$false;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)}
+    Save-Result $fail;exit 1
+  }
   $ready=[ordered]@{
     schema=1;purpose='EMERGENCY_DIAGNOSTIC_ACK_ONLY';controlPlane='github';source='windows-main';target='h3';host='DESKTOP-H3R6CQN';jobId=$id
     ok=$true;classification=[string]$recoveryParsed.classification;retryable=$false;deployment='native';transport=[string]$chosen.transport
@@ -274,6 +320,9 @@ if([bool]$result.ok){
     endpointReachableBefore=$(if($recoveryParsed.PSObject.Properties.Name -contains 'endpointReachableBefore'){[bool]$recoveryParsed.endpointReachableBefore}else{$null})
     ollamaServerStarted=$(if($recoveryParsed.PSObject.Properties.Name -contains 'ollamaServerStarted'){[bool]$recoveryParsed.ollamaServerStarted}else{$false})
     chatCanaryIssued=$true;chatCanaryPassed=$true;chatCanarySeconds=$(if($recoveryParsed.PSObject.Properties.Name -contains 'chatCanarySeconds'){$recoveryParsed.chatCanarySeconds}else{$null})
+    modelRuntimeConfigured=$(if($recoveryParsed.PSObject.Properties.Name -contains 'modelRuntimeConfigured'){[bool]$recoveryParsed.modelRuntimeConfigured}else{$false});modelConfigChanged=$(if($recoveryParsed.PSObject.Properties.Name -contains 'modelConfigChanged'){[bool]$recoveryParsed.modelConfigChanged}else{$false})
+    hermesCliCanaryPassed=$(if($recoveryParsed.PSObject.Properties.Name -contains 'hermesCliCanaryPassed'){[bool]$recoveryParsed.hermesCliCanaryPassed}else{$false});hermesCliCanaryExit=$(if($recoveryParsed.PSObject.Properties.Name -contains 'hermesCliCanaryExit'){$recoveryParsed.hermesCliCanaryExit}else{$null});hermesCliCanarySeconds=$(if($recoveryParsed.PSObject.Properties.Name -contains 'hermesCliCanarySeconds'){$recoveryParsed.hermesCliCanarySeconds}else{$null})
+    postReturnPersisted=$true;postReturnChatPassed=[bool]$postReturnParsed.chatPassed;postReturnChatSeconds=$postReturnParsed.chatSeconds;watchdogExists=$(if($postReturnParsed.PSObject.Properties.Name -contains 'watchdogExists'){[bool]$postReturnParsed.watchdogExists}else{$false});watchdogState=$(if($postReturnParsed.PSObject.Properties.Name -contains 'watchdogState'){[string]$postReturnParsed.watchdogState}else{$null});watchdogLastResult=$(if($postReturnParsed.PSObject.Properties.Name -contains 'watchdogLastResult'){$postReturnParsed.watchdogLastResult}else{$null})
     messagingGatewayTouched=$true;gatewayLifecycle=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycle'){[string]$recoveryParsed.gatewayLifecycle}else{$null});gatewayLifecycleExit=$(if($recoveryParsed.PSObject.Properties.Name -contains 'gatewayLifecycleExit'){$recoveryParsed.gatewayLifecycleExit}else{$null})
     beforeGatewayPids=$(if($recoveryParsed.PSObject.Properties.Name -contains 'beforeGatewayPids'){@($recoveryParsed.beforeGatewayPids)}else{@()});afterGatewayPids=$(if($recoveryParsed.PSObject.Properties.Name -contains 'afterGatewayPids'){@($recoveryParsed.afterGatewayPids)}else{@()})
     generationTestStarted=$true;generationTestPurpose='bounded-chat-canary';generationMaxTokens=2;modelPullStarted=$false;ollamaMutationStarted=$false;networkChanged=$false;routeDiagnostics=$routeDiagnostics;observedAt=(Get-Date -Format o)
