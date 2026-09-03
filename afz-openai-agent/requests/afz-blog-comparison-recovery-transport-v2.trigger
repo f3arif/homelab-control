@@ -5,4 +5,6 @@ replay_35b=false
 ridge_only_if_unattempted=true
 publish_article=false
 production_db_mutation=false
-source_guard_commit=3a15f080529d1491ea55d15f3e04405808a97b3e
+source_guard_commit=b8b303bbf129772db07cc9d93b79342062b05626
+transport_observability=read-only
+attempt=3
