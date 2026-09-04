@@ -27,7 +27,7 @@ jobs:
         run: |
           set -u
           echo 'PI_WAKE_PROBE_BEGIN'
-          for p in / /health /status/h3 /status/lenovo /status/hpenvy; do
+          for p in / /health /status/h3 /status/lenovo /status/hpenvy /status/windows-main /status/windowsmain /status/asus; do
             echo "--- $p ---"
             curl -sS -i --connect-timeout 3 --max-time 8 "http://100.91.50.9:8087${p}" || true
             echo
