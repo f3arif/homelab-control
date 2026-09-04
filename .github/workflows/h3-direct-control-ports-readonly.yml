@@ -1,0 +1,39 @@
+name: H3 Direct Control Ports Read Only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-direct-control-ports-readonly.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe H3 control ports read only
+        shell: bash
+        run: |
+          set +e
+          host='100.106.186.118'
+          echo '=== TAILSCALE ==='
+          tailscale ping --timeout=5s -c 2 "$host"
+          echo '=== TCP ==='
+          for p in 22 80 443 445 3389 5985 5986 8642 8796 8797 9119 11434; do
+            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          echo 'READ_ONLY=PASS'
