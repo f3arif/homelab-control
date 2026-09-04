@@ -162,14 +162,14 @@ try{
   $parityPath=Join-Path $packageRoot 'afz_h3_worker\parity.py'
   foreach($p in @($actionsPath,$parityPath)){if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Pinned candidate file missing after stage: $p"}}
 
-  $runner=@'
+  $runner=@"
 import json
 import sys
 from afz_h3_worker.actions import h3_file_hash
 
 result = h3_file_hash(sys.argv[1], allowed_roots=[sys.argv[2]])
 print(json.dumps(result, separators=(",", ":")))
-'@
+"@
   [IO.File]::WriteAllText($runnerPath,$runner,$utf8)
 
   $python=Get-Command python.exe -ErrorAction SilentlyContinue|Select-Object -First 1
