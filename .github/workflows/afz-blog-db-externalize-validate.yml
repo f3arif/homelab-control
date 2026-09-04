@@ -1,0 +1,119 @@
+name: AFZ Blog Database Externalization Validate
+
+on:
+  push:
+    branches:
+      - chatgpt/afz-blog-db-externalize
+    paths:
+      - 'afz-openai-agent/Invoke-AFZBlog-DatabaseExternalize.ps1'
+      - 'afz-openai-agent/Ensure-AFZ-BlogManager-Runtime.ps1'
+      - 'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1'
+      - 'afz-openai-agent/requests/afz-blog-database-externalize.json'
+      - '.github/workflows/afz-blog-db-externalize-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Invoke-AFZBlog-DatabaseExternalize.ps1',
+            'afz-openai-agent/Ensure-AFZ-BlogManager-Runtime.ps1',
+            'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){throw "$file parse errors: $($errors.Message -join '; ')"}
+            Write-Host "PARSE_PASS $file"
+          }
+
+      - name: Verify fixed request
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=Get-Content 'afz-openai-agent/requests/afz-blog-database-externalize.json' -Raw | ConvertFrom-Json
+          if([int]$r.schema -ne 1){throw 'schema mismatch'}
+          if([string]$r.id -ne 'afz-blog-db-externalize-v1'){throw 'id mismatch'}
+          if([string]$r.status -ne 'ACTIVE' -or [string]$r.action -ne 'externalize-sqlite-runtime'){throw 'request inactive or action mismatch'}
+          if([string]$r.target -ne 'windows-main' -or [string]$r.host -ne 'DESKTOP-10SKF0M'){throw 'target mismatch'}
+          if([string]$r.production_root -ne 'C:\docker\afz-blog-manager'){throw 'production root mismatch'}
+          if([string]$r.source_database_path -ne 'C:\docker\afz-blog-manager\data\afz-blog.db'){throw 'source DB mismatch'}
+          if([string]$r.external_database_path -ne 'C:\AFZ\Runtime\AFZ-Blog\data\afz-blog.db'){throw 'external DB mismatch'}
+          if([bool]$r.allow_git_mutation){throw 'git mutation must remain false'}
+          if([bool]$r.allow_database_content_mutation){throw 'database content mutation must remain false'}
+          if(-not [bool]$r.allow_environment_repoint){throw 'environment repoint must be explicit'}
+          if(-not [bool]$r.allow_service_restart){throw 'service restart must be explicit'}
+          if([bool]$r.allow_website_publish){throw 'website publish must remain false'}
+          if(-not [bool]$r.rollback_on_failure){throw 'rollback must remain enabled'}
+          Write-Host 'REQUEST_SAFETY_PASS'
+
+      - name: Verify externalization invariants
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $helper=Get-Content 'afz-openai-agent/Invoke-AFZBlog-DatabaseExternalize.ps1' -Raw
+          foreach($needle in @(
+            "`$expectedHost='DESKTOP-10SKF0M'",
+            "`$productionRoot='C:\docker\afz-blog-manager'",
+            "`$runtimeRoot='C:\AFZ\Runtime\AFZ-Blog'",
+            "`$externalDb=Join-Path `$runtimeRoot 'data\afz-blog.db'",
+            "User.Value -ne 'S-1-5-18'",
+            'process.env.DATABASE_URL',
+            'file:./data/afz-blog.db',
+            "'@next','env'",
+            'loadEnvConfig',
+            "'better-sqlite3'",
+            'await db.backup(dst)',
+            "integrity_check",
+            'fingerprint',
+            'Stop-BlogRuntime',
+            'Start-BlogRuntime',
+            'DATABASE_URL="file:C:/AFZ/Runtime/AFZ-Blog/data/afz-blog.db"',
+            'productionConfigurationModified',
+            'databaseContentModified=$false',
+            'gitModified=$false',
+            'websitePublished=$false',
+            'rollbackAttempted',
+            'Original in-checkout database unexpectedly disappeared'
+          )){if(-not $helper.Contains($needle)){throw "Missing externalization invariant: $needle"}}
+          foreach($forbidden in @(
+            "Run-Git @('-C',`$productionRoot,'merge'",
+            "Run-Git @('-C',`$productionRoot,'reset'",
+            "Remove-Item -LiteralPath `$sourceDb"
+          )){if($helper.Contains($forbidden)){throw "Forbidden mutation present: $forbidden"}}
+          Write-Host 'EXTERNALIZATION_SAFETY_PASS'
+
+      - name: Verify runtime hook and independent deploy block
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ensure=Get-Content 'afz-openai-agent/Ensure-AFZ-BlogManager-Runtime.ps1' -Raw
+          foreach($needle in @(
+            'AFZ_BLOG_DATABASE_EXTERNALIZE_RUNTIME_HOOK_V1',
+            'Invoke-AFZBlog-DatabaseExternalize.ps1',
+            'afz-blog-database-externalize.json',
+            '-RequestPath $dbExternalizeRequest'
+          )){if(-not $ensure.Contains($needle)){throw "Runtime hook missing: $needle"}}
+          if(([regex]::Matches($ensure,'AFZ_BLOG_DATABASE_EXTERNALIZE_RUNTIME_HOOK_V1')).Count -ne 1){throw 'Externalization runtime hook must occur exactly once'}
+
+          $deploy=Get-Content 'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1' -Raw
+          foreach($needle in @(
+            'data/afz-blog.db',
+            'prisma/schema.prisma',
+            'prisma/migrations/*',
+            "merge','--ff-only','origin/main",
+            'rollback_on_failure',
+            'productionDatabaseModified=$false',
+            'websitePublished=$false'
+          )){if(-not $deploy.Contains($needle)){throw "Independent production deploy guard missing: $needle"}}
+          Write-Host 'HOOK_AND_DEPLOY_BLOCK_PASS'

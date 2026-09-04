@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "afz-blog-db-externalize-v1",
+  "status": "ACTIVE",
+  "action": "externalize-sqlite-runtime",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "production_root": "C:\\docker\\afz-blog-manager",
+  "source_database_path": "C:\\docker\\afz-blog-manager\\data\\afz-blog.db",
+  "external_database_path": "C:\\AFZ\\Runtime\\AFZ-Blog\\data\\afz-blog.db",
+  "allow_git_mutation": false,
+  "allow_database_content_mutation": false,
+  "allow_environment_repoint": true,
+  "allow_service_restart": true,
+  "allow_website_publish": false,
+  "rollback_on_failure": true
+}
