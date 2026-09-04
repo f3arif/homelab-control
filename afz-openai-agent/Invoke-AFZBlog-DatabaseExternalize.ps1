@@ -69,7 +69,10 @@ function Start-BlogRuntime{
 function Get-TaskProof{
   $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if(-not $task){return [ordered]@{valid=$false;exists=$false}}
-  $actions=@($task.Actions);$execute=$(if($actions.Count -eq 1){[string]$actions[0].Execute}else{$null});$arguments=$(if($actions.Count -eq 1){[string]$actions[0].Arguments}else{$null});$workingDirectory=$(if($actions.Count -eq 1){[string]$actions[0].WorkingDirectory}else{$null})
+  $actions=@($task.Actions)
+  $execute=$(if($actions.Count -eq 1){[string]$actions[0].Execute}else{$null})
+  $arguments=$(if($actions.Count -eq 1){[string]$actions[0].Arguments}else{$null})
+  $workingDirectory=$(if($actions.Count -eq 1){[string]$actions[0].WorkingDirectory}else{$null})
   $actionOk=($actions.Count -eq 1 -and ([IO.Path]::GetFileName($execute)) -ieq 'powershell.exe' -and $arguments -like ('*'+$startScript+'*') -and $workingDirectory -eq $productionRoot)
   $principalOk=([string]$task.Principal.UserId -in @('SYSTEM','NT AUTHORITY\SYSTEM') -and [string]$task.Principal.LogonType -eq 'ServiceAccount')
   [ordered]@{valid=($actionOk -and $principalOk);exists=$true;actionOk=$actionOk;principalOk=$principalOk;state=[string]$task.State}
@@ -142,22 +145,29 @@ function inspect(file){
 function Set-ExternalDatabaseEnv{
   $line='DATABASE_URL="file:C:/AFZ/Runtime/AFZ-Blog/data/afz-blog.db"'
   $raw=$(if(Test-Path -LiteralPath $envLocal -PathType Leaf){[IO.File]::ReadAllText($envLocal)}else{''})
-  $matches=[regex]::Matches($raw,'(?im)^[ \t]*DATABASE_URL[ \t]*=.*$')
+  $pattern='^[ \t]*DATABASE_URL[ \t]*=.*$'
+  $rx=New-Object Text.RegularExpressions.Regex($pattern,([Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::Multiline))
+  $matches=$rx.Matches($raw)
   if($matches.Count -gt 1){throw 'More than one DATABASE_URL assignment exists in .env.local; refusing ambiguous edit.'}
-  if($matches.Count -eq 1){$next=[regex]::Replace($raw,'(?im)^[ \t]*DATABASE_URL[ \t]*=.*$',[System.Text.RegularExpressions.MatchEvaluator]{param($m)$line},1)}
+  if($matches.Count -eq 1){$next=$rx.Replace($raw,$line,1)}
   else{$sep=$(if([string]::IsNullOrEmpty($raw)){''}elseif($raw.EndsWith("`n")){''}else{"`r`n"});$next=$raw+$sep+$line+"`r`n"}
   [IO.File]::WriteAllText($envLocal,$next,$utf8)
 }
 
 $result=[ordered]@{schema=1;purpose='AFZ_BLOG_DATABASE_EXTERNALIZE';ok=$false;classification='STARTING';host=$env:COMPUTERNAME;productionRoot=$productionRoot;sourceDatabase=$sourceDb;externalDatabase=$externalDb;productionConfigurationModified=$false;databaseContentModified=$false;gitModified=$false;serviceRestarted=$false;websitePublished=$false;credentialsEmitted=$false;rollbackAttempted=$false;rollbackHealthy=$null;time=(Get-Date -Format o)}
-$request=$null;$statePath=Join-Path $stateRoot 'latest.json';$envBackup=$null;$envExisted=$false;$runtimeStopped=$false
+$statePath=Join-Path $stateRoot 'latest.json'
+$envBackup=$null;$envExisted=$false;$runtimeStopped=$false;$stageDb=$null
 try{
   if($env:COMPUTERNAME -ne $expectedHost){throw ('Wrong host: '+$env:COMPUTERNAME)}
   $identity=[Security.Principal.WindowsIdentity]::GetCurrent();$result.identity=[string]$identity.Name
   if([string]$identity.User.Value -ne 'S-1-5-18'){$result.ok=$true;$result.classification='AFZ_BLOG_DB_EXTERNALIZE_SKIPPED_NON_SYSTEM';Save-Result $result $statePath;exit 0}
   if(-not(Test-Path -LiteralPath $RequestPath -PathType Leaf)){throw ('Request missing: '+$RequestPath)}
   $request=[IO.File]::ReadAllText($RequestPath)|ConvertFrom-Json
-  foreach($pair in @(@('schema','1'),@('id','afz-blog-db-externalize-v1'),@('status','ACTIVE'),@('action','externalize-sqlite-runtime'),@('target','windows-main'),@('host',$expectedHost),@('production_root',$productionRoot),@('source_database_path',$sourceDb),@('external_database_path',$externalDb))){if([string]$request.($pair[0]) -ne [string]$pair[1]){throw ('Request invariant mismatch: '+$pair[0])}}
+  if([int]$request.schema -ne 1){throw 'Request schema mismatch.'}
+  if([string]$request.id -ne 'afz-blog-db-externalize-v1'){throw 'Request id mismatch.'}
+  if([string]$request.status -ne 'ACTIVE' -or [string]$request.action -ne 'externalize-sqlite-runtime'){throw 'Request inactive or action mismatch.'}
+  if([string]$request.target -ne 'windows-main' -or [string]$request.host -ne $expectedHost){throw 'Request target mismatch.'}
+  if([string]$request.production_root -ne $productionRoot -or [string]$request.source_database_path -ne $sourceDb -or [string]$request.external_database_path -ne $externalDb){throw 'Request path invariant mismatch.'}
   if([bool]$request.allow_git_mutation -or [bool]$request.allow_database_content_mutation -or -not [bool]$request.allow_environment_repoint -or -not [bool]$request.allow_service_restart -or [bool]$request.allow_website_publish -or -not [bool]$request.rollback_on_failure){throw 'Unsafe request flags.'}
   if(-not(Test-Path -LiteralPath $productionRoot -PathType Container)){throw 'Production root missing.'}
   if(-not(Test-Path -LiteralPath $appPrisma -PathType Leaf)){throw 'Prisma runtime source missing.'}
@@ -178,13 +188,21 @@ try{
   if([string]$before.resolvedPath -ine $sourceDb -or -not [bool]$before.insideGitRoot){$result.classification='AFZ_BLOG_DB_EXTERNALIZE_BLOCKED_UNEXPECTED_ACTIVE_PATH';Save-Result $result $statePath;exit 42}
   if(-not(Test-Path -LiteralPath $sourceDb -PathType Leaf)){throw 'Active source SQLite database file missing.'}
 
+  $envExisted=Test-Path -LiteralPath $envLocal -PathType Leaf
   Stop-BlogRuntime;$runtimeStopped=$true
-  $backupProof=Backup-And-Fingerprint $sourceDb $externalDb;$result.databaseProof=$backupProof
+  if(Test-Path -LiteralPath $externalDb -PathType Leaf){$backupProof=Backup-And-Fingerprint $sourceDb $externalDb}
+  else{
+    $externalDir=Split-Path $externalDb -Parent;New-Item -ItemType Directory -Force -Path $externalDir|Out-Null
+    $stageDb=$externalDb+'.stage.'+[guid]::NewGuid().ToString('n')
+    $backupProof=Backup-And-Fingerprint $sourceDb $stageDb
+    Move-Item -LiteralPath $stageDb -Destination $externalDb -Force;$stageDb=$null
+  }
+  $result.databaseProof=$backupProof
   if(-not [bool]$backupProof.ok){throw 'External SQLite backup verification failed.'}
   $backupRoot=Join-Path $runtimeRoot 'backups';New-Item -ItemType Directory -Force -Path $backupRoot|Out-Null
-  $envExisted=Test-Path -LiteralPath $envLocal -PathType Leaf
   if($envExisted){$envBackup=Join-Path $backupRoot ('env.local.'+(Get-Date -Format 'yyyyMMddTHHmmss')+'.'+[guid]::NewGuid().ToString('n')+'.bak');Copy-Item -LiteralPath $envLocal -Destination $envBackup -Force}
-  Set-ExternalDatabaseEnv;$result.productionConfigurationModified=$true
+  $result.productionConfigurationModified=$true
+  Set-ExternalDatabaseEnv
   $start=Start-BlogRuntime;$runtimeStopped=$false;$result.serviceRestarted=$true;$result.start=$start
   if(-not [bool]$start.ok){throw 'Blog runtime failed health check after database externalization.'}
   $after=Get-DatabaseClassification;$result.after=$after
@@ -195,11 +213,15 @@ try{
   $result.ok=$true;$result.classification='AFZ_BLOG_DATABASE_EXTERNALIZED_VERIFIED'
 }catch{
   $result.error=$_.Exception.Message
+  if($stageDb){Remove-Item -LiteralPath $stageDb -Force -ErrorAction SilentlyContinue}
   if($result.productionConfigurationModified -or $runtimeStopped){
     $result.rollbackAttempted=$true
     try{
       Stop-BlogRuntime
-      if($envExisted){if(-not $envBackup -or -not(Test-Path -LiteralPath $envBackup -PathType Leaf)){throw 'Environment backup unavailable for rollback.'};Copy-Item -LiteralPath $envBackup -Destination $envLocal -Force}else{Remove-Item -LiteralPath $envLocal -Force -ErrorAction SilentlyContinue}
+      if($result.productionConfigurationModified){
+        if($envExisted){if(-not $envBackup -or -not(Test-Path -LiteralPath $envBackup -PathType Leaf)){throw 'Environment backup unavailable for rollback.'};Copy-Item -LiteralPath $envBackup -Destination $envLocal -Force}
+        else{Remove-Item -LiteralPath $envLocal -Force -ErrorAction SilentlyContinue}
+      }
       $rb=Start-BlogRuntime;$runtimeStopped=$false;$result.rollback=$rb;$result.rollbackHealthy=[bool]$rb.ok
     }catch{$result.rollbackHealthy=$false;$result.rollbackError=$_.Exception.Message}
   }
