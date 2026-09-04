@@ -37,8 +37,8 @@ jobs:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
-          oauth-client-id: \${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: \${{ secrets.TS_AUDIENCE }}
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
       - name: Ensure H3 is awake
@@ -64,11 +64,11 @@ jobs:
 
       - name: Run guarded H3 repair and record result
         env:
-          AFZ_SHA: \${{ github.sha }}
+          AFZ_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          url="https://raw.githubusercontent.com/f3arif/homelab-control/\${AFZ_SHA}/.github/scripts/h3-radiohilal-hermes-cron-rh1.ps1"
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/.github/scripts/h3-radiohilal-hermes-cron-rh1.ps1"
           remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
           set +e
           result=$(timeout 600s tailscale ssh Faiz@100.106.186.118 "$remote" 2>&1)
