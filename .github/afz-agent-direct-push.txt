@@ -1,11 +1,1 @@
-AFZ direct agent source synchronization
-reason=afz-blog-runtime-helper-git-recursion-fix
-target=windows-main
-authority=github-exact-sha
-operation=source-sync-only-then-existing-guarded-blog-runtime-ensure
-protected_service=AFZ Blog Manager
-production_source_mutation=false
-website_publish=false
-arbitrary_shell=false
-requested_source_includes=6b8fc2c1573cd33f98afbcc0b8d1d517fbb19e54
-requested_at=2026-09-03T21:09:00-04:00
+radiohilal-api-deploy-b511c0ad-20260904-r1
