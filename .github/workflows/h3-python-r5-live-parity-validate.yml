@@ -1,0 +1,86 @@
+name: H3 Python R5 Live Parity Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/Invoke-H3-PythonR5-FileHashParity.ps1'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - '.github/workflows/h3-python-r5-live-parity-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Parse PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($path in @(
+            'afz-openai-agent/Invoke-H3-PythonR5-FileHashParity.ps1',
+            'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if(@($errors).Count){$errors|Format-List|Out-String|Write-Error;exit 1}
+          }
+          'POWERSHELL_PARSE=PASS'
+      - name: Validate exact R5 safety boundary
+        shell: powershell
+        run: |
+          $h=Get-Content 'afz-openai-agent/Invoke-H3-PythonR5-FileHashParity.ps1' -Raw
+          foreach($needle in @(
+            '3819a0459835746f5e29905d0d1aaa3142e1bd19',
+            'B61D8EB4E625549836C504D102BC0139D1C97786447E2EA071AC9DBC8F02795E',
+            'h3-python-r5-legacy-file-hash-20260830T1406.txt',
+            'C:\ProgramData\AFZ\OpenAIAgent\keys\afz_h3_worker_system',
+            'StrictHostKeyChecking=yes',
+            'IdentitiesOnly=yes',
+            'git archive',
+            'PASS_R5_LIVE_FILE_HASH_PARITY',
+            'TRANSIENT_STAGE_ONLY_CLEANED',
+            'workerPidContinuity',
+            'heartbeatFreshAfter',
+            'candidateOrphanCountZero'
+          )){if(-not $h.Contains($needle)){throw "Missing R5 parity invariant: $needle"}}
+          foreach($bad in @(
+            'Register-ScheduledTask',
+            'Set-ScheduledTask',
+            'Unregister-ScheduledTask',
+            'Start-ScheduledTask',
+            'Stop-ScheduledTask',
+            'Stop-Process',
+            'Set-Service',
+            'Restart-Service',
+            'ollama stop',
+            'ollama rm'
+          )){if($h.Contains($bad)){throw "Forbidden authority/mutation primitive: $bad"}}
+          $s=Get-Content 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1' -Raw
+          foreach($needle in @(
+            'H3_PYTHON_R5_FILEHASH_PARITY_SYNC_HOOK_V1',
+            'Invoke-H3-PythonR5-FileHashParity.ps1'
+          )){if(-not $s.Contains($needle)){throw "Missing sync hook invariant: $needle"}}
+          'R5_PARITY_SAFETY=PASS'
+      - name: Verify pinned candidate commit and package
+        shell: powershell
+        run: |
+          $sha='3819a0459835746f5e29905d0d1aaa3142e1bd19'
+          git cat-file -e ($sha+'^{commit}')
+          if($LASTEXITCODE -ne 0){throw 'Pinned R5 merge is unavailable in git history.'}
+          foreach($p in @(
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/actions.py',
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/parity.py',
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/process.py',
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/contracts.py',
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/transport.py',
+            'afz-openai-agent/h3-python-worker/afz_h3_worker/__init__.py'
+          )){
+            git cat-file -e ($sha+':'+$p)
+            if($LASTEXITCODE -ne 0){throw "Pinned candidate file missing: $p"}
+          }
+          'PINNED_R5_PACKAGE=PASS'
