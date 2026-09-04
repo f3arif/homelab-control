@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "h3-headless-phase1-staged-20260904",
+  "action": "migrate-h3-headless-phase1",
+  "status": "STAGED_NOT_AUTHORIZED",
+  "target": "h3",
+  "host": "DESKTOP-H3R6CQN",
+  "changes": {
+    "sshd_startup": "Automatic",
+    "ollama_startup": "SYSTEM ScheduledTask AtStartup",
+    "user_login_dependency_removed_for": [
+      "remote-command-plane",
+      "ollama"
+    ],
+    "hermes": false,
+    "radiohilal_worker": false
+  },
+  "rollback": true,
+  "activation_requires_protected_authorization": true
+}
