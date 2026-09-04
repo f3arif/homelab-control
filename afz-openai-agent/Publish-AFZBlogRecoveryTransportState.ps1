@@ -74,6 +74,7 @@ $stderrPath='C:\ProgramData\AFZ\H3AFZBlogModelComparison\recovery.stderr.log'
 $projectRoot='C:\Projects\AFZ-Blog-Model-Comparison-20260902-r1'
 function ReadJson([string]$Path){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{return [IO.File]::ReadAllText($Path)|ConvertFrom-Json}catch{return $null}}
 function Tail([string]$Path,[int]$Max=4000){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{$t=[IO.File]::ReadAllText($Path);if($t.Length -gt $Max){return $t.Substring($t.Length-$Max)};return $t}catch{return $null}}
+function ReadText([string]$Path,[int]$Max=524288){if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};try{$t=[IO.File]::ReadAllText($Path);if($t.Length -gt $Max){return $t.Substring(0,$Max)};return $t}catch{return $null}}
 function ModelState($State,[string]$Name){
   $v=$null
   if($State -and $State.PSObject.Properties.Name -contains 'models'){
@@ -101,6 +102,8 @@ $o=[ordered]@{
   ridge27b=(ModelState $state 'qwen3.8-ridge:27b-16k')
   ridgeSavedResponseExists=(Test-Path -LiteralPath (Join-Path $projectRoot 'ridge27b-16k-ollama-response.json') -PathType Leaf)
   qwen35bSavedResponseExists=(Test-Path -LiteralPath (Join-Path $projectRoot 'qwen35b-a3b-ollama-response.json') -PathType Leaf)
+  qwen35bSavedResponseRaw=(ReadText (Join-Path $projectRoot 'qwen35b-a3b-ollama-response.json'))
+  ridge27bSavedResponseRaw=(ReadText (Join-Path $projectRoot 'ridge27b-16k-ollama-response.json'))
   recoveryTaskExists=($null -ne $task)
   recoveryTaskState=$(if($task){[string]$task.State}else{'missing'})
   recoveryTaskPrincipalUser=$(if($task){[string]$task.Principal.UserId}else{$null})
