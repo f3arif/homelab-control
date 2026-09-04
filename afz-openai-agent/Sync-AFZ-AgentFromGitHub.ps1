@@ -454,6 +454,20 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
 
   # Execute the current H3 Hermes request once after exact Git source sync. This is
   # deliberately non-fatal to sync and carries its own per-request one-shot marker.
+  # H3_PYTHON_R5_FILEHASH_PARITY_SYNC_HOOK_V1
+  # One-shot non-authoritative parity only. The helper is SYSTEM-only, exact-SHA
+  # pinned, transient-stage-only, and cannot start/stop workers or tasks.
+  $h3PythonR5Parity=[ordered]@{ok=$true;status='not-run'}
+  try{
+    $r5Helper=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-PythonR5-FileHashParity.ps1'
+    if(Test-Path -LiteralPath $r5Helper -PathType Leaf){
+      $r5Raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r5Helper -InstallRoot $InstallRoot -SyncedSha $resolvedSha | Select-Object -Last 1
+      $r5Code=$LASTEXITCODE
+      if($r5Raw -is [string]){try{$r5Parsed=$r5Raw|ConvertFrom-Json}catch{$r5Parsed=[ordered]@{status='invalid-json';raw=[string]$r5Raw}}}else{$r5Parsed=$r5Raw}
+      $h3PythonR5Parity=[ordered]@{ok=($r5Code -eq 0);status=$(if($r5Code -eq 0){'completed'}else{'helper-failed'});exit=$r5Code;result=$r5Parsed}
+    }
+  }catch{$h3PythonR5Parity=[ordered]@{ok=$false;status='helper-exception';error=$_.Exception.Message}}
+
   $h3HermesQwenActivation=Invoke-H3HermesQwenOneShot -SyncedSha $resolvedSha
 
   # One-shot activation for the already-reviewed 35B A3B comparison request.
