@@ -1,20 +1,34 @@
 {
   "schema": 1,
-  "id": "h3-headless-phase1-staged-20260904",
+  "id": "h3-headless-phase1-20260904",
   "action": "migrate-h3-headless-phase1",
-  "status": "STAGED_NOT_AUTHORIZED",
+  "status": "COMPLETED",
   "target": "h3",
   "host": "DESKTOP-H3R6CQN",
-  "changes": {
+  "completed_at": "2026-09-04T12:50:33-04:00",
+  "verified": {
     "sshd_startup": "Automatic",
-    "ollama_startup": "SYSTEM ScheduledTask AtStartup",
-    "user_login_dependency_removed_for": [
-      "remote-command-plane",
-      "ollama"
-    ],
-    "hermes": false,
-    "radiohilal_worker": false
+    "sshd_running": true,
+    "ollama_task": "AFZ H3 Headless Ollama",
+    "ollama_principal": "SYSTEM",
+    "ollama_trigger": "AtStartup",
+    "ollama_loopback": "127.0.0.1:11434",
+    "ollama_models_visible": 17,
+    "hermes_task": "AFZ H3 Hermes Headless Gateway",
+    "hermes_principal": "SYSTEM",
+    "hermes_trigger": "AtStartup",
+    "openai_codex_oauth_visible_under_system": true,
+    "radiohilal_cron_job": "9d9eea1b7618",
+    "radiohilal_cron_enabled": true,
+    "radiohilal_schedule": "every 60m",
+    "radiohilal_provider": "ollama",
+    "radiohilal_model": "qwen3.8-ridge:27b-64k",
+    "radiohilal_reasoning_effort": "low",
+    "cron_doctor": "PASS",
+    "desktop_login_required_for_core": false
   },
-  "rollback": true,
-  "activation_requires_protected_authorization": true
+  "notes": [
+    "Existing interactive Generic Worker and RadioHilal35B OneDrive workers were left unchanged because they depend on the interactive OneDrive sync profile.",
+    "Core Radio Hilal cron, Hermes gateway, Ollama, and SSH service no longer require desktop login."
+  ]
 }
