@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - chatgpt/afz-blog-prod-deploy-07380a73
+      - chatgpt/afz-blog-prod-deploy-a223b14b
     paths:
       - 'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
@@ -44,12 +45,13 @@ jobs:
           $ErrorActionPreference='Stop'
           $request=Get-Content 'afz-openai-agent/requests/afz-blog-production-deploy.json' -Raw | ConvertFrom-Json
           if([int]$request.schema -ne 1){throw 'request schema mismatch'}
-          if([string]$request.id -ne 'afz-blog-production-deploy-07380a73-r1'){throw 'request id mismatch'}
+          if([string]$request.id -ne 'afz-blog-production-deploy-a223b14b-r2'){throw 'request id mismatch'}
           if([string]$request.status -ne 'ACTIVE' -or [string]$request.action -ne 'deploy-validated-main'){throw 'request inactive or wrong action'}
           if([string]$request.host -ne 'DESKTOP-10SKF0M' -or [string]$request.target -ne 'windows-main'){throw 'request target mismatch'}
           if([string]$request.expected_current_sha -ne 'a37e71aa0e0c9fad41ecdc9652a7024c485666f4'){throw 'unexpected current SHA'}
-          if([string]$request.expected_blog_sha -ne '07380a730f91edc240e7fc971fdf1fb11fdec4a8'){throw 'unexpected target SHA'}
+          if([string]$request.expected_blog_sha -ne 'a223b14b38260d097343b8cdb4499f4122140321'){throw 'unexpected target SHA'}
           if([bool]$request.allow_database_mutation){throw 'database mutation must be false'}
+          if(-not [bool]$request.allow_database_untrack_migration){throw 'database untrack migration must be explicitly enabled'}
           if([bool]$request.allow_schema_or_migration_change){throw 'schema/migration change must be false'}
           if([bool]$request.allow_website_publish){throw 'website publish must be false'}
           if(-not [bool]$request.rollback_on_failure){throw 'rollback must be true'}
@@ -62,6 +64,11 @@ jobs:
             'prisma/schema.prisma',
             'prisma/migrations/*',
             'Get-FileHash',
+            'deploy-backups',
+            "check-ignore','--quiet','data/afz-blog.db",
+            'databaseRestoredAsIgnoredRuntimeData',
+            'databasePreserved',
+            'allow_database_untrack_migration',
             'AFZ_BLOG_PRODUCTION_DEPLOY_ROLLED_BACK',
             'http://127.0.0.1:3015/',
             'Stop-BlogRuntime',
