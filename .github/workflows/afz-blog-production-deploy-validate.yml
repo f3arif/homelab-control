@@ -34,6 +34,9 @@ jobs:
             $errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
             if($errors.Count -gt 0){
+              foreach($e in $errors){
+                Write-Host ("PARSE_ERROR file={0} line={1} column={2} text={3} message={4}" -f $file,$e.Extent.StartLineNumber,$e.Extent.StartColumnNumber,$e.Extent.Text,$e.Message)
+              }
               throw "$file parse errors: $($errors.Message -join '; ')"
             }
             Write-Host "PARSE_PASS $file"
