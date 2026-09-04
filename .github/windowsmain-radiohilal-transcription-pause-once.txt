@@ -1,0 +1,2 @@
+Trigger one-time bounded RadioHilal lecture transcription pause on windows-main.
+Created 2026-09-04T00:10 America/Toronto.
