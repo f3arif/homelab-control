@@ -152,12 +152,14 @@ const done = arguments[arguments.length - 1];
     const afz = addons.find(a => a?.manifest?.id === 'com.afzengineering.releasecatalog' || a?.manifest?.name === 'AFZ New Movie Releases');
     const trakt = addons.find(a => a?.manifest?.name === 'Trakt Integration');
     const tv = addons.find(a => a?.manifest?.name === 'Debridio - TV');
+    const store = addons.find(a => a?.manifest?.name === 'Store | TB');
     return {
       count:addons.length,
       order:addons.map(a => a?.manifest?.name || a?.manifest?.id || ''),
       afzVersion:afz?.manifest?.version || null,
       traktCatalogs:(trakt?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
-      debridioTvCatalogs:(tv?.manifest?.catalogs || []).map(c => c?.name || c?.id || '')
+      debridioTvCatalogs:(tv?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
+      storeCatalogs:(store?.manifest?.catalogs || []).map(c => c?.name || c?.id || '')
     };
   }
 
@@ -189,6 +191,11 @@ const done = arguments[arguments.length - 1];
   const tv = addons.find(a => a?.manifest?.name === 'Debridio - TV');
   if (tv?.manifest?.catalogs) {
     tv.manifest.catalogs = tv.manifest.catalogs.filter(c => ['ca','in'].includes(c?.id));
+  }
+
+  const store = addons.find(a => a?.manifest?.name === 'Store | TB');
+  if (store?.manifest?.catalogs) {
+    store.manifest.catalogs = store.manifest.catalogs.filter(c => c?.id === 'st:store:tb');
   }
 
   const priority = [
@@ -242,6 +249,7 @@ const done = arguments[arguments.length - 1];
     changed:JSON.stringify(namesBefore) !== JSON.stringify(afterSummary.order) ||
       JSON.stringify(summary(before).traktCatalogs) !== JSON.stringify(afterSummary.traktCatalogs) ||
       JSON.stringify(summary(before).debridioTvCatalogs) !== JSON.stringify(afterSummary.debridioTvCatalogs) ||
+      JSON.stringify(summary(before).storeCatalogs) !== JSON.stringify(afterSummary.storeCatalogs) ||
       summary(before).afzVersion !== afterSummary.afzVersion
   });
 })().catch(e => done({ok:false,error:String(e)}));
@@ -252,7 +260,10 @@ const done = arguments[arguments.length - 1];
     if args.action == "apply" and result and result.get("ok"):
         command(sock, seq, "WebDriver:Navigate", {"url": "https://web.stremio.com/#/"})
         seq += 1
-        time.sleep(6)
+        time.sleep(4)
+        command(sock, seq, "WebDriver:Refresh", {})
+        seq += 1
+        time.sleep(15)
         rows_js = r"""
 return [...document.querySelectorAll('*')]
   .filter(e => e.children.length === 0)
