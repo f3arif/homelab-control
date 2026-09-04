@@ -1,2 +1,4 @@
 MovieRecommender direct audit request
 purpose=github-primary-readonly-catalog-audit
+retry=existing-r4-fast-signal
+requested_at=2026-09-03T23:09:00-04:00
