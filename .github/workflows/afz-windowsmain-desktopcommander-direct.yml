@@ -1,0 +1,85 @@
+name: AFZ Windows-main Desktop Commander Direct Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-windowsmain-desktopcommander-direct.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  direct-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Initialize sanitized result
+        shell: bash
+        run: |
+          printf '%s\n' '{"status":"initialized","targetSha":"a5ff97026276cda986bb227a87840ae86fb78b37"}' > /tmp/afz-direct-result.json
+
+      - name: Join AFZ tailnet
+        id: tailscale
+        continue-on-error: true
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+          log-mode: quiet
+
+      - name: Probe and request exact SHA
+        if: steps.tailscale.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          target='a5ff97026276cda986bb227a87840ae86fb78b37'
+          endpoint='http://100.70.25.8:8797'
+          before="$(curl -sS --connect-timeout 4 --max-time 8 "$endpoint/health" 2>&1)"
+          payload="$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$target")"
+          code="$(curl -sS -o /tmp/deploy-response.txt -w '%{http_code}' --connect-timeout 4 --max-time 10 -H 'Content-Type: application/json' -X POST --data "$payload" "$endpoint/api/push-deploy" 2>/tmp/deploy-stderr.txt)"
+          deploy="$(cat /tmp/deploy-response.txt 2>/dev/null)"
+          err="$(cat /tmp/deploy-stderr.txt 2>/dev/null)"
+          after=''
+          matched=false
+          for i in $(seq 1 12); do
+            after="$(curl -sS --connect-timeout 4 --max-time 8 "$endpoint/health" 2>&1)"
+            if printf '%s' "$after" | grep -q "$target"; then matched=true; break; fi
+            sleep 2
+          done
+          jq -n             --arg status "completed"             --arg targetSha "$target"             --arg httpCode "$code"             --arg deployResponse "$deploy"             --arg deployStderr "$err"             --arg healthBefore "$before"             --arg healthAfter "$after"             --argjson targetObserved "$matched"             '{status:$status,targetSha:$targetSha,httpCode:$httpCode,targetObserved:$targetObserved,deployResponse:$deployResponse,deployStderr:$deployStderr,healthBefore:$healthBefore,healthAfter:$healthAfter}'             > /tmp/afz-direct-result.json
+
+      - name: Record sanitized result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '.github/afz-direct-probe-results/windowsmain-desktopcommander-latest.json';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            let raw = fs.existsSync('/tmp/afz-direct-result.json')
+              ? fs.readFileSync('/tmp/afz-direct-result.json','utf8')
+              : JSON.stringify({status:'result-file-missing'});
+            let obj;
+            try { obj = JSON.parse(raw); } catch { obj = {status:'invalid-result-json'}; }
+            obj.tailscaleOutcome = '${{ steps.tailscale.outcome }}';
+            obj.runId = context.runId;
+            obj.recordedAt = new Date().toISOString();
+            const content = Buffer.from(JSON.stringify(obj, null, 2) + '\n').toString('base64');
+            let currentSha;
+            try {
+              const r = await github.rest.repos.getContent({owner,repo,path,ref:'main'});
+              if (!Array.isArray(r.data)) currentSha = r.data.sha;
+            } catch(e) {
+              if (e.status !== 404) throw e;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,repo,path,branch:'main',
+              message:'Record Windows-main Desktop Commander direct probe',
+              content,
+              ...(currentSha ? {sha: currentSha} : {})
+            });
