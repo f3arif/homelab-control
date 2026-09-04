@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - 'afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1'
       - '.github/workflows/windowsmain-fallback-updater-selfheal-validate.yml'
   push:
     branches: [main]
     paths:
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - 'afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1'
       - '.github/workflows/windowsmain-fallback-updater-selfheal-validate.yml'
 
 permissions:
@@ -25,10 +27,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $file='afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1'
-          $tokens=$null;$errors=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
-          if($errors.Count){throw ($errors.Message -join '; ')}
+          foreach($file in @(
+            'afz-openai-agent\Sync-AFZ-AgentFromGitHub.ps1',
+            'afz-openai-agent\Invoke-MovieRecommender-CatalogV2-GitHub.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ($file+': '+($errors.Message -join '; '))}
+          }
 
       - name: Verify missing-only canonical updater repair contract
         shell: powershell
