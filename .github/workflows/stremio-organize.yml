@@ -91,15 +91,17 @@ jobs:
           assert d.get('ok') is True, d
           after=d.get('after') or {}
           assert after.get('count',0) >= 12, after
-          assert after.get('afzVersion') == '0.3.1', after
+          assert after.get('afzVersion'), after
           trakt=after.get('traktCatalogs') or []
           assert set(trakt) == {'Trakt Watchlist','Trakt Recommendations'}, trakt
           tv=after.get('debridioTvCatalogs') or []
           assert set(tv) == {'Canada TV','India TV'}, tv
           order=after.get('order') or []
-          expected=['AFZ New Movie Releases','Cinemeta','Trakt Integration','Kids Shows Age 3 to 8','EinthusanTV - Hindi']
+          expected=['AFZ Movies','Cinemeta','Trakt Integration','Kids Shows Age 3 to 8','EinthusanTV - Hindi']
           assert order[:5] == expected, order[:8]
-          assert int(d.get('homeRowCount',999)) <= 26, d.get('homeRowCount')
+          cinemeta=after.get('cinemetaCatalogs') or []
+          assert all(x.get('id') != 'imdbRating' for x in cinemeta), cinemeta
+          assert int(d.get('homeRowCount',999)) <= 25, d.get('homeRowCount')
           print('Stremio organizer verification passed')
           print('Installed addons:', after.get('count'))
           print('AFZ addon version:', after.get('afzVersion'))
@@ -108,7 +110,7 @@ jobs:
           with open('/tmp/stremio-summary.md','w',encoding='utf-8') as f:
               f.write('## Stremio organization result\n\n')
               f.write(f"- Installed addons: {after.get('count')}\n")
-              f.write(f"- AFZ New Movie Releases: v{after.get('afzVersion')}\n")
+              f.write(f"- AFZ Movies: v{after.get('afzVersion')}\n")
               f.write(f"- Home rows: {d.get('homeRowCount')}\n")
               f.write(f"- Trakt rows: {', '.join(trakt)}\n")
               f.write(f"- Debridio TV rows: {', '.join(tv)}\n")

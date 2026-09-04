@@ -93,8 +93,8 @@ def main():
             live_manifest = json.load(response)
         if live_manifest.get("id") != "com.afzengineering.releasecatalog":
             raise RuntimeError("Unexpected AFZ manifest id")
-        if live_manifest.get("version") != "0.3.1":
-            raise RuntimeError(f"Unexpected AFZ manifest version: {live_manifest.get('version')!r}")
+        if not str(live_manifest.get("version") or "").strip():
+            raise RuntimeError("AFZ manifest version missing")
 
     sock = socket.create_connection((MARIONETTE_HOST, MARIONETTE_PORT), 6)
     sock.settimeout(75)
@@ -153,13 +153,15 @@ const done = arguments[arguments.length - 1];
     const trakt = addons.find(a => a?.manifest?.name === 'Trakt Integration');
     const tv = addons.find(a => a?.manifest?.name === 'Debridio - TV');
     const store = addons.find(a => a?.manifest?.name === 'Store | TB');
+    const cinemeta = addons.find(a => a?.manifest?.name === 'Cinemeta');
     return {
       count:addons.length,
       order:addons.map(a => a?.manifest?.name || a?.manifest?.id || ''),
       afzVersion:afz?.manifest?.version || null,
       traktCatalogs:(trakt?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
       debridioTvCatalogs:(tv?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
-      storeCatalogs:(store?.manifest?.catalogs || []).map(c => c?.name || c?.id || '')
+      storeCatalogs:(store?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
+      cinemetaCatalogs:(cinemeta?.manifest?.catalogs || []).map(c => ({id:c?.id || '',name:c?.name || '',type:c?.type || ''}))
     };
   }
 
@@ -171,7 +173,7 @@ const done = arguments[arguments.length - 1];
   let afzManifestRefreshed = false;
   let afzRefreshError = null;
   let afz = addons.find(a => a?.manifest?.id === 'com.afzengineering.releasecatalog' || a?.manifest?.name === 'AFZ New Movie Releases');
-  if (!liveManifest || liveManifest?.id !== 'com.afzengineering.releasecatalog' || liveManifest?.version !== '0.3.1') {
+  if (!liveManifest || liveManifest?.id !== 'com.afzengineering.releasecatalog' || !String(liveManifest?.version || '').trim()) {
     return done({ok:false,error:'validated AFZ manifest payload missing'});
   }
   if (afz) {
@@ -182,6 +184,11 @@ const done = arguments[arguments.length - 1];
     addons.push(afz);
   }
   afzManifestRefreshed = true;
+
+  const cinemeta = addons.find(a => a?.manifest?.name === 'Cinemeta');
+  if (cinemeta?.manifest?.catalogs) {
+    cinemeta.manifest.catalogs = cinemeta.manifest.catalogs.filter(c => c?.id !== 'imdbRating');
+  }
 
   const trakt = addons.find(a => a?.manifest?.name === 'Trakt Integration');
   if (trakt?.manifest?.catalogs) {
@@ -199,6 +206,7 @@ const done = arguments[arguments.length - 1];
   }
 
   const priority = [
+    'AFZ Movies',
     'AFZ New Movie Releases',
     'Cinemeta',
     'Trakt Integration',
@@ -231,7 +239,7 @@ const done = arguments[arguments.length - 1];
   const verifyData = await api('addonCollectionGet', {authKey});
   const after = verifyData?.result?.addons || [];
   const afterSummary = summary(after);
-  const expectedAfz = afzManifestRefreshed ? '0.3.1' : summary(before).afzVersion;
+  const expectedAfz = afzManifestRefreshed ? String(liveManifest.version) : summary(before).afzVersion;
   if (afzManifestRefreshed && afterSummary.afzVersion !== expectedAfz) {
     await api('addonCollectionSet', {authKey, addons:before});
     return done({ok:false,error:'AFZ manifest refresh did not persist; original collection restored',backupKey,before:summary(before),after:afterSummary});
@@ -284,3 +292,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print(json.dumps({"ok":False,"error":str(exc)}, ensure_ascii=True, separators=(",", ":")))
         raise
+
