@@ -1,3 +1,3 @@
 Trigger one-time bounded RadioHilal lecture transcription pause on windows-main.
-Run 2: persist verification readback to OneDrive.
-Created 2026-09-04T00:12 America/Toronto.
+Run 3: persist direct Windows result in GitHub.
+Created 2026-09-04T00:15 America/Toronto.
