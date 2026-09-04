@@ -1,0 +1,46 @@
+name: HP Envy RadioHilal Recovery Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-radiohilal-recovery-probe.yml'
+      - '.github/hpenvy-radiohilal-recovery-probe.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: hpenvy-radiohilal-recovery-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read HP failover and Windows-main state
+        shell: bash
+        run: |
+          set -u
+          base='http://100.71.26.69:8791'
+          echo '=== HP PING ==='
+          tailscale ping --timeout=5s -c 2 100.71.26.69 || true
+          for path in /api/hp-health /api/status /api/control-hub/state /api/live-control; do
+            echo "=== GET ${path} ==="
+            curl -sS --connect-timeout 3 --max-time 15 "${base}${path}" || true
+            echo
+          done
+          echo '=== OPTIONS /api/control ==='
+          curl -sS -i -X OPTIONS --connect-timeout 3 --max-time 10 "${base}/api/control" || true
+          echo
