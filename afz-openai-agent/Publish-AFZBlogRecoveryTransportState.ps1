@@ -222,16 +222,19 @@ function Invoke-GuardedRecoveryV6($Probe,$V5,$Carrier){
   }
 
   if(-not $V5 -or [string]$V5.status -ne 'recovery-bootstrap-started'){
-    return [ordered]@{ok=$true;status='v5-proof-missing';jobId=$jobId;mutation='NONE';modelReplay35B=$false}
+    return [ordered]@{ok=$true;status='v5-proof-missing';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
   }
   if(-not $Carrier -or [bool]$Carrier.ok -or [string]$Carrier.status -ne 'failed'){
-    return [ordered]@{ok=$true;status='v5-failure-proof-missing';jobId=$jobId;mutation='NONE';modelReplay35B=$false}
+    return [ordered]@{ok=$true;status='v5-failure-proof-missing';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
   }
   if([string]$Carrier.expectedSha -ne [string]$V5.syncedSha){
-    return [ordered]@{ok=$true;status='v5-carrier-sha-mismatch';jobId=$jobId;mutation='NONE';modelReplay35B=$false}
+    return [ordered]@{ok=$true;status='v5-carrier-sha-mismatch';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
   }
 
-  $ridgeAdvertised=(@($Probe.ollamaModels) -contains 'qwen3.8-ridge:27b-16k')
+  $ridgeAdvertised=$false
+  if($Probe -and $Probe.PSObject.Properties.Name -contains 'ollamaModels'){
+    $ridgeAdvertised=(@($Probe.ollamaModels) -contains 'qwen3.8-ridge:27b-16k')
+  }
   $eligible=(
     $Probe -and [bool]$Probe.ok -and
     $Probe.qwen35b -and [bool]$Probe.qwen35b.attempted -and
@@ -247,63 +250,29 @@ function Invoke-GuardedRecoveryV6($Probe,$V5,$Carrier){
     return [ordered]@{
       ok=$true;status='not-eligible';jobId=$jobId;mutation='NONE'
       modelReplay35B=$false;ridgeOnlyIfUnattempted=$true
-      qwen35bAttempted=$(if($Probe -and $Probe.qwen35b){[bool]$Probe.qwen35b.attempted}else{$false})
-      ridge27bAttempted=$(if($Probe -and $Probe.ridge27b){[bool]$Probe.ridge27b.attempted}else{$false})
-      ridgeSavedResponseExists=$(if($Probe){[bool]$Probe.ridgeSavedResponseExists}else{$false})
-      ollamaApiReady=$(if($Probe){[bool]$Probe.ollamaApiReady}else{$false})
       ridgeModelAdvertised=$ridgeAdvertised
-      recoveryTaskState=$(if($Probe){[string]$Probe.recoveryTaskState}else{$null})
     }
   }
-  if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$v4=Read-SafeJson $v4Marker
-$carrier=Read-SafeJson $carrierResult
-$transportTask=Get-ScheduledTask -TaskName $transportTaskName -ErrorAction SilentlyContinue
-$transportInfo=$(if($transportTask){Get-ScheduledTaskInfo -TaskName $transportTaskName -ErrorAction SilentlyContinue}else{$null})
-$wake=$null
-try{$wake=Ensure-H3Awake}catch{$wake=[ordered]@{ok=$false;wakeAttempted=$false;online=$false;error=$_.Exception.Message}}
-$probe=$null
-if($wake -and [bool]$wake.online){try{$probe=Invoke-H3ReadOnlyProbe}catch{$probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}}else{$probe=[pscustomobject]@{ok=$false;classification='H3_OFFLINE_AFTER_WAKE';error=$(if($wake){$wake.error}else{'wake-state-missing'});mutation='NONE'}}
-$v5=$null
-try{$v5=Invoke-GuardedRecoveryV5 $probe $v4 $carrier}catch{$v5=[pscustomobject]@{ok=$false;status='v5-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
-$v6=$null
-try{$v6=Invoke-GuardedRecoveryV6 $probe $v5 $carrier}catch{$v6=[pscustomobject]@{ok=$false;status='v6-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
-
-$out=[ordered]@{
-  schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true
-  source='windows-main';controlPlane='github';jobId=$jobId;syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
-  wake=$wake;activationV3=$v3;activationV4=$v4
-  recoveryV5MarkerExists=(Test-Path -LiteralPath $v5Marker -PathType Leaf);recoveryV5=$v5
-  recoveryV6MarkerExists=(Test-Path -LiteralPath $v6Marker -PathType Leaf);recoveryV6=$v6
-  carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrier
-  transportTaskExists=($null -ne $transportTask);transportTaskState=$(if($transportTask){[string]$transportTask.State}else{'missing'})
-  transportTaskLastRunTime=$(if($transportInfo -and $transportInfo.LastRunTime -gt [datetime]'2000-01-01'){$transportInfo.LastRunTime.ToString('o')}else{$null})
-  transportTaskLastTaskResult=$(if($transportInfo){[int]$transportInfo.LastTaskResult}else{$null})
-  h3Probe=$probe
-  modelReplay35B=$false
-  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if(($v6 -and [string]$v6.status -eq 'recovery-bootstrap-started') -or ($v5 -and [string]$v5.status -eq 'recovery-bootstrap-started')){$true}else{$false})
-  modelActionPerformedByDiagnosticProbe=$false
-  observedAt=(Get-Date -Format o)
-}
-$json=$out|ConvertTo-Json -Depth 35
-foreach($target in @([pscustomobject]@{Root=$sharedDiagRoot;Path=$sharedDiagPath},[pscustomobject]@{Root=$termDiagRoot;Path=$termDiagPath})){
-  try{if(Test-Path -LiteralPath $target.Root -PathType Container){[IO.File]::WriteAllText($target.Path,$json,$utf8)}}catch{}
-}
-Write-Output ($out|ConvertTo-Json -Depth 35 -Compress)
-){
-    return [ordered]@{ok=$false;status='invalid-synced-sha';jobId=$jobId;mutation='NONE'}
+  if($SyncedSha -notmatch '^[0-9a-fA-F]{40}$'){
+    return [ordered]@{ok=$false;status='invalid-synced-sha';jobId=$jobId;mutation='NONE';modelReplay35B=$false}
   }
   if([string]$SyncedSha -eq [string]$V5.syncedSha){
-    return [ordered]@{ok=$true;status='waiting-for-new-source-sha';jobId=$jobId;mutation='NONE';modelReplay35B=$false}
+    return [ordered]@{ok=$true;status='waiting-for-new-source-sha';jobId=$jobId;mutation='NONE';modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}
   }
 
   $bootstrap=Join-Path $PSScriptRoot 'Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1'
   if(-not(Test-Path -LiteralPath $bootstrap -PathType Leaf)){
-    return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;mutation='NONE'}
+    return [ordered]@{ok=$false;status='bootstrap-missing';jobId=$jobId;path=$bootstrap;mutation='NONE';modelReplay35B=$false}
   }
 
   $armed=[ordered]@{
-    ok=$true;status='armed';jobId=$jobId;marker=$v6Marker;syncedSha=$SyncedSha
-    modelReplay35B=$false;ridgeOnlyIfUnattempted=$true
+    ok=$true
+    status='armed'
+    jobId=$jobId
+    marker=$v6Marker
+    syncedSha=$SyncedSha
+    modelReplay35B=$false
+    ridgeOnlyIfUnattempted=$true
     priorV5Sha=[string]$V5.syncedSha
     priorCarrierStatus=[string]$Carrier.status
     authoritativeProof=[ordered]@{
@@ -319,10 +288,15 @@ Write-Output ($out|ConvertTo-Json -Depth 35 -Compress)
     }
     armedAt=(Get-Date -Format o)
   }
-  Write-SafeJson $v6Marker $armed
 
+  Write-SafeJson $v6Marker $armed
   try{
-    $bootstrapArgs=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$bootstrap,'-ExpectedSha',$SyncedSha,'-JobId',$jobId)
+    $bootstrapArgs=@(
+      '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
+      '-File',$bootstrap,
+      '-ExpectedSha',$SyncedSha,
+      '-JobId',$jobId
+    )
     $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $bootstrapArgs -WindowStyle Hidden -PassThru
     $armed.status='recovery-bootstrap-started'
     $armed.bootstrapPid=[int]$p.Id
@@ -350,19 +324,22 @@ $probe=$null
 if($wake -and [bool]$wake.online){try{$probe=Invoke-H3ReadOnlyProbe}catch{$probe=[pscustomobject]@{ok=$false;classification='H3_READONLY_PROBE_EXCEPTION';error=$_.Exception.Message;mutation='NONE'}}}else{$probe=[pscustomobject]@{ok=$false;classification='H3_OFFLINE_AFTER_WAKE';error=$(if($wake){$wake.error}else{'wake-state-missing'});mutation='NONE'}}
 $v5=$null
 try{$v5=Invoke-GuardedRecoveryV5 $probe $v4 $carrier}catch{$v5=[pscustomobject]@{ok=$false;status='v5-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
+$v6=$null
+try{$v6=Invoke-GuardedRecoveryV6 $probe $v5 $carrier}catch{$v6=[pscustomobject]@{ok=$false;status='v6-rearm-exception';error=$_.Exception.Message;modelReplay35B=$false;ridgeOnlyIfUnattempted=$true}}
 
 $out=[ordered]@{
   schema=1;purpose='EMERGENCY_DIAGNOSTIC_AND_GUARDED_RECOVERY_REARM';diagnosticReadOnly=$true
   source='windows-main';controlPlane='github';jobId=$jobId;syncedSha=$(if($SyncedSha){$SyncedSha}else{$null})
   wake=$wake;activationV3=$v3;activationV4=$v4
   recoveryV5MarkerExists=(Test-Path -LiteralPath $v5Marker -PathType Leaf);recoveryV5=$v5
+  recoveryV6MarkerExists=(Test-Path -LiteralPath $v6Marker -PathType Leaf);recoveryV6=$v6
   carrierResultExists=(Test-Path -LiteralPath $carrierResult -PathType Leaf);carrierResult=$carrier
   transportTaskExists=($null -ne $transportTask);transportTaskState=$(if($transportTask){[string]$transportTask.State}else{'missing'})
   transportTaskLastRunTime=$(if($transportInfo -and $transportInfo.LastRunTime -gt [datetime]'2000-01-01'){$transportInfo.LastRunTime.ToString('o')}else{$null})
   transportTaskLastTaskResult=$(if($transportInfo){[int]$transportInfo.LastTaskResult}else{$null})
   h3Probe=$probe
   modelReplay35B=$false
-  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if($v5 -and [string]$v5.status -eq 'recovery-bootstrap-started'){$true}else{$false})
+  ridgeCallAuthorizedOnlyByAuthoritativeH3UnattemptedProof=$(if($v6 -and [string]$v6.status -eq 'recovery-bootstrap-started'){$true}else{$false})
   modelActionPerformedByDiagnosticProbe=$false
   observedAt=(Get-Date -Format o)
 }
