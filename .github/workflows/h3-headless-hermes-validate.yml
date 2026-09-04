@@ -1,0 +1,74 @@
+name: Validate H3 Headless Hermes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/h3-headless/Run-H3-Hermes-Headless.ps1'
+      - 'afz-openai-agent/h3-headless/Install-H3-Hermes-Headless.ps1'
+      - '.github/workflows/h3-headless-hermes-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @(
+            'afz-openai-agent\h3-headless\Run-H3-Hermes-Headless.ps1',
+            'afz-openai-agent\h3-headless\Install-H3-Hermes-Headless.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+            if(@($errors).Count){$errors|Format-List|Out-String|Write-Error;throw "Parse failed: $p"}
+            Write-Output "PARSE_PASS=$p"
+          }
+
+      - name: Enforce runner boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $c=Get-Content 'afz-openai-agent\h3-headless\Run-H3-Hermes-Headless.ps1' -Raw
+          foreach($needle in @(
+            "HERMES_HOME='C:\Users\Faiz\AppData\Local\hermes'",
+            "[Environment]::MachineName",
+            "auth status openai-codex",
+            "http://127.0.0.1:11434/api/tags",
+            "gateway status",
+            "gateway run"
+          )){if(-not $c.Contains($needle)){throw "Missing runner invariant: $needle"}}
+          foreach($forbidden in @(
+            'auth logout','config set','auth remove','auth reset','ollama pull',
+            '0.0.0.0:11434','AutoAdminLogon','DefaultPassword'
+          )){if($c.Contains($forbidden)){throw "Forbidden runner operation: $forbidden"}}
+          'RUNNER_BOUNDARIES=PASS'
+
+      - name: Enforce installer boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $c=Get-Content 'afz-openai-agent\h3-headless\Install-H3-Hermes-Headless.ps1' -Raw
+          foreach($needle in @(
+            "ValidateSet('Audit','Activate','Rollback')",
+            "AFZ H3 Hermes Headless Gateway",
+            "New-ScheduledTaskTrigger -AtStartup",
+            "New-ScheduledTaskPrincipal -UserId 'SYSTEM'",
+            "LogonType ServiceAccount",
+            "RunLevel Highest",
+            "9d9eea1b7618",
+            "openai-codex",
+            "loginRequired=$false"
+          )){if(-not $c.Contains($needle)){throw "Missing installer invariant: $needle"}}
+          foreach($forbidden in @(
+            'config.yaml','auth logout','auth remove','auth reset','ollama pull',
+            'AutoAdminLogon','DefaultPassword','Remove-LocalUser'
+          )){if($c.Contains($forbidden)){throw "Forbidden installer operation: $forbidden"}}
+          'INSTALLER_BOUNDARIES=PASS'
