@@ -1,0 +1,57 @@
+name: HP Envy To Windows-main Recovery Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-to-windowsmain-recovery-probe.yml'
+      - '.github/hpenvy-to-windowsmain-recovery-probe.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Windows-main from HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.71.26.69
+          remote_script=$(cat <<'REMOTE'
+          set +e
+          echo "HP_HOST=$(hostname)"
+          echo "HP_TIME=$(date -Is)"
+          echo '=== WINDOWS MAIN TAILSCALE ==='
+          tailscale ping --timeout=5s --c=2 100.70.25.8 || true
+          for host in 100.70.25.8 192.168.50.94; do
+            echo "=== HOST=$host ==="
+            ping -c 1 -W 2 "$host" || true
+            for p in 22 445 3389 5985 5986 8787 8790 8796 8797; do
+              if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+                echo "TCP_${host}_${p}=OPEN"
+              else
+                echo "TCP_${host}_${p}=CLOSED_OR_FILTERED"
+              fi
+            done
+          done
+          echo '=== WINDOWS OPS STATUS ==='
+          curl -sS --connect-timeout 3 --max-time 10 http://100.70.25.8:8790/api/status || true
+          echo
+          echo '=== PI WAKE SERVICE ROOT ==='
+          curl -sS --connect-timeout 3 --max-time 10 http://100.91.50.9:8087/ || true
+          echo
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | base64 -w0)
+          timeout 120s tailscale ssh coolyo@100.71.26.69 "bash -lc \"echo '$encoded' | base64 -d | bash\""
