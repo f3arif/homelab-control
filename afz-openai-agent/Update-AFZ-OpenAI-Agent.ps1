@@ -135,6 +135,17 @@ try{
   if($ExpectedSha -and $remoteSha -ne $ExpectedSha){throw "Agent source sync returned unexpected remoteSha: actual=$remoteSha expected=$ExpectedSha"}
   $changed=[bool]$syncResult.changed
 
+# RADIOHILAL_GIT_TRACKING_REPAIR_POSTSYNC_HOOK_V1
+  # Bootstrap the private RadioHilal checkout out of stale remote-tracking refs.
+  # The helper is fixed-target and fail-closed: clean checkout, approved origin,
+  # fast-forward only, backup ref before main movement, no live service mutation.
+  $radioHilalGitRepairRunner=Join-Path $InstallRoot 'afz-openai-agent\Repair-RadioHilal-GitTracking.ps1'
+  if(Test-Path -LiteralPath $radioHilalGitRepairRunner -PathType Leaf){
+    try{
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $radioHilalGitRepairRunner -InstallRoot $InstallRoot *> $null
+    }catch{}
+  }
+
 # RADIOHILAL_GITHUB_API_DEPLOY_POSTSYNC_HOOK_V1
   # Fixed-target exact-SHA RadioHilal deployment. The helper is fail-closed,
   # requires a successful BuildApi validation for the exact RadioHilal main SHA,
