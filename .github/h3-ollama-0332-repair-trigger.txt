@@ -1,0 +1,1 @@
+Trigger H3 Ollama 0.33.2 corruption repair on 2026-09-04.
