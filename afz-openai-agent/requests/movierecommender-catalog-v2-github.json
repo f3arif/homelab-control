@@ -2,7 +2,7 @@
   "schema": 1,
   "project": "movierecommender",
   "action": "catalog-v2-github",
-  "job_id": "movierecommender-catalog-v2-github-20260903-r1",
+  "job_id": "movierecommender-catalog-v2-github-20260903-r2",
   "status": "active",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
