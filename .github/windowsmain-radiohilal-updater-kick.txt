@@ -1,0 +1,6 @@
+purpose=force-existing-windows-main-system-updater
+reason=movierecommender-r4-existing-job-acceptance
+movie_job_id=movierecommender-catalog-v2-github-20260903-r4
+requested_source=73a7061c70f33a93327ce41a706a7c0bdaeaf62f
+no_new_movie_job=true
+requested_at=2026-09-03T23:22:00-04:00
