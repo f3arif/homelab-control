@@ -1,0 +1,82 @@
+name: MovieRecommender Catalog V2 R3 Patch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/movierecommender-catalog-v2-r3-patch-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: movierecommender-catalog-v2-r3-patch
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch Hindi discovery ID retention and bump request to r3
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          runner = Path('afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1')
+          text = runner.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  "    '    # AFZ_HINDI_TARGETED_DISCOVERY_V1',\n    '    for p in range(1,min(6,MAX_PAGES)+1):',",
+                  "    '    # AFZ_HINDI_TARGETED_DISCOVERY_V2',\n    '    hindi_ids=set()',\n    '    for p in range(1,min(6,MAX_PAGES)+1):',"
+              ),
+              (
+                  "    '                if tid: pool[int(tid)]=x',",
+                  "    '                if tid: hindi_ids.add(int(tid)); pool[int(tid)]=x',"
+              ),
+              (
+                  "  $digitalReplacement=$digitalLine+$nl+\"                if olang=='hi': cats['hindi_bollywood'].append((dr['dt'],m))\"",
+                  "  $digitalReplacement=$digitalLine+$nl+\"                if olang=='hi' or int(tid) in hindi_ids: cats['hindi_bollywood'].append((dr['dt'],m))\""
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'runner patch shape mismatch count={count} old={old!r}')
+              text = text.replace(old, new, 1)
+          runner.write_text(text, encoding='utf-8', newline='\n')
+
+          req_path = Path('afz-openai-agent/requests/movierecommender-catalog-v2-github.json')
+          req = json.loads(req_path.read_text(encoding='utf-8'))
+          req['job_id'] = 'movierecommender-catalog-v2-github-20260903-r3'
+          req['diagnostic'] = 'retain Hindi targeted-discovery TMDB IDs through detail enrichment'
+          req_path.write_text(json.dumps(req, indent=2) + '\n', encoding='utf-8')
+
+      - name: Validate expected r3 markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "AFZ_HINDI_TARGETED_DISCOVERY_V2" afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1
+          grep -F "hindi_ids.add(int(tid))" afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1
+          grep -F "olang=='hi' or int(tid) in hindi_ids" afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1
+          grep -F "movierecommender-catalog-v2-github-20260903-r3" afz-openai-agent/requests/movierecommender-catalog-v2-github.json
+
+      - name: Commit exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add afz-openai-agent/Invoke-MovieRecommender-CatalogV2-GitHub.ps1 afz-openai-agent/requests/movierecommender-catalog-v2-github.json
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix MovieRecommender Hindi catalog retention r3"
+          git push origin HEAD:main
