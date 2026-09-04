@@ -53,6 +53,10 @@ function Write-ProspectStore {
 function Get-ProspectProperty {
   param($Object,[string]$Name,$Default=$null)
   if ($null -eq $Object) { return $Default }
+  if ($Object -is [System.Collections.IDictionary]) {
+    if ($Object.Contains($Name)) { return $Object[$Name] }
+    return $Default
+  }
   $p = $Object.PSObject.Properties[$Name]
   if ($p) { return $p.Value }
   return $Default
