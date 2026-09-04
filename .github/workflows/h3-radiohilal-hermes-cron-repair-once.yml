@@ -45,14 +45,43 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo tailscale set --accept-routes=true || true
           if nc -z -w 3 100.106.186.118 22; then
             echo 'H3_ALREADY_REACHABLE=YES'
             exit 0
           fi
+
           echo 'H3_WAKE_REQUEST=PI'
-          curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3
-          for attempt in $(seq 1 24); do
+          curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3 || echo 'PI_WAKE_UNAVAILABLE=YES'
+
+          echo 'H3_WAKE_REQUEST=DIRECT_WOL'
+          python3 - <<'PY'
+          import socket,time,json
+          mac='4c:ed:fb:3f:b0:9e'
+          m=bytes.fromhex(mac.replace(':',''))
+          packet=b'\xff'*6+m*16
+          targets=['192.168.50.255','255.255.255.255']
+          ports=[9,7]
+          sent=[]
+          for target in targets:
+              for port in ports:
+                  for attempt in range(1,4):
+                      s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                      s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1)
+                      try:
+                          n=s.sendto(packet,(target,port))
+                          sent.append({'target':target,'port':port,'attempt':attempt,'bytes':n})
+                      except Exception as e:
+                          sent.append({'target':target,'port':port,'attempt':attempt,'error':repr(e)})
+                      finally:
+                          s.close()
+                      time.sleep(.15)
+          print(json.dumps({'mac':mac,'packetBytes':len(packet),'attempts':sent},indent=2))
+          PY
+
+          for attempt in $(seq 1 30); do
             echo "wake_attempt=$attempt"
+            tailscale ping --timeout=3s -c 1 100.106.186.118 || true
             if nc -z -w 3 100.106.186.118 22; then
               echo 'H3_SSH_REACHABLE=PASS'
               exit 0
