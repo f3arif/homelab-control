@@ -1,0 +1,52 @@
+name: AFZ Blog Recovery V6 Validate
+# retrigger: v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-blog-recovery-v6-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse recovery PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Publish-AFZBlogRecoveryTransportState.ps1',
+            'afz-openai-agent/Bootstrap-H3-AFZBlog-ModelComparisonRecovery.ps1',
+            'afz-openai-agent/tools/Launch-H3-AFZBlog-ModelComparisonRecovery.ps1',
+            'afz-openai-agent/tools/Recover-H3-AFZBlog-ModelComparison.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){ throw "$file parse errors: $($errors.Message -join '; ')" }
+            Write-Host "PARSE_PASS $file"
+          }
+      - name: Verify V6 safety invariants
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content 'afz-openai-agent/Publish-AFZBlogRecoveryTransportState.ps1' -Raw
+          foreach($needle in @(
+            "activation-v6.json",
+            "modelReplay35B=`$false",
+            "ridgeOnlyIfUnattempted=`$true",
+            "-not [bool]`$Probe.ridge27b.attempted",
+            "-not [bool]`$Probe.ridgeSavedResponseExists",
+            "[bool]`$Probe.ollamaApiReady",
+            "qwen3.8-ridge:27b-16k"
+          )){if(-not $p.Contains($needle)){throw "Missing V6 invariant: $needle"}}
+          $r=Get-Content 'afz-openai-agent/tools/Recover-H3-AFZBlog-ModelComparison.ps1' -Raw
+          if(-not $r.Contains("if(-not [bool]`$secondState.attempted)")){throw 'Recovery Ridge single-flight condition missing'}
+          if(-not $r.Contains("`$secondState.attempted=`$true")){throw 'Recovery does not persist attempted before model call'}
+          Write-Host 'V6_SAFETY_PASS'
