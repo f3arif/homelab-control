@@ -1,0 +1,57 @@
+name: RemoteOps Stale Recovery Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/AFZ-RemoteOps-OneShot.ps1'
+      - 'afz-openai-agent/requests/afz-remoteops-start.json'
+      - '.github/workflows/remoteops-stale-recover-validate.yml'
+  push:
+    branches:
+      - ops/remoteops-stale-recover-20260904
+    paths:
+      - 'afz-openai-agent/AFZ-RemoteOps-OneShot.ps1'
+      - 'afz-openai-agent/requests/afz-remoteops-start.json'
+      - '.github/workflows/remoteops-stale-recover-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $tokens=$null;$errors=$null
+          $path='afz-openai-agent\AFZ-RemoteOps-OneShot.ps1'
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ($errors.Message -join '; ')}
+      - name: Verify narrow recovery contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $text=Get-Content 'afz-openai-agent\AFZ-RemoteOps-OneShot.ps1' -Raw
+          foreach($needle in @(
+            "remoteops-recover-stale-only",
+            "Get-HeartbeatAgeSeconds",
+            "staleThresholdSeconds=180",
+            "Stop-ScheduledTask -TaskName `$taskName",
+            "Start-ScheduledTask -TaskName `$taskName",
+            "unrelatedHooksInvoked=`$false",
+            "radioHilalServicesTouched=`$false"
+          )){if(-not $text.Contains($needle)){throw "Missing recovery contract: $needle"}}
+          $req=Get-Content 'afz-openai-agent\requests\afz-remoteops-start.json' -Raw | ConvertFrom-Json
+          if($req.phase -ne 'remoteops-recover-stale-only'){throw 'Request phase mismatch'}
+          if($req.taskName -ne 'AFZ Remote Ops'){throw 'Task name mismatch'}
+          $start=$text.IndexOf("if(`$phase -eq 'remoteops-recover-stale-only')")
+          $end=$text.IndexOf('# Legacy/default startup phase.',$start)
+          if($start -lt 0 -or $end -le $start){throw 'Could not isolate recovery phase'}
+          $body=$text.Substring($start,$end-$start)
+          foreach($forbidden in @('RadioHilal.Api','RadioHilal.Frontend','Invoke-H3','Invoke-HPEnvy','Invoke-FamilyPtt','Set-Service','Restart-Service','Remove-Item -Recurse')){
+            if($body.Contains($forbidden)){throw "Forbidden unrelated mutation in recovery phase: $forbidden"}
+          }
