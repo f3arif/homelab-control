@@ -131,6 +131,7 @@ try{
   }
 
   foreach($ps1 in @(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter '*.ps1' -ErrorAction SilentlyContinue)){
+    if($ps1.Name -eq 'Sync-AFZ-AgentFromGitHub-Core.ps1'){continue}
     try{
       $text=Get-Content -LiteralPath $ps1.FullName -Raw
       $fixed=$text.Replace('[Security.Cryptography.ProtectedData]','[System.Security.Cryptography.ProtectedData]').Replace('[Security.Cryptography.DataProtectionScope]','[System.Security.Cryptography.DataProtectionScope]')
