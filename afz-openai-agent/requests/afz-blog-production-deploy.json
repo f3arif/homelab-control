@@ -1,8 +1,8 @@
 {
-  "schema": 1,
-  "id": "afz-blog-production-deploy-a223b14b-r2",
+  "schema": 2,
+  "id": "afz-blog-production-deploy-a223b14b-r3-external-db",
   "status": "HOLD",
-  "action": "deploy-validated-main",
+  "action": "deploy-validated-main-external-db",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
   "production_root": "C:\\docker\\afz-blog-manager",
@@ -16,5 +16,6 @@
   "allow_schema_or_migration_change": false,
   "allow_website_publish": false,
   "rollback_on_failure": true,
-  "allow_database_untrack_migration": true
+  "require_external_database_verified": true,
+  "require_checkout_runtime_database_absent": true
 }
