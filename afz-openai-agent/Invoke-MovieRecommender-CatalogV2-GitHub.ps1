@@ -82,13 +82,58 @@ function Find-Gh{
   }
   return $null
 }
+function Find-Git{
+  $c=Get-Command git.exe -ErrorAction SilentlyContinue|Select-Object -First 1
+  if($c){
+    if($c.Source){return [string]$c.Source}
+    if($c.Path){return [string]$c.Path}
+  }
+  foreach($p in @('C:\Program Files\Git\cmd\git.exe','C:\Program Files\Git\bin\git.exe')){
+    if(Test-Path -LiteralPath $p -PathType Leaf){return $p}
+  }
+  return $null
+}
+function Try-PublishGitPush($Object){
+  $git=Find-Git
+  if(-not $git){return [ordered]@{ok=$false;status='git-missing'}}
+  $tmp=Join-Path $env:TEMP ('afz-movie-git-return-'+[guid]::NewGuid().ToString('N'))
+  try{
+    $clone=Invoke-Native -File $git -ArgumentList @('clone','--quiet','--single-branch','--branch',$resultBranch,('https://github.com/'+$resultRepo+'.git'),$tmp) -TimeoutSec 90 -WorkingDirectory $env:TEMP
+    if($clone.Code -ne 0){return [ordered]@{ok=$false;status='git-clone-failed';exit=$clone.Code}}
+    $target=Join-Path $tmp ($resultRepoPath.Replace('/','\'))
+    $parent=Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $parent|Out-Null
+    [IO.File]::WriteAllText($target,($Object|ConvertTo-Json -Depth 30 -Compress),$utf8)
+    foreach($args in @(
+      @('-C',$tmp,'config','user.name','windows-main'),
+      @('-C',$tmp,'config','user.email','windows-main@afz.local'),
+      @('-C',$tmp,'add','--',$resultRepoPath)
+    )){
+      $x=Invoke-Native -File $git -ArgumentList $args -TimeoutSec 30 -WorkingDirectory $tmp
+      if($x.Code -ne 0){return [ordered]@{ok=$false;status='git-prepare-failed';exit=$x.Code}}
+    }
+    $diff=Invoke-Native -File $git -ArgumentList @('-C',$tmp,'diff','--cached','--quiet') -TimeoutSec 30 -WorkingDirectory $tmp
+    if($diff.Code -eq 0){return [ordered]@{ok=$true;status='published-no-change';branch=$resultBranch;path=$resultRepoPath}}
+    $commit=Invoke-Native -File $git -ArgumentList @('-C',$tmp,'commit','-m','windows-main MovieRecommender catalog v2 result') -TimeoutSec 60 -WorkingDirectory $tmp
+    if($commit.Code -ne 0){return [ordered]@{ok=$false;status='git-commit-failed';exit=$commit.Code}}
+    $push=Invoke-Native -File $git -ArgumentList @('-C',$tmp,'push','origin',('HEAD:'+$resultBranch)) -TimeoutSec 90 -WorkingDirectory $tmp
+    if($push.Code -ne 0){return [ordered]@{ok=$false;status='git-push-failed';exit=$push.Code}}
+    return [ordered]@{ok=$true;status='published-git-push';branch=$resultBranch;path=$resultRepoPath}
+  }catch{
+    return [ordered]@{ok=$false;status='git-publisher-exception';error=$_.Exception.Message}
+  }finally{
+    if(Test-Path -LiteralPath $tmp -PathType Container){Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue}
+  }
+}
 function Try-PublishGithub($Object){
   try{
     $gh=Find-Gh
-    if(-not $gh){return [ordered]@{ok=$false;status='gh-missing'}}
+    if(-not $gh){return Try-PublishGitPush $Object}
     $perm=Invoke-Native -File $gh -ArgumentList @('api',("repos/"+$resultRepo),'--jq','.permissions.push') -TimeoutSec 30 -WorkingDirectory $projectRoot
     if($perm.Code -ne 0 -or $perm.Stdout.Trim().ToLowerInvariant() -ne 'true'){
-      return [ordered]@{ok=$false;status='gh-auth-or-permission-unavailable';exit=$perm.Code}
+      $fallback=Try-PublishGitPush $Object
+      if([bool]$fallback.ok){return $fallback}
+      return [ordered]@{ok=$false;status='gh-auth-or-permission-unavailable';exit=$perm.Code;gitFallback=$fallback}
     }
     $json=$Object|ConvertTo-Json -Depth 30 -Compress
     $payload=[ordered]@{
@@ -104,7 +149,7 @@ function Try-PublishGithub($Object){
       [IO.File]::WriteAllText($tmp,($payload|ConvertTo-Json -Compress),$utf8)
       $putUrl="repos/"+$resultRepo+"/contents/"+$resultRepoPath
       $put=Invoke-Native -File $gh -ArgumentList @('api',$putUrl,'--method','PUT','--input',$tmp) -TimeoutSec 60 -WorkingDirectory $projectRoot
-      if($put.Code -ne 0){return [ordered]@{ok=$false;status='contents-put-failed';exit=$put.Code}}
+      if($put.Code -ne 0){$fallback=Try-PublishGitPush $Object;if([bool]$fallback.ok){return $fallback};return [ordered]@{ok=$false;status='contents-put-failed';exit=$put.Code;gitFallback=$fallback}}
       return [ordered]@{ok=$true;status='published';branch=$resultBranch;path=$resultRepoPath}
     }finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
   }catch{return [ordered]@{ok=$false;status='publisher-exception';error=$_.Exception.Message}}
