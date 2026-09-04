@@ -1,5 +1,5 @@
 name: AFZ Blog HP Envy Control Hub Probe
-# retrigger: control-hub-http-v2
+# retrigger: windows-main-lan-relay-readonly-20260903T2329
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -44,3 +44,30 @@ jobs:
             if [ -s /tmp/afz-probe-body ]; then head -c 12000 /tmp/afz-probe-body; echo; fi
             if [ -s /tmp/afz-probe-err ]; then cat /tmp/afz-probe-err; fi
           done
+
+      - name: Probe Windows-main LAN from HP Envy relay
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_script=$(cat <<'REMOTE'
+          set +e
+          host=192.168.50.94
+          echo "HP_RELAY_HOST=$(hostname)"
+          echo "WM_LAN_TARGET=$host"
+          ping -c 1 -W 2 "$host" >/tmp/wm-ping 2>&1
+          echo "WM_LAN_PING_EXIT=$?"
+          cat /tmp/wm-ping
+          for p in 22 445 5985 5986 8787 8790 8796 8797; do
+            timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null
+            echo "WM_LAN_TCP_$p=$?"
+          done
+          for path in 8787/api/status 8790/api/status 8790/health 8796/health 8797/health; do
+            code=$(curl -sS --connect-timeout 3 --max-time 6 -o /tmp/wm-body -w '%{http_code}' "http://$host/$path" 2>/tmp/wm-err)
+            rc=$?
+            echo "WM_LAN_HTTP path=$path curl=$rc http=$code"
+            if [ -s /tmp/wm-body ]; then head -c 4000 /tmp/wm-body; echo; fi
+            if [ -s /tmp/wm-err ]; then cat /tmp/wm-err; fi
+          done
+          REMOTE
+          )
+          printf '%s\n' "$remote_script" | tailscale ssh coolyo@100.71.26.69 'bash -s'
