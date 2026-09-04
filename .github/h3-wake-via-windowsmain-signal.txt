@@ -1,0 +1,3 @@
+target=h3
+action=wake-via-windowsmain
+nonce=20260904T1058
