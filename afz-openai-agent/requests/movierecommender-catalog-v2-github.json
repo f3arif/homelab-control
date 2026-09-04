@@ -2,7 +2,7 @@
   "schema": 1,
   "project": "movierecommender",
   "action": "catalog-v2-github",
-  "job_id": "movierecommender-catalog-v2-github-20260903-r2",
+  "job_id": "movierecommender-catalog-v2-github-20260903-r3",
   "status": "active",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
@@ -11,5 +11,6 @@
   "result_branch": "windows-main-results",
   "oneDrive_role": "backup-only",
   "expected_r3_sha256": "29a0fcbd36fd6964fbebd88cc99e7e3de26b48185d0a8fc032ca7d9f58fe821f",
-  "rollback_on_failure": true
+  "rollback_on_failure": true,
+  "diagnostic": "retain Hindi targeted-discovery TMDB IDs through detail enrichment"
 }

@@ -259,7 +259,8 @@ try{
   $hindiLines=@(
     '    start=(datetime.now(timezone.utc)-timedelta(days=540)).date().isoformat()',
     '    end=datetime.now(timezone.utc).date().isoformat()',
-    '    # AFZ_HINDI_TARGETED_DISCOVERY_V1',
+    '    # AFZ_HINDI_TARGETED_DISCOVERY_V2',
+    '    hindi_ids=set()',
     '    for p in range(1,min(6,MAX_PAGES)+1):',
     '        try:',
     "            obj=sget('/discover/movies',{",
@@ -269,7 +270,7 @@ try{
     '            })',
     '            for x in movie_results(obj):',
     "                tid=x.get('id') or x.get('tmdbId')",
-    '                if tid: pool[int(tid)]=x',
+    '                if tid: hindi_ids.add(int(tid)); pool[int(tid)]=x',
     '        except Exception: pass'
   )
   $hindiReplacement=$hindiLines -join $nl
@@ -280,7 +281,7 @@ try{
   $text=Replace-One $text ([regex]::Escape($gidsLine)) $gidsReplacement 'original-language'
 
   $digitalLine="                cats['new_digital'].append((dr['dt'],m))"
-  $digitalReplacement=$digitalLine+$nl+"                if olang=='hi': cats['hindi_bollywood'].append((dr['dt'],m))"
+  $digitalReplacement=$digitalLine+$nl+"                if olang=='hi' or int(tid) in hindi_ids: cats['hindi_bollywood'].append((dr['dt'],m))"
   $text=Replace-One $text ([regex]::Escape($digitalLine)) $digitalReplacement 'hindi-catalog-append'
 
   $blurayOld="                cats['bluray_4k'].append(((premium,pr['dt']),m))"
