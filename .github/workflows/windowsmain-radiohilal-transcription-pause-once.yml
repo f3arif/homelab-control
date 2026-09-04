@@ -7,7 +7,7 @@ on:
       - '.github/windowsmain-radiohilal-transcription-pause-once.txt'
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -19,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
@@ -99,4 +104,22 @@ jobs:
           )
 
           encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
-          timeout 420s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+          set +e
+          result=$(timeout 420s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded" 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$result"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          {
+            printf 'exitCode=%s\n' "$rc"
+            printf '%s\n' "$result"
+          } > .github/windowsmain-radiohilal-transcription-pause-result.txt
+          git add .github/windowsmain-radiohilal-transcription-pause-result.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record Windows-main RadioHilal transcription pause result'
+            git push origin HEAD:main
+          fi
+          exit "$rc"
