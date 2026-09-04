@@ -1,4 +1,5 @@
 name: AFZ Blog HP Envy Relay Probe
+# retrigger: relay probe v1
 
 on:
   push:
