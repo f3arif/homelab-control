@@ -97,10 +97,10 @@ try{
   $broadLead=New-NormalizedProspect $candidate 'batch-3'
   $broadLead.serviceAreas=@('GTA','Southern Ontario')
   $broadLead.excludedLocations=@('Brampton')
-  $broadLead | Add-Member -NotePropertyName exclusionAudit -NotePropertyValue ([pscustomobject]@{
+  Set-ProspectProperty $broadLead 'exclusionAudit' ([pscustomobject]@{
     location='Brampton';status='excluded';evidence='The site advertises GTA and Southern Ontario coverage, which encompasses Brampton.'
     sourceUrls=@('https://example.com/services');checkedAt=(Get-Date -Format o);resolutionPass='deep';modelChoice='sol';model='test-sol'
-  }) -Force
+  })
   $migrationStore=New-ProspectStore;$migrationStore.leads=@($broadLead)
   Assert-True ((Update-ProspectExclusionPolicy $migrationStore) -eq 1) 'legacy broad-area exclusion should be migrated once'
   Assert-True ((Get-ProspectExclusionAuditStatus $broadLead) -eq 'inconclusive') 'broad-area-only legacy exclusion must be reopened for the new Sol check'
@@ -111,10 +111,10 @@ try{
   $explicitLead=New-NormalizedProspect $candidate 'batch-4'
   $explicitLead.serviceAreas=@('Toronto','Brampton')
   $explicitLead.excludedLocations=@('Brampton')
-  $explicitLead | Add-Member -NotePropertyName exclusionAudit -NotePropertyValue ([pscustomobject]@{
+  Set-ProspectProperty $explicitLead 'exclusionAudit' ([pscustomobject]@{
     location='Brampton';status='excluded';evidence='The official service page lists Brampton.'
     sourceUrls=@('https://example.com/brampton-services');checkedAt=(Get-Date -Format o);resolutionPass='deep';modelChoice='sol';model='test-sol'
-  }) -Force
+  })
   $explicitStore=New-ProspectStore;$explicitStore.leads=@($explicitLead)
   Assert-True ((Update-ProspectExclusionPolicy $explicitStore) -eq 1) 'legacy explicit Brampton evidence should receive the new policy marker'
   Assert-True ((Get-ProspectExclusionAuditStatus $explicitLead) -eq 'excluded') 'explicit Brampton service evidence must remain excluded'
