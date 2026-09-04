@@ -10,11 +10,15 @@ function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){thro
 try{
   . (Join-Path $PSScriptRoot 'ProspectEngine.ps1')
   $engineSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ProspectEngine.ps1') -Raw -Encoding UTF8
+  $uiSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'index.html') -Raw -Encoding UTF8
   $agentSource=Get-Content -LiteralPath (Join-Path $AgentRoot 'AFZ-OpenAI-Agent-v2.ps1') -Raw -Encoding UTF8
   Assert-True ($engineSource.Contains("type='web_search_preview'")) 'Responses API research must use the documented web-search preview declaration'
   Assert-True (-not $engineSource.Contains("type='web_search';")) 'legacy web_search plus search_context_size declaration must not return'
   Assert-True ($agentSource.Contains("New-Object System.Text.UTF8Encoding(`$false)")) 'OpenAI JSON must use explicit no-BOM UTF-8 encoding on Windows PowerShell'
   Assert-True ($agentSource.Contains("-Body `$jsonBytes")) 'OpenAI request transport must send the validated UTF-8 byte array'
+  Assert-True ($engineSource.Contains('broad regional coverage alone is allowed')) 'Sol audit prompt must allow broad regional coverage without explicit Brampton evidence'
+  Assert-True ($uiSource.Contains('General GTA, Peel, Southern Ontario, or Ontario-wide coverage is allowed')) 'UI must explain the explicit-evidence exclusion rule'
+  Assert-True (-not $engineSource.Contains('Mail.Send')) 'Prospect Engine must remain draft-only'
   $sol=Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})
   Assert-True ($sol.model -eq 'test-sol' -and $sol.searchContextSize -eq 'high') 'Sol selection should use the configured Sol model'
   $luna=Resolve-ProspectResearchModel ([pscustomobject]@{model='luna'})
@@ -50,6 +54,8 @@ try{
   Assert-True ($null -ne $lead) 'valid official-domain lead should normalize'
   Assert-True ($lead.fitScore -eq 82) 'fit score should be preserved'
   Assert-True (-not (Test-ProspectExcludedLocation $lead @('Brampton'))) 'eligible Toronto prospect should not match the Brampton exclusion'
+  $lead.serviceAreas=@('Greater Toronto Area','Peel Region','Southern Ontario','Ontario-wide')
+  Assert-True (-not (Test-ProspectExcludedLocation $lead @('Brampton'))) 'generic broad regional coverage must not imply Brampton'
   $lead.serviceAreas=@('Toronto','Brampton')
   Assert-True (Test-ProspectExcludedLocation $lead @('Brampton')) 'explicit Brampton service must trigger the hard exclusion'
   $lead.serviceAreas=@('Toronto','Markham')
@@ -63,6 +69,7 @@ try{
   Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'legacy lead must remain draft-blocked until its territory audit is clear'
   Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
   Assert-True ((Get-ProspectExclusionAuditStatus $loaded.leads[0]) -eq 'clear') 'clear territory audit should be persisted on the lead'
+  Assert-True ([int]$loaded.leads[0].exclusionAudit.policyVersion -eq 2) 'territory audit must record the explicit-evidence policy version'
   Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'complete preflight should open draft gate'
   Set-ProspectExclusionAudit $loaded.leads[0] 'inconclusive' 'No finite official service area was published.' @('https://example.com/services') $sol 'deep'
   Assert-True ([string]$loaded.leads[0].exclusionAudit.resolutionPass -eq 'deep') 'deep territory resolution should be recorded on the lead'
@@ -75,8 +82,10 @@ try{
   Assert-True (Test-ProspectExcludedLocation $loaded.leads[0] @('Brampton')) 'excluded territory audit must quarantine the lead'
   Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'excluded territory audit must block Outlook drafts'
   Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
+  Assert-True (-not (@($loaded.leads[0].excludedLocations) -contains 'Brampton')) 'clearing an audit must remove the generated Brampton quarantine marker'
   $candidate.sourceUrls=@('https://example.com/services','https://different.example/projects')
   Assert-True ($null -eq (New-NormalizedProspect $candidate 'batch-2')) 'cross-domain evidence must be rejected'
+  $candidate.sourceUrls=@('https://example.com/services','https://example.com/projects')
   $request=[pscustomobject]@{Headers=@{Origin='https://attacker.example'};Url=[Uri]'http://127.0.0.1:8796/api/prospects/update'}
   $context=[pscustomobject]@{Request=$request}
   Assert-True (-not (Test-ProspectRequestOrigin $context)) 'cross-origin writes must be rejected'
@@ -84,6 +93,31 @@ try{
   Assert-True (Test-ProspectRequestOrigin $context) 'same-origin writes should be accepted'
   $invalidAuditModeRejected=$false;try{Invoke-ProspectExclusionAuditBatch ([pscustomobject]@{model='sol';mode='unsafe-mode'})|Out-Null}catch{$invalidAuditModeRejected=$true}
   Assert-True $invalidAuditModeRejected 'unsupported territory-audit modes must be rejected'
+
+  $broadLead=New-NormalizedProspect $candidate 'batch-3'
+  $broadLead.serviceAreas=@('GTA','Southern Ontario')
+  $broadLead.excludedLocations=@('Brampton')
+  $broadLead | Add-Member -NotePropertyName exclusionAudit -NotePropertyValue ([pscustomobject]@{
+    location='Brampton';status='excluded';evidence='The site advertises GTA and Southern Ontario coverage, which encompasses Brampton.'
+    sourceUrls=@('https://example.com/services');checkedAt=(Get-Date -Format o);resolutionPass='deep';modelChoice='sol';model='test-sol'
+  }) -Force
+  $migrationStore=New-ProspectStore;$migrationStore.leads=@($broadLead)
+  Assert-True ((Update-ProspectExclusionPolicy $migrationStore) -eq 1) 'legacy broad-area exclusion should be migrated once'
+  Assert-True ((Get-ProspectExclusionAuditStatus $broadLead) -eq 'inconclusive') 'broad-area-only legacy exclusion must be reopened for the new Sol check'
+  Assert-True ([string]$broadLead.exclusionAudit.resolutionPass -eq 'policy-v2-pending') 'reopened broad-area lead must be queued for policy-v2 resolution'
+  Assert-True (-not (@($broadLead.excludedLocations) -contains 'Brampton')) 'reopened broad-area lead must leave the excluded list'
+  Assert-True ((Update-ProspectExclusionPolicy $migrationStore) -eq 0) 'policy migration must be idempotent'
+
+  $explicitLead=New-NormalizedProspect $candidate 'batch-4'
+  $explicitLead.serviceAreas=@('Toronto','Brampton')
+  $explicitLead.excludedLocations=@('Brampton')
+  $explicitLead | Add-Member -NotePropertyName exclusionAudit -NotePropertyValue ([pscustomobject]@{
+    location='Brampton';status='excluded';evidence='The official service page lists Brampton.'
+    sourceUrls=@('https://example.com/brampton-services');checkedAt=(Get-Date -Format o);resolutionPass='deep';modelChoice='sol';model='test-sol'
+  }) -Force
+  $explicitStore=New-ProspectStore;$explicitStore.leads=@($explicitLead)
+  Assert-True ((Update-ProspectExclusionPolicy $explicitStore) -eq 1) 'legacy explicit Brampton evidence should receive the new policy marker'
+  Assert-True ((Get-ProspectExclusionAuditStatus $explicitLead) -eq 'excluded') 'explicit Brampton service evidence must remain excluded'
   Write-Host 'AFZ Prospect Engine tests: PASS'
 }finally{
   Remove-Item -LiteralPath $StateRoot -Recurse -Force -ErrorAction SilentlyContinue
