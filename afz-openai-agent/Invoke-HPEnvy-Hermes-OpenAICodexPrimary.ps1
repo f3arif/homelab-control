@@ -85,7 +85,7 @@ printf '%s\n' '===== HP ENVY CODEX AUTHLIST LOCAL READONLY END ====='
       $script=$script -replace "`r`n","`n"
       [IO.File]::WriteAllText($taskPath,$script,(New-Object Text.UTF8Encoding($false)))
     }
-    $o=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_AUTHLIST_QUEUED_HPREMOTEWORKER';authVerified=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;worker='hpenvy';queueTask=$taskId;executionIdentity='SYSTEM';time=(Get-Date -Format o)}
+    $o=[ordered]@{schema=1;requestId=$id;classification='HP_HERMES_CODEX_AUTHLIST_QUEUED_HPREMOTEWORKER';authVerified=$false;configuredProvider=$null;configuredModel=$null;contextLength=$null;baseUrlPresent=$false;providerSwitched=$false;generationStarted=$false;gatewayStarted=$false;secretValuesEmitted=$false;worker='hpenvy';queueTask=$taskId;executionIdentity='SYSTEM';time=(Get-Date -Format o)}
     Write-Output ($o|ConvertTo-Json -Depth 8 -Compress)
     exit 0
   }
