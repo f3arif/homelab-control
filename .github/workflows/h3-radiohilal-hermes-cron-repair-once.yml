@@ -79,6 +79,31 @@ jobs:
           print(json.dumps({'mac':mac,'packetBytes':len(packet),'attempts':sent},indent=2))
           PY
 
+          echo 'H3_WAKE_REQUEST=WINDOWS_MAIN_RELAY'
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+          $mac='4C-ED-FB-3F-B0-9E'
+          $broadcast='192.168.50.255'
+          $m=[byte[]](($mac -split '[:-]') | ForEach-Object {[Convert]::ToByte($_,16)})
+          $packet=New-Object byte[] 102
+          0..5 | ForEach-Object {$packet[$_]=0xFF}
+          for($i=0;$i -lt 16;$i++){[Array]::Copy($m,0,$packet,6+($i*6),6)}
+          $udp=New-Object Net.Sockets.UdpClient
+          $udp.EnableBroadcast=$true
+          foreach($port in @(9,7)){
+            1..3 | ForEach-Object {
+              [void]$udp.Send($packet,$packet.Length,$broadcast,$port)
+              Start-Sleep -Milliseconds 150
+            }
+          }
+          $udp.Close()
+          Write-Output "WOL_SENT=TRUE MAC=$mac BROADCAST=$broadcast"
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 40s tailscale ssh Faiz@100.70.25.8 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded" || echo 'WINDOWS_MAIN_WOL_RELAY_UNAVAILABLE=YES'
+
           for attempt in $(seq 1 30); do
             echo "wake_attempt=$attempt"
             tailscale ping --timeout=3s -c 1 100.106.186.118 || true
