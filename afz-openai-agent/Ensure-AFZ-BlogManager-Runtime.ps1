@@ -25,10 +25,11 @@ function Invoke-NativeGit([string[]]$ArgumentVector,[switch]$AllowFailure){
   $gitCommand=Get-Command git.exe -ErrorAction Stop | Select-Object -First 1
   $gitPath=$(if($gitCommand.Source){[string]$gitCommand.Source}else{[string]$gitCommand.Path})
   if([string]::IsNullOrWhiteSpace($gitPath)){throw 'Unable to resolve git.exe path'}
+  $effectiveArgs=@('-c',('safe.directory='+$root))+$ArgumentVector
   $old=$ErrorActionPreference
-  try{$ErrorActionPreference='Continue';$lines=@(& $gitPath @ArgumentVector 2>&1|ForEach-Object{[string]$_});$code=$LASTEXITCODE}
+  try{$ErrorActionPreference='Continue';$lines=@(& $gitPath @effectiveArgs 2>&1|ForEach-Object{[string]$_});$code=$LASTEXITCODE}
   finally{$ErrorActionPreference=$old}
-  if(-not $AllowFailure -and $code -ne 0){throw ('git failed exit='+$code)}
+  if(-not $AllowFailure -and $code -ne 0){throw ('git failed exit='+$code+' command='+($ArgumentVector -join ' ')+' output='+(($lines|Select-Object -Last 3) -join ' | '))}
   [pscustomobject]@{exit=[int]$code;lines=$lines;text=($lines -join "`n")}
 }
 function Get-ListenerCount{
