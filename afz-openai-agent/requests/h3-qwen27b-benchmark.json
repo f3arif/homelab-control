@@ -1,7 +1,12 @@
 {
   "schema": 1,
   "project": "qwen38-27b-website-benchmark",
-  "job_id": "qwen27b-website-20260827-i02",
-  "start_iteration": 2,
-  "max_iterations": 5
+  "job_id": "radiohilal-hermes-cron-rh1-20260904T1126",
+  "start_iteration": 1,
+  "max_iterations": 1,
+  "maintenance_action": "radiohilal-hermes-cron-rh1",
+  "maintenance_target_host": "DESKTOP-H3R6CQN",
+  "maintenance_cron_job_id": "9d9eea1b7618",
+  "allow_global_hermes_config_change": false,
+  "fail_closed_pause_on_test_failure": true
 }
