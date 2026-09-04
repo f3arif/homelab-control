@@ -1,5 +1,5 @@
 name: AFZ Blog HP Envy Control Hub Probe
-# retrigger: control-hub-http-v1
+# retrigger: control-hub-http-v2
 
 on:
   push:
