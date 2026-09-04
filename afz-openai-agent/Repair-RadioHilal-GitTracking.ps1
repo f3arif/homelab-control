@@ -98,7 +98,10 @@ try{
   $branch=Git-Text $repo @('symbolic-ref','--quiet','--short','HEAD')
   if($branch -ne $mainBranch){throw "MAIN_BRANCH_MISMATCH actual=$branch"}
   $dirty=Git-Text $repo @('status','--porcelain=v1')
-  if($dirty){throw 'MAIN_CHECKOUT_DIRTY'}
+  $dirtyLines=@()
+  if($dirty){$dirtyLines=@($dirty -split '\r?\n' | Where-Object {$_})}
+  $mainWorktreeDirty=(@($dirtyLines).Count -gt 0)
+  $mainDirtyCount=@($dirtyLines).Count
 
   $before=Git-Text $repo @('rev-parse','HEAD')
   # Prefer the existing interactive GitHub bridge as the private-repo trust boundary.
@@ -129,11 +132,24 @@ try{
     (Test-Ancestor $repo $requiredMain $trackedMainLocal)
   )
   if($bridgeFresh -and $localRefsCoherent){
+    $bridgeClassification=$(if($mainWorktreeDirty){'RADIOHILAL_GIT_TRACKING_CURRENT_DIRTY_PRESERVED_VIA_USER_BRIDGE'}else{'RADIOHILAL_GIT_TRACKING_CURRENT_VIA_USER_BRIDGE'})
     Publish ([ordered]@{
-      schema=1;project='radiohilal';status='completed';classification='RADIOHILAL_GIT_TRACKING_CURRENT_VIA_USER_BRIDGE';retryable=$false
+      schema=1;project='radiohilal';status='completed';classification=$bridgeClassification;retryable=$false
       host=$expectedComputer;mainBefore=$before;remoteMain=$trackedMainLocal;mainAfter=$before
       remoteOps=$trackedOpsLocal;opsStatus='current';requiredMain=$requiredMain
+      mainWorktreeDirty=$mainWorktreeDirty;mainDirtyCount=$mainDirtyCount;mainWorktreeMutationAllowed=$false
       bridgeTaskState=$(if($task){[string]$task.State}else{'Missing'});bridgeLastResult=[int64]$bridgeInfo.LastTaskResult;bridgeAgeSeconds=$bridgeAgeSeconds
+      privateGitNetworkFromSystem=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)
+    })
+    exit 0
+  }
+
+  if($mainWorktreeDirty){
+    Publish ([ordered]@{
+      schema=1;project='radiohilal';status='safe-stop';classification='RADIOHILAL_MAIN_DIRTY_PRESERVED_BRIDGE_NOT_READY';retryable=$true
+      host=$expectedComputer;mainBefore=$before;remoteMain=$trackedMainLocal;remoteOps=$trackedOpsLocal;requiredMain=$requiredMain
+      mainWorktreeDirty=$true;mainDirtyCount=$mainDirtyCount;mainWorktreeMutationAllowed=$false
+      bridgeTaskState=$(if($task){[string]$task.State}else{'Missing'});bridgeAgeSeconds=$bridgeAgeSeconds
       privateGitNetworkFromSystem=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)
     })
     exit 0
