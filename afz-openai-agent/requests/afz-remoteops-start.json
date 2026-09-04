@@ -1,6 +1,6 @@
 {
-  "id": "afz-remoteops-hpenvy-hermes-codex-primary-20260901-r1",
+  "id": "afz-remoteops-radiohilal-hermes-smoke-20260904-r1",
   "taskName": "AFZ Remote Ops",
-  "phase": "hpenvy-hermes-codex-primary-only",
-  "purpose": "Verify the already-completed HP Envy Hermes OpenAI Codex OAuth login and configure only the HP Envy Hermes primary provider as openai-codex with model gpt-5.6-luna. Do not regenerate OAuth, start the AFZ Remote Ops task, invoke unrelated H3/Tailscale/Surfshark/FamilyPTT hooks, start a gateway, run model generation, expose Ollama, or modify firewall/network configuration."
+  "phase": "remoteops-recover-stale-only",
+  "purpose": "Recover only the pre-existing AFZ Remote Ops task when its windows-main heartbeat is stale so the queued RadioHilal Hermes Codex OAuth smoke job can run. Do not invoke unrelated H3/Tailscale/Surfshark/FamilyPTT/Hermes hooks and do not touch RadioHilal API/frontend/transcription."
 }
