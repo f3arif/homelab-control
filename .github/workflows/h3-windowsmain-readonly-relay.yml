@@ -1,0 +1,45 @@
+name: H3 to Windows-main Readonly Relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-windowsmain-readonly-relay.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Windows-main from H3 without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          h3='100.106.186.118'
+          tailscale ping --timeout=5s -c 2 "$h3"
+
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          [ordered]@{
+            host=$env:COMPUTERNAME
+            time=(Get-Date -Format o)
+            windowsMainPing=(Test-Connection -ComputerName '100.70.25.8' -Count 1 -Quiet -ErrorAction SilentlyContinue)
+            port3002=(Test-NetConnection -ComputerName '100.70.25.8' -Port 3002 -InformationLevel Quiet -WarningAction SilentlyContinue)
+            port8790=(Test-NetConnection -ComputerName '100.70.25.8' -Port 8790 -InformationLevel Quiet -WarningAction SilentlyContinue)
+            port22=(Test-NetConnection -ComputerName '100.70.25.8' -Port 22 -InformationLevel Quiet -WarningAction SilentlyContinue)
+          } | ConvertTo-Json -Compress
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 180s tailscale ssh "Faiz@${h3}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
