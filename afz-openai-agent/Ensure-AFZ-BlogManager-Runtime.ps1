@@ -9,6 +9,9 @@ $taskName='AFZ Blog Manager'
 $root='C:\docker\afz-blog-manager'
 $startScript=Join-Path $root 'scripts\start-blog-manager-3015.ps1'
 $buildId=Join-Path $root '.next\BUILD_ID'
+$controlRoot='C:\AFZ\homelab-control'
+$dbExternalizeRunner=Join-Path $controlRoot 'afz-openai-agent\Invoke-AFZBlog-DatabaseExternalize.ps1'
+$dbExternalizeRequest=Join-Path $controlRoot 'afz-openai-agent\requests\afz-blog-database-externalize.json'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-blog-runtime-ensure'
 $statePath=Join-Path $stateRoot 'latest.json'
 $mirror='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\AFZ-BLOG-RUNTIME-ENSURE-LATEST.txt'
@@ -16,10 +19,10 @@ $utf8=New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
 
 function Save-Result($Object){
-  $json=$Object|ConvertTo-Json -Depth 16
+  $json=$Object|ConvertTo-Json -Depth 24
   [IO.File]::WriteAllText($statePath,$json,$utf8)
   try{[IO.File]::WriteAllText($mirror,$json,$utf8)}catch{}
-  Write-Output ($Object|ConvertTo-Json -Depth 16 -Compress)
+  Write-Output ($Object|ConvertTo-Json -Depth 24 -Compress)
 }
 function Invoke-NativeGit([string[]]$ArgumentVector,[switch]$AllowFailure){
   $gitCommand=Get-Command git.exe -ErrorAction Stop | Select-Object -First 1
@@ -76,6 +79,7 @@ $result=[ordered]@{
   root=$root
   taskCreated=$false
   serviceStarted=$false
+  databaseExternalization=$null
   sourceModified=$false
   gitMetadataModified=$false
   websitePublished=$false
@@ -119,6 +123,21 @@ try{
     $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force|Out-Null
     $result.taskCreated=$true
+  }
+
+  # AFZ_BLOG_DATABASE_EXTERNALIZE_RUNTIME_HOOK_V1
+  # Fixed request + SYSTEM-only helper. Failure is recorded by both helpers and
+  # never weakens the independent production deploy DB/schema block.
+  if((Test-Path -LiteralPath $dbExternalizeRunner -PathType Leaf) -and (Test-Path -LiteralPath $dbExternalizeRequest -PathType Leaf)){
+    try{
+      $raw=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $dbExternalizeRunner -InstallRoot $controlRoot -RequestPath $dbExternalizeRequest 2>&1|ForEach-Object{[string]$_})
+      $code=$LASTEXITCODE
+      $parsed=$null
+      foreach($line in @($raw|Where-Object{-not [string]::IsNullOrWhiteSpace($_)})){try{$parsed=$line|ConvertFrom-Json}catch{}}
+      $result.databaseExternalization=[ordered]@{ok=($code -eq 0 -and $null -ne $parsed -and [bool]$parsed.ok);exit=$code;classification=$(if($parsed){[string]$parsed.classification}else{'NO_JSON'});result=$parsed}
+    }catch{
+      $result.databaseExternalization=[ordered]@{ok=$false;classification='HOOK_EXCEPTION';error=$_.Exception.Message}
+    }
   }
 
   if($beforeListeners -eq 0 -and $result.taskCreated){
