@@ -65,7 +65,7 @@ jobs:
             "RunLevel Highest",
             "9d9eea1b7618",
             "openai-codex",
-            "loginRequired=$false"
+            'loginRequired=$false'
           )){if(-not $c.Contains($needle)){throw "Missing installer invariant: $needle"}}
           foreach($forbidden in @(
             'config.yaml','auth logout','auth remove','auth reset','ollama pull',
