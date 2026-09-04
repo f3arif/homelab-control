@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "project": "radiohilal",
+  "action": "deploy-github-api-exact",
+  "job_id": "radiohilal-api-deploy-b511c0ad-20260904-r1",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "repository": "f3arif/RadioHilal",
+  "expected_main_commit": "b511c0adcf7925e315f02cfba2906e18009a8e1e",
+  "validation_job_id": "000-radiohilal-build-api-b511c0ad-q7",
+  "rollback_on_failure": true,
+  "allow_config_overwrite": false,
+  "allow_database_mutation": false
+}
