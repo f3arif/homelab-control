@@ -6,6 +6,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+$env:GIT_TERMINAL_PROMPT='0'
+$env:GCM_INTERACTIVE='Never'
 
 $expectedComputer='DESKTOP-10SKF0M'
 $projectRoot='C:\docker\movie-recommender'
