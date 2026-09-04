@@ -24,7 +24,7 @@ jobs:
   relay:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 14
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - name: Dispatch main-branch repair and wait
@@ -55,7 +55,7 @@ jobs:
   repair:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -64,96 +64,35 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Verify H3 reachability
+      - name: Sync windows-main to exact source
+        env:
+          AFZ_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          tailscale ping --timeout=5s -c 2 100.106.186.118
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 5 --max-time 20 -H 'Content-Type: application/json' -X POST --data "$payload" http://100.70.25.8:8797/api/push-deploy
+          for attempt in $(seq 1 30); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 5 --max-time 12 http://100.70.25.8:8797/health 2>/dev/null); then
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              if [ "$commit" = "${AFZ_SHA,,}" ]; then
+                echo "WINDOWS_MAIN_EXACT_SHA=$commit"
+                exit 0
+              fi
+              echo "attempt=$attempt current=$commit expected=${AFZ_SHA,,}"
+            fi
+            sleep 5
+          done
+          echo 'windows-main did not reach exact source SHA' >&2
+          exit 1
 
-      - name: Repair Ollama application and prove 35B generation
+      - name: Repair H3 Ollama through windows-main
+        env:
+          AFZ_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          encoded=$(python - <<'PY'
-          import base64
-          script = r'''
-          $ErrorActionPreference='Stop'
-          $ProgressPreference='SilentlyContinue'
-          if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "wrong host: $env:COMPUTERNAME"}
-          $setup=Join-Path $env:TEMP 'OllamaSetup-0.33.2.exe'
-          $url='https://github.com/ollama/ollama/releases/download/v0.33.2/OllamaSetup.exe'
-          $expected='5A91C1CF92480E28A84CD99E437219BE719DF5A50D5FA0FD5FE5B5C4A122F506'
-          $installRoot='C:\Users\Faiz\AppData\Local\Programs\Ollama'
-          $ollama=Join-Path $installRoot 'ollama.exe'
-          $server=Join-Path $installRoot 'lib\ollama\llama-server.exe'
-          $modelDir='C:\Users\Faiz\.ollama\models'
-          if(-not(Test-Path $modelDir -PathType Container)){throw 'model store missing'}
-          $before=Get-ChildItem $modelDir -File -Recurse -ErrorAction Stop | Measure-Object Length -Sum
-          if($before.Count -lt 1 -or $before.Sum -lt 1000000000){throw 'model store unexpectedly empty'}
-          if(-not(Test-Path $setup -PathType Leaf)){Invoke-WebRequest -Uri $url -OutFile $setup -UseBasicParsing}
-          $hash=(Get-FileHash $setup -Algorithm SHA256).Hash.ToUpperInvariant()
-          if($hash -ne $expected){
-            Remove-Item $setup -Force -ErrorAction SilentlyContinue
-            Invoke-WebRequest -Uri $url -OutFile $setup -UseBasicParsing
-            $hash=(Get-FileHash $setup -Algorithm SHA256).Hash.ToUpperInvariant()
-          }
-          if($hash -ne $expected){throw "installer hash mismatch: $hash"}
-          try{Stop-ScheduledTask -TaskName 'AFZ H3 Ollama Server' -ErrorAction SilentlyContinue}catch{}
-          Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-            ($_.Name -in @('ollama.exe','ollama app.exe')) -and
-            ([string]$_.ExecutablePath -like 'C:\Users\Faiz\AppData\Local\Programs\Ollama\*')
-          } | ForEach-Object { try{Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}catch{} }
-          Start-Sleep -Seconds 2
-          $p=Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/CLOSEAPPLICATIONS','/FORCECLOSEAPPLICATIONS') -Wait -PassThru
-          Start-Sleep -Seconds 5
-          if(-not(Test-Path $ollama -PathType Leaf)){throw 'ollama.exe missing after reinstall'}
-          if(-not(Test-Path $server -PathType Leaf)){throw 'llama-server.exe missing after reinstall'}
-          try{Start-ScheduledTask -TaskName 'AFZ H3 Ollama Server' -ErrorAction Stop}catch{
-            $a=New-ScheduledTaskAction -Execute $ollama -Argument 'serve' -WorkingDirectory $installRoot
-            $tr=New-ScheduledTaskTrigger -AtStartup
-            $st=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-            $pr=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Highest
-            Register-ScheduledTask -TaskName 'AFZ H3 Ollama Server' -Action $a -Trigger $tr -Settings $st -Principal $pr -Force | Out-Null
-            Start-ScheduledTask -TaskName 'AFZ H3 Ollama Server'
-          }
-          $models=$null
-          for($i=0;$i -lt 30;$i++){
-            Start-Sleep -Seconds 2
-            try{$models=Invoke-RestMethod -Uri 'http://127.0.0.1:11434/v1/models' -TimeoutSec 5;break}catch{}
-          }
-          if($null -eq $models){throw 'Ollama endpoint did not recover'}
-          $ids=@($models.data | ForEach-Object{[string]$_.id})
-          if($ids -notcontains 'qwen3.6:35b-a3b'){throw '35B model missing after repair'}
-          $payload=[ordered]@{model='qwen3.6:35b-a3b';messages=@(@{role='user';content='Reply exactly OK'});stream=$false;think=$false;options=@{num_predict=8}} | ConvertTo-Json -Depth 8 -Compress
-          $gen=Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:11434/api/chat' -ContentType 'application/json' -Body $payload -TimeoutSec 240
-          $reply=[string]$gen.message.content
-          if([string]::IsNullOrWhiteSpace($reply)){throw '35B generation returned empty content'}
-          $after=Get-ChildItem $modelDir -File -Recurse -ErrorAction Stop | Measure-Object Length -Sum
-          if($after.Count -ne $before.Count -or $after.Sum -ne $before.Sum){throw 'model store changed during application repair'}
-          $o=[ordered]@{
-            ok=$true
-            host=$env:COMPUTERNAME
-            installerSha256=$hash
-            installerExit=$p.ExitCode
-            llamaServerPresent=(Test-Path $server -PathType Leaf)
-            endpointReachable=$true
-            model35BListed=$true
-            generationReply=$reply
-            modelFilesBefore=$before.Count
-            modelBytesBefore=$before.Sum
-            modelFilesAfter=$after.Count
-            modelBytesAfter=$after.Sum
-            completedAt=(Get-Date -Format o)
-          }
-          Write-Output ('H3_OLLAMA_REPAIR_RESULT='+($o|ConvertTo-Json -Compress))
-          '''
-          print(base64.b64encode(script.encode('utf-16le')).decode())
-          PY
-          )
-          timeout 600s tailscale ssh Faiz@100.106.186.118 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
-
-      - name: Confirm Hermes gateway still responds
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout 30s tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "& $env:LOCALAPPDATA\hermes\bin\hermes.exe gateway status"'
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s","action":"apply"}' "$AFZ_SHA")
+          response=$(curl --silent --show-error --fail-with-body --connect-timeout 5 --max-time 690 -H 'Content-Type: application/json' -X POST --data "$payload" http://100.70.25.8:8797/api/h3-ollama-repair0332)
+          printf '%s\n' "$response"
+          python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is True; assert d.get("classification")=="H3_OLLAMA_0332_REPAIR_VERIFIED"; r=d["result"]; assert r.get("llamaServerPresent") is True; assert r.get("endpointReachable") is True; assert r.get("model35BListed") is True; assert str(r.get("generationReply") or "").strip(); assert r.get("modelFilesBefore")==r.get("modelFilesAfter"); assert r.get("modelBytesBefore")==r.get("modelBytesAfter"); assert "running" in str(r.get("gatewayStatus") or "").lower(); print("H3_OLLAMA_REPAIR_ACCEPTANCE=PASS")' <<<"$response"
