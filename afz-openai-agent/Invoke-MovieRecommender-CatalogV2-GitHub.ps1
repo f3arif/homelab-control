@@ -151,7 +151,7 @@ function Validate-Live([bool]$RequireV2){
       if($name -notmatch '^[\x20-\x7E]+$'){throw "MANIFEST_NAME_NON_ASCII id=$([string]$d.id)"}
     }
   }
-  $today=(Get-Date).Date
+  $today=[DateTime]::UtcNow.Date
   $cutoff=$today.AddDays(-180)
   $metrics=[ordered]@{}
   foreach($id in $expected){
