@@ -21,9 +21,12 @@ function Save-Result($Object){
   try{[IO.File]::WriteAllText($mirror,$json,$utf8)}catch{}
   Write-Output ($Object|ConvertTo-Json -Depth 16 -Compress)
 }
-function Git([string[]]$ArgumentVector,[switch]$AllowFailure){
+function Invoke-NativeGit([string[]]$ArgumentVector,[switch]$AllowFailure){
+  $gitCommand=Get-Command git.exe -ErrorAction Stop | Select-Object -First 1
+  $gitPath=$(if($gitCommand.Source){[string]$gitCommand.Source}else{[string]$gitCommand.Path})
+  if([string]::IsNullOrWhiteSpace($gitPath)){throw 'Unable to resolve git.exe path'}
   $old=$ErrorActionPreference
-  try{$ErrorActionPreference='Continue';$lines=@(& git @ArgumentVector 2>&1|ForEach-Object{[string]$_});$code=$LASTEXITCODE}
+  try{$ErrorActionPreference='Continue';$lines=@(& $gitPath @ArgumentVector 2>&1|ForEach-Object{[string]$_});$code=$LASTEXITCODE}
   finally{$ErrorActionPreference=$old}
   if(-not $AllowFailure -and $code -ne 0){throw ('git failed exit='+$code)}
   [pscustomobject]@{exit=[int]$code;lines=$lines;text=($lines -join "`n")}
@@ -60,10 +63,10 @@ try{
   if(-not(Test-Path -LiteralPath $buildId -PathType Leaf)){throw 'Production .next BUILD_ID missing; refusing runtime start without successful build'}
   if(-not(Get-Command git.exe -ErrorAction SilentlyContinue)){throw 'git.exe missing'}
 
-  $head=(Git @('-C',$root,'rev-parse','HEAD')).text.Trim().ToLowerInvariant()
-  $branch=(Git @('-C',$root,'branch','--show-current')).text.Trim()
-  $origin=(Git @('-C',$root,'remote','get-url','origin')).text.Trim()
-  $dirty=@((Git @('-C',$root,'status','--porcelain=v1','-uall')).lines|Where-Object{$_}).Count
+  $head=(Invoke-NativeGit @('-C',$root,'rev-parse','HEAD')).text.Trim().ToLowerInvariant()
+  $branch=(Invoke-NativeGit @('-C',$root,'branch','--show-current')).text.Trim()
+  $origin=(Invoke-NativeGit @('-C',$root,'remote','get-url','origin')).text.Trim()
+  $dirty=@((Invoke-NativeGit @('-C',$root,'status','--porcelain=v1','-uall')).lines|Where-Object{$_}).Count
   $result.git=[ordered]@{head=$head;branch=$branch;origin=$origin;dirtyCount=$dirty}
   if($branch -ne 'main' -or $origin.TrimEnd('/').ToLowerInvariant() -ne 'https://github.com/f3arif/afz-blog.git' -or $dirty -ne 0){
     $result.classification='AFZ_BLOG_RUNTIME_ENSURE_BLOCKED_GIT_STATE';$result.time=(Get-Date -Format o);Save-Result $result;exit 40
