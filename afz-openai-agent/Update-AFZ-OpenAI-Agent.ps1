@@ -187,6 +187,18 @@ if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
 }
 
+
+# Exact-SHA AFZ Blog production deployment is request-gated, one-shot,
+# SYSTEM-only, and rollback-protected. The helper blocks database/schema
+# changes and website publication, and mirrors its own terminal result.
+$blogProductionDeploy=Join-Path $InstallRoot 'afz-openai-agent\Invoke-AFZBlog-ProductionDeploy.ps1'
+$blogProductionDeployRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-blog-production-deploy.json'
+if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path -LiteralPath $blogProductionDeployRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogProductionDeploy -InstallRoot $InstallRoot -RequestPath $blogProductionDeployRequest *> $null
+  }catch{}
+}
+
   $allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
   $wrapper=Join-Path $InstallRoot 'afz-openai-agent\Start-AFZ-OpenAI-Agent.ps1'
   $control=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Agent-Control.ps1'
