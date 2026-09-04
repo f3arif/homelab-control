@@ -99,8 +99,7 @@ jobs:
           if($repo){
             $candidate=Join-Path (Split-Path -Parent $repo) ((Split-Path -Leaf $repo)+'.github-bridge.log')
             if(Test-Path -LiteralPath $candidate -PathType Leaf){
-              try{$bridgeLog=(Get-Content -LiteralPath $candidate -Tail 25 -ErrorAction Stop) -join "
-"}catch{}
+              try{$bridgeLog=(Get-Content -LiteralPath $candidate -Tail 25 -ErrorAction Stop) -join [Environment]::NewLine}catch{}
             }
           }
 
