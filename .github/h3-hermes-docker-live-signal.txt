@@ -1,1 +1,2 @@
-h3-hermes-docker-live-20260904-radiohilal-cron-reasoning-low-readonly
+probe=radiohilal-hermes-live
+nonce=20260904T1128
