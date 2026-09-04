@@ -62,7 +62,7 @@ function Run-Npm([string[]]$ArgumentVector,[string]$LogPath){
   $err=Join-Path $env:TEMP ('afz-blog-npm-'+[guid]::NewGuid().ToString('n')+'.err')
   try{
     $p=Start-Process -FilePath $exe -ArgumentList $ArgumentVector -WorkingDirectory $expectedRoot -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
-    if(-not $p.WaitForExit(240000)){
+    if(-not $p.WaitForExit(600000)){
       try{$p.Kill()}catch{}
       throw ('npm timed out: '+($ArgumentVector -join ' '))
     }
@@ -175,6 +175,8 @@ $dependencyRefreshNeeded=$false
 $dbBefore=$null
 $envBefore=$null
 $envLocalBefore=$null
+$dbBackupDir=$null
+$databaseUntrackMigration=$false
 
 try{
   if($env:COMPUTERNAME -ne $expectedHost){throw ('Wrong host: '+$env:COMPUTERNAME)}
@@ -206,7 +208,7 @@ try{
   }
   if([string]$request.target -ne 'windows-main' -or [string]$request.host -ne $expectedHost){throw 'Request target mismatch.'}
   if([string]$request.production_root -ne $expectedRoot){throw 'Request production root mismatch.'}
-  if(-not [bool]$request.require_clean -or -not [bool]$request.require_fast_forward -or -not [bool]$request.allow_build -or -not [bool]$request.allow_service_restart -or [bool]$request.allow_database_mutation -or [bool]$request.allow_schema_or_migration_change -or [bool]$request.allow_website_publish -or -not [bool]$request.rollback_on_failure){
+  if(-not [bool]$request.require_clean -or -not [bool]$request.require_fast_forward -or -not [bool]$request.allow_build -or -not [bool]$request.allow_service_restart -or [bool]$request.allow_database_mutation -or [bool]$request.allow_schema_or_migration_change -or [bool]$request.allow_website_publish -or -not [bool]$request.rollback_on_failure -or -not [bool]$request.allow_database_untrack_migration){
     throw 'Request safety policy mismatch.'
   }
 
@@ -269,7 +271,6 @@ try{
   $changed=@((Run-Git @('-C',$expectedRoot,'diff','--name-only',$beforeHead,$expectedSha)).lines|Where-Object{$_})
   $result.changedFiles=$changed
   $blocked=@($changed|Where-Object{
-    $_ -eq 'data/afz-blog.db' -or
     $_ -eq 'prisma/schema.prisma' -or
     $_ -like 'prisma/migrations/*' -or
     $_ -match '(^|/)\.env($|\.)'
@@ -281,6 +282,334 @@ try{
     Save-Result $result $statePath
     exit 40
   }
+
+  $dbStatus=@((Run-Git @('-C',$expectedRoot,'diff','--name-status',$beforeHead,$expectedSha,'--','data/afz-blog.db')).lines|Where-Object{$_})
+  $dbRemovalProven=(@($dbStatus|Where-Object{$_ -match '^D\s+data/afz-blog[.]db  $result.dependencyRefreshNeeded=$dependencyRefreshNeeded
+
+  $dbPath=Join-Path $expectedRoot 'data\afz-blog.db'
+  $envPath=Join-Path $expectedRoot '.env'
+  $envLocalPath=Join-Path $expectedRoot '.env.local'
+  $dbBefore=Hash-IfPresent $dbPath
+  if([string]::IsNullOrWhiteSpace([string]$dbBefore)){throw 'Production runtime database is missing before deployment.'}
+  $envBefore=Hash-IfPresent $envPath
+  $envLocalBefore=Hash-IfPresent $envLocalPath
+  $result.integrityBefore=[ordered]@{
+    databaseSha256=$dbBefore
+    envSha256=$envBefore
+    envLocalSha256=$envLocalBefore
+    envPresent=(Test-Path -LiteralPath $envPath -PathType Leaf)
+    envLocalPresent=(Test-Path -LiteralPath $envLocalPath -PathType Leaf)
+  }
+
+  Stop-BlogRuntime
+  $serviceWasStopped=$true
+
+  $dbQuiesced=Hash-IfPresent $dbPath
+  if([string]::IsNullOrWhiteSpace([string]$dbQuiesced)){throw 'Production runtime database disappeared while quiescing the service.'}
+  if([string]$dbQuiesced -ne [string]$dbBefore){
+    $result.databaseChangedDuringQuiesce=$true
+    $dbBefore=$dbQuiesced
+    $result.integrityBefore.databaseSha256=$dbBefore
+  }else{
+    $result.databaseChangedDuringQuiesce=$false
+  }
+
+  $backupRoot='C:\ProgramData\AFZ\AFZ-Blog\deploy-backups'
+  $dbBackupDir=Join-Path $backupRoot ('a223-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
+  New-Item -ItemType Directory -Force -Path $dbBackupDir | Out-Null
+  $dbBackupPath=Join-Path $dbBackupDir 'afz-blog.db'
+  Copy-Item -LiteralPath $dbPath -Destination $dbBackupPath -Force
+  foreach($suffix in @('-wal','-shm','-journal')){
+    $src=$dbPath+$suffix
+    if(Test-Path -LiteralPath $src -PathType Leaf){Copy-Item -LiteralPath $src -Destination (Join-Path $dbBackupDir ('afz-blog.db'+$suffix)) -Force}
+  }
+  $dbBackupHash=Hash-IfPresent $dbBackupPath
+  if([string]$dbBackupHash -ne [string]$dbBefore){throw 'External runtime database backup hash mismatch.'}
+  $result.databaseBackup=[ordered]@{directory=$dbBackupDir;databaseSha256=$dbBackupHash;outsideGitRoot=$true}
+
+  $merge=Run-Git @('-C',$expectedRoot,'merge','--ff-only','origin/main') -AllowFailure
+  if([int]$merge.exit -ne 0){throw ('Fast-forward merge failed: '+(($merge.lines|Select-Object -Last 6)-join ' | '))}
+  $mutationStarted=$true
+  $result.productionModified=$true
+
+  $afterMerge=Git-Snapshot
+  if([string]$afterMerge.head -ne $expectedSha -or [string]$afterMerge.branch -ne 'main' -or [int]$afterMerge.dirtyCount -ne 0){
+    throw 'Post-fast-forward Git verification failed.'
+  }
+
+  New-Item -ItemType Directory -Force -Path (Split-Path $dbPath -Parent) | Out-Null
+  Copy-Item -LiteralPath (Join-Path $dbBackupDir 'afz-blog.db') -Destination $dbPath -Force
+  foreach($suffix in @('-wal','-shm','-journal')){
+    $dst=$dbPath+$suffix
+    Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+    $src=Join-Path $dbBackupDir ('afz-blog.db'+$suffix)
+    if(Test-Path -LiteralPath $src -PathType Leaf){Copy-Item -LiteralPath $src -Destination $dst -Force}
+  }
+  $restoredDbHash=Hash-IfPresent $dbPath
+  if([string]$restoredDbHash -ne [string]$dbBefore){throw 'Restored runtime database hash mismatch after Git fast-forward.'}
+  $ignored=Run-Git @('-C',$expectedRoot,'check-ignore','--quiet','data/afz-blog.db') -AllowFailure
+  if([int]$ignored.exit -ne 0){throw 'Restored runtime database is not ignored by target Git policy.'}
+  $afterRestore=Git-Snapshot
+  if([int]$afterRestore.dirtyCount -ne 0){throw 'Production checkout became dirty after restoring ignored runtime database.'}
+  $result.databaseRestoredAsIgnoredRuntimeData=$true
+
+  if($dependencyRefreshNeeded){
+    $installLog=Join-Path $runtimeRoot ('npm-ci-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+    [void](Run-Npm @('ci') $installLog)
+    $result.installLog=$installLog
+  }
+
+  $buildLog=Join-Path $runtimeRoot ('build-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+  [void](Run-Npm @('run','build') $buildLog)
+  $result.buildLog=$buildLog
+
+  $health=Start-BlogRuntime
+  $result.serviceRestarted=$true
+  if(-not [bool]$health.ok){throw ('Production health failed after deploy: '+[string]$health.httpError)}
+
+  $dbAfter=Hash-IfPresent $dbPath
+  $envAfter=Hash-IfPresent $envPath
+  $envLocalAfter=Hash-IfPresent $envLocalPath
+  $integrityOk=([string]$dbBefore -eq [string]$dbAfter -and [string]$envBefore -eq [string]$envAfter -and [string]$envLocalBefore -eq [string]$envLocalAfter)
+  $result.integrityAfter=[ordered]@{
+    databaseSha256=$dbAfter
+    envSha256=$envAfter
+    envLocalSha256=$envLocalAfter
+    preserved=$integrityOk
+  }
+  if(-not $integrityOk){throw 'Production database or environment-file hash changed during deployment.'}
+
+  $final=Git-Snapshot
+  if([string]$final.head -ne $expectedSha -or [int]$final.dirtyCount -ne 0){throw 'Final production Git verification failed.'}
+
+  $result.ok=$true
+  $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_COMPLETED'
+  $result.after=[ordered]@{git=$final;health=$health}
+  $result.productionDatabaseModified=$false
+  $result.databasePreserved=([string]$dbAfter -eq [string]$dbBefore)
+  $result.environmentModified=$false
+  $result.schemaMigrationExecuted=$false
+  $result.websitePublished=$false
+  $result.time=(Get-Date -Format o)
+  Save-Result $result $statePath
+  exit 0
+}catch{
+  $failure=$_.Exception.Message
+  $result.error=$failure
+
+  if($mutationStarted -and $request -and [bool]$request.rollback_on_failure -and $beforeHead -match '^[0-9a-f]{40}$'){
+    $result.rollbackAttempted=$true
+    try{
+      Stop-BlogRuntime
+      [void](Run-Git @('-C',$expectedRoot,'reset','--hard',$beforeHead))
+      if($dbBackupDir -and (Test-Path -LiteralPath (Join-Path $dbBackupDir 'afz-blog.db') -PathType Leaf)){
+        Copy-Item -LiteralPath (Join-Path $dbBackupDir 'afz-blog.db') -Destination (Join-Path $expectedRoot 'data\afz-blog.db') -Force
+        foreach($suffix in @('-wal','-shm','-journal')){
+          $dst=(Join-Path $expectedRoot 'data\afz-blog.db')+$suffix
+          Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+          $src=Join-Path $dbBackupDir ('afz-blog.db'+$suffix)
+          if(Test-Path -LiteralPath $src -PathType Leaf){Copy-Item -LiteralPath $src -Destination $dst -Force}
+        }
+      }
+      if($dependencyRefreshNeeded){
+        $rollbackInstallLog=Join-Path $runtimeRoot ('rollback-npm-ci-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+        [void](Run-Npm @('ci') $rollbackInstallLog)
+        $result.rollbackInstallLog=$rollbackInstallLog
+      }
+      $rollbackBuildLog=Join-Path $runtimeRoot ('rollback-build-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+      [void](Run-Npm @('run','build') $rollbackBuildLog)
+      $result.rollbackBuildLog=$rollbackBuildLog
+      $rollbackHealth=Start-BlogRuntime
+      $result.rollbackHealthy=[bool]$rollbackHealth.ok
+      $result.rollbackHealth=$rollbackHealth
+      $dbRollback=Hash-IfPresent (Join-Path $expectedRoot 'data\afz-blog.db')
+      $envRollback=Hash-IfPresent (Join-Path $expectedRoot '.env')
+      $envLocalRollback=Hash-IfPresent (Join-Path $expectedRoot '.env.local')
+      $result.rollbackIntegrityPreserved=([string]$dbBefore -eq [string]$dbRollback -and [string]$envBefore -eq [string]$envRollback -and [string]$envLocalBefore -eq [string]$envLocalRollback)
+      $rolled=Git-Snapshot
+      if([string]$rolled.head -eq $beforeHead -and [int]$rolled.dirtyCount -eq 0 -and [bool]$rollbackHealth.ok -and [bool]$result.rollbackIntegrityPreserved){
+        $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLED_BACK'
+      }else{
+        $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLBACK_FAILED'
+      }
+    }catch{
+      $result.rollbackHealthy=$false
+      $result.rollbackError=$_.Exception.Message
+      $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLBACK_FAILED'
+    }
+  }else{
+    if($result.classification -eq 'STARTING'){$result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_FAILED_PREMUTATION'}
+    if($serviceWasStopped -and -not $mutationStarted){
+      try{
+        $restoreHealth=Start-BlogRuntime
+        $result.premutationServiceRestore=$restoreHealth
+      }catch{}
+    }
+  }
+
+  $result.productionDatabaseModified=$false
+  $result.environmentModified=$false
+  $result.schemaMigrationExecuted=$false
+  $result.websitePublished=$false
+  $result.time=(Get-Date -Format o)
+  if($statePath){
+    Save-Result $result $statePath
+  }else{
+    Write-Output ($result|ConvertTo-Json -Depth 24 -Compress)
+  }
+  exit 20
+}finally{
+  if($lockStream){
+    try{$lockStream.Dispose()}catch{}
+    Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  }
+}
+}).Count -eq 1)
+  if(-not $dbRemovalProven){
+    $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_BLOCKED'
+    $result.blockedReason='Expected target must remove the tracked data/afz-blog.db exactly once.'
+    $result.databaseDiff=$dbStatus
+    $result.time=(Get-Date -Format o)
+    Save-Result $result $statePath
+    exit 40
+  }
+
+  $targetGitIgnore=(Run-Git @('-C',$expectedRoot,'show',($expectedSha+':.gitignore'))).text
+  if($targetGitIgnore -notmatch '(?m)^\*\.db\s*  $result.dependencyRefreshNeeded=$dependencyRefreshNeeded
+
+  $dbPath=Join-Path $expectedRoot 'data\afz-blog.db'
+  $envPath=Join-Path $expectedRoot '.env'
+  $envLocalPath=Join-Path $expectedRoot '.env.local'
+  $dbBefore=Hash-IfPresent $dbPath
+  $envBefore=Hash-IfPresent $envPath
+  $envLocalBefore=Hash-IfPresent $envLocalPath
+  $result.integrityBefore=[ordered]@{
+    databaseSha256=$dbBefore
+    envSha256=$envBefore
+    envLocalSha256=$envLocalBefore
+    envPresent=(Test-Path -LiteralPath $envPath -PathType Leaf)
+    envLocalPresent=(Test-Path -LiteralPath $envLocalPath -PathType Leaf)
+  }
+
+  Stop-BlogRuntime
+  $serviceWasStopped=$true
+
+  $merge=Run-Git @('-C',$expectedRoot,'merge','--ff-only','origin/main') -AllowFailure
+  if([int]$merge.exit -ne 0){throw ('Fast-forward merge failed: '+(($merge.lines|Select-Object -Last 6)-join ' | '))}
+  $mutationStarted=$true
+  $result.productionModified=$true
+
+  $afterMerge=Git-Snapshot
+  if([string]$afterMerge.head -ne $expectedSha -or [string]$afterMerge.branch -ne 'main' -or [int]$afterMerge.dirtyCount -ne 0){
+    throw 'Post-fast-forward Git verification failed.'
+  }
+
+  if($dependencyRefreshNeeded){
+    $installLog=Join-Path $runtimeRoot ('npm-ci-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+    [void](Run-Npm @('ci') $installLog)
+    $result.installLog=$installLog
+  }
+
+  $buildLog=Join-Path $runtimeRoot ('build-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+  [void](Run-Npm @('run','build') $buildLog)
+  $result.buildLog=$buildLog
+
+  $health=Start-BlogRuntime
+  $result.serviceRestarted=$true
+  if(-not [bool]$health.ok){throw ('Production health failed after deploy: '+[string]$health.httpError)}
+
+  $dbAfter=Hash-IfPresent $dbPath
+  $envAfter=Hash-IfPresent $envPath
+  $envLocalAfter=Hash-IfPresent $envLocalPath
+  $integrityOk=([string]$dbBefore -eq [string]$dbAfter -and [string]$envBefore -eq [string]$envAfter -and [string]$envLocalBefore -eq [string]$envLocalAfter)
+  $result.integrityAfter=[ordered]@{
+    databaseSha256=$dbAfter
+    envSha256=$envAfter
+    envLocalSha256=$envLocalAfter
+    preserved=$integrityOk
+  }
+  if(-not $integrityOk){throw 'Production database or environment-file hash changed during deployment.'}
+
+  $final=Git-Snapshot
+  if([string]$final.head -ne $expectedSha -or [int]$final.dirtyCount -ne 0){throw 'Final production Git verification failed.'}
+
+  $result.ok=$true
+  $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_COMPLETED'
+  $result.after=[ordered]@{git=$final;health=$health}
+  $result.productionDatabaseModified=$false
+  $result.websitePublished=$false
+  $result.time=(Get-Date -Format o)
+  Save-Result $result $statePath
+  exit 0
+}catch{
+  $failure=$_.Exception.Message
+  $result.error=$failure
+
+  if($mutationStarted -and $request -and [bool]$request.rollback_on_failure -and $beforeHead -match '^[0-9a-f]{40}$'){
+    $result.rollbackAttempted=$true
+    try{
+      Stop-BlogRuntime
+      [void](Run-Git @('-C',$expectedRoot,'reset','--hard',$beforeHead))
+      if($dependencyRefreshNeeded){
+        $rollbackInstallLog=Join-Path $runtimeRoot ('rollback-npm-ci-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+        [void](Run-Npm @('ci') $rollbackInstallLog)
+        $result.rollbackInstallLog=$rollbackInstallLog
+      }
+      $rollbackBuildLog=Join-Path $runtimeRoot ('rollback-build-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.log')
+      [void](Run-Npm @('run','build') $rollbackBuildLog)
+      $result.rollbackBuildLog=$rollbackBuildLog
+      $rollbackHealth=Start-BlogRuntime
+      $result.rollbackHealthy=[bool]$rollbackHealth.ok
+      $result.rollbackHealth=$rollbackHealth
+      $dbRollback=Hash-IfPresent (Join-Path $expectedRoot 'data\afz-blog.db')
+      $envRollback=Hash-IfPresent (Join-Path $expectedRoot '.env')
+      $envLocalRollback=Hash-IfPresent (Join-Path $expectedRoot '.env.local')
+      $result.rollbackIntegrityPreserved=([string]$dbBefore -eq [string]$dbRollback -and [string]$envBefore -eq [string]$envRollback -and [string]$envLocalBefore -eq [string]$envLocalRollback)
+      $rolled=Git-Snapshot
+      if([string]$rolled.head -eq $beforeHead -and [int]$rolled.dirtyCount -eq 0 -and [bool]$rollbackHealth.ok -and [bool]$result.rollbackIntegrityPreserved){
+        $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLED_BACK'
+      }else{
+        $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLBACK_FAILED'
+      }
+    }catch{
+      $result.rollbackHealthy=$false
+      $result.rollbackError=$_.Exception.Message
+      $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_ROLLBACK_FAILED'
+    }
+  }else{
+    if($result.classification -eq 'STARTING'){$result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_FAILED_PREMUTATION'}
+    if($serviceWasStopped -and -not $mutationStarted){
+      try{
+        $restoreHealth=Start-BlogRuntime
+        $result.premutationServiceRestore=$restoreHealth
+      }catch{}
+    }
+  }
+
+  $result.productionDatabaseModified=$false
+  $result.websitePublished=$false
+  $result.time=(Get-Date -Format o)
+  if($statePath){
+    Save-Result $result $statePath
+  }else{
+    Write-Output ($result|ConvertTo-Json -Depth 24 -Compress)
+  }
+  exit 20
+}finally{
+  if($lockStream){
+    try{$lockStream.Dispose()}catch{}
+    Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  }
+}
+){
+    $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_BLOCKED'
+    $result.blockedReason='Target .gitignore does not ignore *.db; runtime DB preservation refused.'
+    $result.time=(Get-Date -Format o)
+    Save-Result $result $statePath
+    exit 40
+  }
+  $databaseUntrackMigration=$true
+  $result.databaseUntrackMigration=$true
 
   $dependencyRefreshNeeded=(@($changed|Where-Object{$_ -in @('package.json','package-lock.json')}).Count -gt 0)
   $result.dependencyRefreshNeeded=$dependencyRefreshNeeded
