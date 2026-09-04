@@ -1,4 +1,4 @@
-# probe refresh 2026-09-04T10:26-04:00
+# probe refresh 2026-09-04T10:31-04:00 stremio-tailnet
 name: Windows-main Direct Ports Once
 
 on:
@@ -32,14 +32,14 @@ jobs:
           ip route get 192.168.50.94 || true
           for host in 100.70.25.8 192.168.50.94; do
             echo "=== HOST=$host ==="
-            for p in 22 445 5985 5986 8787 8790 8796 8797; do
+            for p in 22 445 5985 5986 8787 8790 8796 8797 18766; do
               if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
                 echo "WM_"$host"_TCP_"$p"=OPEN"
               else
                 echo "WM_"$host"_TCP_"$p"=CLOSED_OR_FILTERED"
               fi
             done
-            for path in 8787/api/status 8790/api/status 8790/health 8796/health 8797/health; do
+            for path in 8787/api/status 8790/api/status 8790/health 8796/health 8797/health 18766/health 18766/manifest.json; do
               echo "GET_BEGIN=http://$host/$path"
               curl --silent --show-error --connect-timeout 3 --max-time 6 --write-out '\nHTTP_CODE=%{http_code}\n' "http://$host/$path" || true
               echo "GET_END=http://$host/$path"
