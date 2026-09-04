@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          for p in 8787 8790 8796 8797; do
+          for p in 3002 8787 8790 8796 8797; do
             if timeout 3 bash -c "</dev/tcp/100.70.25.8/$p" 2>/dev/null; then
               echo "WM_TCP_${p}=OPEN"
             else
@@ -35,6 +35,7 @@ jobs:
             fi
           done
           for target in \
+            'http://100.70.25.8:3002/review' \
             'http://100.70.25.8:8787/api/status' \
             'http://100.70.25.8:8790/api/status' \
             'http://100.70.25.8:8790/health' \
