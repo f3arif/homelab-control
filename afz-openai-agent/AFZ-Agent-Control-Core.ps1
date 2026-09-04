@@ -121,7 +121,7 @@ function Invoke-MovieRecommenderCatalogDirect([string]$Action){
 }
 
 function Invoke-HermesRadioHilalCronAudit {
-  $runner=Join-Path $InstallRoot 'afz-openai-agent\\Invoke-Hermes-RadioHilalCronAudit.ps1'
+  $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Hermes-RadioHilalCronAudit.ps1'
   if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){throw "Hermes RadioHilal cron audit runner missing: $runner"}
   $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -JobId '9d9eea1b7618' 2>&1 | Out-String).Trim()
   $code=$LASTEXITCODE
@@ -213,7 +213,7 @@ try{
       $sha=([string]$req.sha).Trim().ToLowerInvariant()
       $current=([string](Get-Commit)).Trim().ToLowerInvariant()
       if($action -ne 'audit'){Send-Json $ctx 400 @{ok=$false;error='unsupported MovieRecommender catalog action'};continue}
-      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40} -and $ctx.Request.HttpMethod -eq 'POST'){
+      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='HP Envy Surfshark peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
       $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
@@ -245,8 +245,12 @@ try{
 
     if($path -eq '/api/hermes-radiohilal-cron' -and $ctx.Request.HttpMethod -eq 'POST'){
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='Hermes RadioHilal cron audit peer not authorized';client=$ip};continue}
-      $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
-      $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
+      $req=Read-Json $ctx
+      $action=([string]$req.action).Trim().ToLowerInvariant()
+      $repo=[string]$req.repository
+      $ref=[string]$req.ref
+      $sha=([string]$req.sha).Trim().ToLowerInvariant()
+      $current=([string](Get-Commit)).Trim().ToLowerInvariant()
       if($action -ne 'audit'){Send-Json $ctx 400 @{ok=$false;error='unsupported Hermes RadioHilal cron action'};continue}
       if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='HP Envy Surfshark peer not authorized';client=$ip};continue}
