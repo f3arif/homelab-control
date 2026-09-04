@@ -1,5 +1,5 @@
 name: HP Envy Reachability Check Once
-# Read-only relay diagnostics for AFZ control and H3: 2026-09-03
+# Read-only relay diagnostics for AFZ control and H3: 2026-09-03T22:50-04:00
 
 on:
   push:
