@@ -8,7 +8,7 @@ on:
       - '.github/windowsmain-radiohilal-bridge-once.txt'
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -18,8 +18,13 @@ concurrency:
 jobs:
   bridge:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
@@ -27,7 +32,7 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Run RadioHilal bridge once
+      - name: Pause RadioHilal transcription on windows-main
         shell: bash
         run: |
           set -euo pipefail
@@ -38,37 +43,82 @@ jobs:
           $ErrorActionPreference='Stop'
           if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
 
-          $taskName='RadioHilal-GitHub-Bridge'
-          $jobId='000-critical-radiohilal-build-api-033c191d-20260903T2339'
-          $resultPath="C:\AFZ\RadioHilalGit-ops\github-ops\results\$jobId.json"
+          $taskName='AFZ RadioHilal Series Intake'
+          $allowedNames=@('python','pythonw','powershell','pwsh','ffmpeg','whisper-cli','whisper')
+          $stopped=[System.Collections.Generic.List[object]]::new()
 
-          function Wait-Idle([int]$Seconds=360){
-            $deadline=(Get-Date).AddSeconds($Seconds)
-            do{
-              $t=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-              if([string]$t.State -ne 'Running'){return}
-              Start-Sleep -Seconds 2
-            }while((Get-Date)-lt $deadline)
-            throw 'BRIDGE_TIMEOUT'
+          $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $taskBefore=if($null -ne $task){[string]$task.State}else{'NOT_FOUND'}
+          if($null -ne $task -and [string]$task.State -eq 'Running'){
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 750
           }
 
-          Wait-Idle
-          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          Wait-Idle
-
-          if(Test-Path -LiteralPath $resultPath -PathType Leaf){
-            Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8
-          } else {
-            [ordered]@{
-              host=$env:COMPUTERNAME
-              taskState=[string](Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
-              result='missing'
-              resultPath=$resultPath
-              time=(Get-Date -Format o)
-            } | ConvertTo-Json -Compress
-            exit 3
+          $matches=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name=[IO.Path]::GetFileNameWithoutExtension([string]$_.Name)
+            $cmd=[string]$_.CommandLine
+            if([string]::IsNullOrWhiteSpace($cmd)){return $false}
+            if($allowedNames -notcontains $name){return $false}
+            (($cmd -match '(?i)RadioHilal') -and ($cmd -match '(?i)(whisper|faster-whisper|whisperx|transcrib|lecture)'))
+          })
+          foreach($p in $matches | Sort-Object ProcessId -Descending){
+            try{
+              Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction Stop
+              $stopped.Add([pscustomobject]@{pid=[int]$p.ProcessId;name=[string]$p.Name})
+            }catch{}
           }
+
+          Start-Sleep -Seconds 2
+          $remaining=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name=[IO.Path]::GetFileNameWithoutExtension([string]$_.Name)
+            $cmd=[string]$_.CommandLine
+            if([string]::IsNullOrWhiteSpace($cmd)){return $false}
+            if($allowedNames -notcontains $name){return $false}
+            (($cmd -match '(?i)RadioHilal') -and ($cmd -match '(?i)(whisper|faster-whisper|whisperx|transcrib|lecture)'))
+          })
+
+          $taskAfter=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $taskAfterState=if($null -ne $taskAfter){[string]$taskAfter.State}else{'NOT_FOUND'}
+          $resultObj=[ordered]@{
+            host=$env:COMPUTERNAME
+            taskBefore=$taskBefore
+            taskAfter=$taskAfterState
+            schedulerDisabled=$false
+            stoppedCount=$stopped.Count
+            stopped=@($stopped)
+            remainingCount=$remaining.Count
+            apiFrontendChanged=$false
+            restartPolicy='Existing 00:30-07:00 gate plus RAM<80 CPU<85 no-active-Whisper queue-idle gates remain authoritative'
+            time=(Get-Date -Format o)
+          }
+
+          $oneDrive=[string]$env:OneDriveCommercial
+          if([string]::IsNullOrWhiteSpace($oneDrive)){$oneDrive='C:\Users\Faiz\OneDrive - AFZ Engineering Inc'}
+          $resultDir=Join-Path $oneDrive 'AFZ Shared\AFZ Workers\Results'
+          New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
+          $resultObj | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $resultDir 'radiohilal-transcription-pause-github-latest.json') -Encoding UTF8
+          $resultObj | ConvertTo-Json -Depth 6 -Compress
+          if($remaining.Count -ne 0){exit 4}
           REMOTE
           )
+
           encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
-          timeout 540s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+          set +e
+          result=$(timeout 420s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded" 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$result"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          {
+            printf 'exitCode=%s\n' "$rc"
+            printf '%s\n' "$result"
+          } > .github/windowsmain-radiohilal-transcription-pause-result.txt
+          git add .github/windowsmain-radiohilal-transcription-pause-result.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record Windows-main RadioHilal transcription pause result'
+            git push origin HEAD:main
+          fi
+          exit "$rc"
