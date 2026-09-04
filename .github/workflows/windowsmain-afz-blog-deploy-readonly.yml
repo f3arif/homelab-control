@@ -1,0 +1,99 @@
+name: Windows-main AFZ Blog Deploy Readonly Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windowsmain-afz-blog-deploy-readonly.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-afz-blog-deploy-readonly
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Inspect updater and AFZ Blog deployment state without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.70.25.8'
+          tailscale ping --timeout=5s -c 2 "$host"
+
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='SilentlyContinue'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+
+          function ReadText([string]$p,[int]$max=12000){
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null}
+            try{
+              $t=[IO.File]::ReadAllText($p)
+              if($t.Length -gt $max){return $t.Substring($t.Length-$max)}
+              return $t
+            }catch{return $null}
+          }
+          function ReadJson([string]$p){
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null}
+            try{return [IO.File]::ReadAllText($p)|ConvertFrom-Json}catch{return [ordered]@{readError=$_.Exception.Message}}
+          }
+          function Task([string]$name){
+            $t=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+            $i=$null
+            if($t){$i=Get-ScheduledTaskInfo -TaskName $name -ErrorAction SilentlyContinue}
+            [ordered]@{
+              present=[bool]$t
+              state=$(if($t){[string]$t.State}else{$null})
+              lastRun=$(if($i){$i.LastRunTime.ToString('o')}else{$null})
+              lastResult=$(if($i){[int64]$i.LastTaskResult}else{$null})
+              nextRun=$(if($i){$i.NextRunTime.ToString('o')}else{$null})
+            }
+          }
+
+          $root='C:\AFZ\homelab-control'
+          $jobRoot='C:\ProgramData\AFZ\OpenAIAgent'
+          $deployState='C:\ProgramData\AFZ\OpenAIAgent\jobs\afz-blog-production-deploy\afz-blog-production-deploy-07380a73-r1.json'
+          $procs=@()
+          try{
+            $procs=@(
+              Get-CimInstance Win32_Process -ErrorAction Stop |
+                Where-Object{
+                  ([string]$_.Name) -match '(?i)^powershell.exe$' -and
+                  ([string]$_.CommandLine) -match '(?i)(Update-AFZ-OpenAI-Agent|Sync-AFZ-AgentFromGitHub|Invoke-AFZBlog-ProductionDeploy)'
+                } |
+                Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine
+            )
+          }catch{}
+
+          [ordered]@{
+            host=$env:COMPUTERNAME
+            time=(Get-Date -Format o)
+            sourceState=ReadJson (Join-Path $jobRoot 'source-state.json')
+            lastUpdate=ReadJson (Join-Path $jobRoot 'last-update.json')
+            pushWatcherState=ReadJson (Join-Path $jobRoot 'push-watcher.json')
+            pushWatcherLogTail=ReadText (Join-Path $jobRoot 'logs\push-watcher.log') 16000
+            updaterTask=Task 'AFZ OpenAI Agent Updater'
+            pushWatcherTask=Task 'AFZ OpenAI Agent Push Deploy Watcher'
+            helperPresent=(Test-Path -LiteralPath (Join-Path $root 'afz-openai-agent\Invoke-AFZBlog-ProductionDeploy.ps1') -PathType Leaf)
+            requestPresent=(Test-Path -LiteralPath (Join-Path $root 'afz-openai-agent\requests\afz-blog-production-deploy.json') -PathType Leaf)
+            deployState=ReadJson $deployState
+            deployMirrorPresent=(Test-Path -LiteralPath 'C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results\AFZ-BLOG-PRODUCTION-DEPLOY-LATEST.txt' -PathType Leaf)
+            processes=$procs
+          } | ConvertTo-Json -Depth 16 -Compress
+          REMOTE
+          )
+
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 240s tailscale ssh "Faiz@$host" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
