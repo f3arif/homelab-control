@@ -423,8 +423,28 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
     if($restart){try{Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue}catch{};Start-Sleep -Milliseconds 700;Start-ScheduledTask -TaskName $taskName}
     elseif($t.State -ne 'Running'){Start-ScheduledTask -TaskName $taskName}
   }
+  # CONTROL_PARENT_SAFE_REFRESH_V1
+  # Exact-SHA updates may be spawned by the Control service itself. Restarting
+  # that parent task inline can deadlock while Task Scheduler waits for this
+  # child updater to exit. Persist a marker and let the independent fallback
+  # updater perform the restart on its next pass.
+  $controlRefreshMarker=Join-Path $stateRoot 'control-refresh.pending'
+  $controlRefreshPending=(Test-Path -LiteralPath $controlRefreshMarker -PathType Leaf)
+  if($ExpectedSha){
+    if($changed){
+      try{Set-Content -LiteralPath $controlRefreshMarker -Value $remoteSha -Encoding ASCII}catch{}
+      $controlRefreshPending=$true
+    }
+    $controlRestartNow=$false
+  }else{
+    $controlRestartNow=($changed -or $controlRefreshPending)
+  }
+
   Ensure-Running $agentTaskName $changed
-  Ensure-Running $controlTaskName $changed
+  Ensure-Running $controlTaskName $controlRestartNow
+  if((-not $ExpectedSha) -and $controlRestartNow -and (Test-Path -LiteralPath $controlRefreshMarker -PathType Leaf)){
+    Remove-Item -LiteralPath $controlRefreshMarker -Force -ErrorAction SilentlyContinue
+  }
   $pushWatcherRestarted=$false
   if($pushWatcherNeedsRefresh){
     Ensure-Running $pushWatcherTaskName $true
