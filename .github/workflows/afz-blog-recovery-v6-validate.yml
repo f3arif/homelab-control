@@ -1,5 +1,5 @@
 name: AFZ Blog Recovery V6 Validate
-# retrigger: branch-fix-v2
+# retrigger: branch-fix-v3
 
 on:
   push:
@@ -49,6 +49,6 @@ jobs:
             "qwen3.8-ridge:27b-16k"
           )){if(-not $p.Contains($needle)){throw "Missing V6 invariant: $needle"}}
           $r=Get-Content 'afz-openai-agent/tools/Recover-H3-AFZBlog-ModelComparison.ps1' -Raw
-          if(-not $r.Contains("if(-not [bool]`$secondState.attempted)")){throw 'Recovery Ridge single-flight condition missing'}
-          if(-not $r.Contains("`$secondState.attempted=`$true")){throw 'Recovery does not persist attempted before model call'}
+          if(-not $r.Contains("if([bool]`$secondState.attempted)")){throw 'Recovery prior-attempt guard missing'}
+          if(-not $r.Contains("`$states[`$second]=[ordered]@{attempted=`$true;status='running'")){throw 'Recovery does not persist attempted before model call'}
           Write-Host 'V6_SAFETY_PASS'
