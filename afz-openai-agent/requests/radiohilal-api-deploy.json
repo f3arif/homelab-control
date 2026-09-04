@@ -3,7 +3,7 @@
   "project": "radiohilal",
   "action": "deploy-github-api-exact",
   "job_id": "radiohilal-api-deploy-2b247e47-20260904-r8",
-  "status": "active",
+  "status": "inactive",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
   "repository": "f3arif/RadioHilal",
@@ -11,5 +11,6 @@
   "validation_job_id": "000-critical-radiohilal-build-api-2b247e47-gha-20260904T0001",
   "rollback_on_failure": true,
   "allow_config_overwrite": false,
-  "allow_database_mutation": false
+  "allow_database_mutation": false,
+  "note": "Superseded by exact SharePoint worker lane for current RadioHilal main f74d0501d9f4fd65d14a9ca1b83e94a652965b6b; keep inactive to prevent duplicate deployment."
 }
