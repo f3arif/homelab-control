@@ -158,6 +158,59 @@ try{
     }catch{}
   }
 
+# RADIOHILAL_HERMES_CRON_AUDIT_POSTSYNC_HOOK_V1
+  # Read-only fixed-job audit for Hermes cron 9d9eea1b7618. The helper emits
+  # sanitized routing/state only; this hook mirrors that JSON for remote
+  # observability without exposing config.yaml or credential material.
+  $radioHilalHermesAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Hermes-RadioHilalCronAudit.ps1'
+  if(Test-Path -LiteralPath $radioHilalHermesAuditRunner -PathType Leaf){
+    $auditStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\radiohilal-hermes-cron'
+    $auditStatePath=Join-Path $auditStateRoot 'latest.json'
+    $auditMirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius'
+    $auditMirrorPath=Join-Path $auditMirrorRoot 'RADIOHILAL-HERMES-CRON-AUDIT-LATEST.json'
+    try{
+      New-Item -ItemType Directory -Force -Path $auditStateRoot | Out-Null
+      $oldEap=$ErrorActionPreference;$ErrorActionPreference='Continue'
+      $auditRaw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $radioHilalHermesAuditRunner -JobId '9d9eea1b7618' 2>&1 | Out-String).Trim()
+      $auditCode=$LASTEXITCODE
+      $ErrorActionPreference=$oldEap
+      if([string]::IsNullOrWhiteSpace($auditRaw)){throw 'RadioHilal Hermes cron audit returned empty output'}
+      $auditObj=$auditRaw|ConvertFrom-Json -ErrorAction Stop
+      $auditEnvelope=[ordered]@{
+        schema=1
+        sourceSha=$remoteSha
+        hook='RADIOHILAL_HERMES_CRON_AUDIT_POSTSYNC_HOOK_V1'
+        auditExitCode=$auditCode
+        audit=$auditObj
+        time=(Get-Date -Format o)
+      }
+      $auditJson=$auditEnvelope|ConvertTo-Json -Depth 16
+      $auditJson|Set-Content -LiteralPath $auditStatePath -Encoding UTF8
+      try{
+        if(Test-Path -LiteralPath $auditMirrorRoot -PathType Container){
+          $auditJson|Set-Content -LiteralPath $auditMirrorPath -Encoding UTF8
+        }
+      }catch{}
+    }catch{
+      try{
+        New-Item -ItemType Directory -Force -Path $auditStateRoot | Out-Null
+        $auditEnvelope=[ordered]@{
+          schema=1
+          sourceSha=$remoteSha
+          hook='RADIOHILAL_HERMES_CRON_AUDIT_POSTSYNC_HOOK_V1'
+          auditExitCode=$LASTEXITCODE
+          audit=[ordered]@{ok=$false;classification='RADIOHILAL_HERMES_CRON_AUDIT_HOOK_EXCEPTION';secretValuesEmitted=$false;error=$_.Exception.Message}
+          time=(Get-Date -Format o)
+        }
+        $auditJson=$auditEnvelope|ConvertTo-Json -Depth 16
+        $auditJson|Set-Content -LiteralPath $auditStatePath -Encoding UTF8
+        if(Test-Path -LiteralPath $auditMirrorRoot -PathType Container){
+          $auditJson|Set-Content -LiteralPath $auditMirrorPath -Encoding UTF8
+        }
+      }catch{}
+    }
+  }
+
 # MOVIERECOMMENDER_STREMIO_POSTSYNC_HOOK_V1
   # Fixed typed request only. Runs before nonessential runtime hooks so updater
   # contention elsewhere cannot starve MovieRecommender acceptance.
