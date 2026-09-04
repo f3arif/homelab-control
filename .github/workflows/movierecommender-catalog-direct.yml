@@ -1,0 +1,88 @@
+name: MovieRecommender Catalog Direct Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/movierecommender-catalog-direct.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: movierecommender-catalog-direct
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Exact-sync Windows-main to this GitHub SHA
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 15 -H 'Content-Type: application/json' -X POST --data "$payload" http://100.70.25.8:8797/api/push-deploy
+
+      - name: Wait for exact source and call typed audit
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              expected=$(printf '%s' "$AFZ_SHA" | tr '[:upper:]' '[:lower:]')
+              if [ "$commit" = "$expected" ]; then
+                payload=$(printf '{"action":"audit","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+                code=$(curl --silent --show-error --output /tmp/movie-audit.json --write-out '%{http_code}' --connect-timeout 3 --max-time 260 -H 'Content-Type: application/json' -X POST --data "$payload" http://100.70.25.8:8797/api/movierecommender-catalog || true)
+                if [ "$code" = "200" ]; then
+                  cat /tmp/movie-audit.json
+                  exit 0
+                fi
+                echo "Attempt $attempt: exact source active, typed endpoint HTTP=$code"
+              else
+                echo "Attempt $attempt: Windows-main source=$commit expected=$expected"
+              fi
+            else
+              echo "Attempt $attempt: control health unavailable"
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Validate and summarize catalog state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          d=json.load(open("/tmp/movie-audit.json",encoding="utf-8"))
+          assert d.get("ok") is True, d
+          m=d.get("manifest") or {}
+          cats=d.get("catalogs") or {}
+          print("Manifest:", m.get("id"), m.get("version"))
+          print("Catalog IDs:", ", ".join(m.get("catalogIds") or []))
+          for cid,v in cats.items():
+              print(f"{cid}: count={v.get('count')} sorted={v.get('sortedNewestToOldest')} outside180={v.get('outside180DayDateWindow')} oldest={v.get('oldest')} newest={v.get('newest')}")
+          with open("/tmp/movie-summary.md","w",encoding="utf-8") as f:
+              f.write("## MovieRecommender direct audit\n\n")
+              f.write(f"- Manifest: {m.get('id')} v{m.get('version')}\n")
+              f.write(f"- Source SHA-256: {(d.get('source') or {}).get('sha256')}\n")
+              for cid,v in cats.items():
+                  f.write(f"- {cid}: {v.get('count')} items; sorted={v.get('sortedNewestToOldest')}; outside180={v.get('outside180DayDateWindow')}; {v.get('newest')} to {v.get('oldest')}\n")
+          PY
+          cat /tmp/movie-summary.md >> "$GITHUB_STEP_SUMMARY"
