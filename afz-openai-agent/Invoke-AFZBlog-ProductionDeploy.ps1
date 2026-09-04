@@ -284,7 +284,29 @@ try{
   }
 
   $dbStatus=@((Run-Git @('-C',$expectedRoot,'diff','--name-status',$beforeHead,$expectedSha,'--','data/afz-blog.db')).lines|Where-Object{$_})
-  $dbRemovalProven=(@($dbStatus|Where-Object{$_ -match '^D\s+data/afz-blog[.]db  $result.dependencyRefreshNeeded=$dependencyRefreshNeeded
+  $dbRemovalProven=(@($dbStatus|Where-Object{$_ -match '^D\s+data/afz-blog[.]db$'}).Count -eq 1)
+  if(-not $dbRemovalProven){
+    $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_BLOCKED'
+    $result.blockedReason='Expected target must remove the tracked data/afz-blog.db exactly once.'
+    $result.databaseDiff=$dbStatus
+    $result.time=(Get-Date -Format o)
+    Save-Result $result $statePath
+    exit 40
+  }
+
+  $targetGitIgnore=(Run-Git @('-C',$expectedRoot,'show',($expectedSha+':.gitignore'))).text
+  if($targetGitIgnore -notmatch '(?m)^\*\.db\s*$'){
+    $result.classification='AFZ_BLOG_PRODUCTION_DEPLOY_BLOCKED'
+    $result.blockedReason='Target .gitignore does not ignore *.db; runtime DB preservation refused.'
+    $result.time=(Get-Date -Format o)
+    Save-Result $result $statePath
+    exit 40
+  }
+  $databaseUntrackMigration=$true
+  $result.databaseUntrackMigration=$true
+
+  $dependencyRefreshNeeded=(@($changed|Where-Object{$_ -in @('package.json','package-lock.json')}).Count -gt 0)
+  $result.dependencyRefreshNeeded=$dependencyRefreshNeeded
 
   $dbPath=Join-Path $expectedRoot 'data\afz-blog.db'
   $envPath=Join-Path $expectedRoot '.env'
