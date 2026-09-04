@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# HOTRELOAD_CANARY=20260903T2108Z h3-hermes-r37-recovery
+# HOTRELOAD_CANARY=20260904T1735Z codex-schema-watcher-recovery
 [CmdletBinding()]
 param(
   [string]$InstallRoot='C:\AFZ\homelab-control',
