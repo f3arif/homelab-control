@@ -133,6 +133,18 @@ try{
   if($ExpectedSha -and $remoteSha -ne $ExpectedSha){throw "Agent source sync returned unexpected remoteSha: actual=$remoteSha expected=$ExpectedSha"}
   $changed=[bool]$syncResult.changed
 
+# RADIOHILAL_GITHUB_API_DEPLOY_POSTSYNC_HOOK_V1
+  # Fixed-target exact-SHA RadioHilal deployment. The helper is fail-closed,
+  # requires a successful BuildApi validation for the exact RadioHilal main SHA,
+  # stages and backs up before mutation, preserves appsettings, health-checks,
+  # and rolls back automatically on post-mutation failure.
+  $radioHilalApiDeployRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-RadioHilal-GitHubApiDeploy.ps1'
+  if(Test-Path -LiteralPath $radioHilalApiDeployRunner -PathType Leaf){
+    try{
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $radioHilalApiDeployRunner -InstallRoot $InstallRoot *> $null
+    }catch{}
+  }
+
 # MOVIERECOMMENDER_STREMIO_POSTSYNC_HOOK_V1
   # Fixed typed request only. Runs before nonessential runtime hooks so updater
   # contention elsewhere cannot starve MovieRecommender acceptance.
