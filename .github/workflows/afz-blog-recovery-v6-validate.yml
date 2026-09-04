@@ -1,5 +1,5 @@
 name: AFZ Blog Recovery V6 Validate
-# retrigger: v2
+# retrigger: branch-fix-v1
 
 on:
   push:
@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: afz-blog-recovery-v6-fix
       - name: Parse recovery PowerShell
         shell: powershell
         run: |
