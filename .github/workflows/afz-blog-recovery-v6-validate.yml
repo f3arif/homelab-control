@@ -1,5 +1,5 @@
 name: AFZ Blog Recovery V6 Validate
-# retrigger: branch-fix-v1
+# retrigger: branch-fix-v2
 
 on:
   push:
