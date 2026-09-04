@@ -1,0 +1,84 @@
+name: AFZ Blog Production Deploy Validate
+
+on:
+  push:
+    branches:
+      - chatgpt/afz-blog-prod-deploy-07380a73
+    paths:
+      - 'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/requests/afz-blog-production-deploy.json'
+      - '.github/workflows/afz-blog-production-deploy-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1',
+            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null
+            $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){
+              throw "$file parse errors: $($errors.Message -join '; ')"
+            }
+            Write-Host "PARSE_PASS $file"
+          }
+
+      - name: Verify request and safety invariants
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $request=Get-Content 'afz-openai-agent/requests/afz-blog-production-deploy.json' -Raw | ConvertFrom-Json
+          if([int]$request.schema -ne 1){throw 'request schema mismatch'}
+          if([string]$request.id -ne 'afz-blog-production-deploy-07380a73-r1'){throw 'request id mismatch'}
+          if([string]$request.status -ne 'ACTIVE' -or [string]$request.action -ne 'deploy-validated-main'){throw 'request inactive or wrong action'}
+          if([string]$request.host -ne 'DESKTOP-10SKF0M' -or [string]$request.target -ne 'windows-main'){throw 'request target mismatch'}
+          if([string]$request.expected_current_sha -ne 'a37e71aa0e0c9fad41ecdc9652a7024c485666f4'){throw 'unexpected current SHA'}
+          if([string]$request.expected_blog_sha -ne '07380a730f91edc240e7fc971fdf1fb11fdec4a8'){throw 'unexpected target SHA'}
+          if([bool]$request.allow_database_mutation){throw 'database mutation must be false'}
+          if([bool]$request.allow_schema_or_migration_change){throw 'schema/migration change must be false'}
+          if([bool]$request.allow_website_publish){throw 'website publish must be false'}
+          if(-not [bool]$request.rollback_on_failure){throw 'rollback must be true'}
+
+          $helper=Get-Content 'afz-openai-agent/Invoke-AFZBlog-ProductionDeploy.ps1' -Raw
+          foreach($needle in @(
+            "merge-base','--is-ancestor",
+            "merge','--ff-only','origin/main",
+            'data/afz-blog.db',
+            'prisma/schema.prisma',
+            'prisma/migrations/*',
+            'Get-FileHash',
+            'AFZ_BLOG_PRODUCTION_DEPLOY_ROLLED_BACK',
+            'http://127.0.0.1:3015/',
+            'Stop-BlogRuntime',
+            'Start-BlogRuntime',
+            'rollback_on_failure',
+            'productionDatabaseModified=$false',
+            'websitePublished=$false'
+          )){
+            if(-not $helper.Contains($needle)){throw "Missing deployment safety invariant: $needle"}
+          }
+
+          $updater=Get-Content 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1' -Raw
+          foreach($needle in @(
+            'Invoke-AFZBlog-ProductionDeploy.ps1',
+            'afz-blog-production-deploy.json'
+          )){
+            if(-not $updater.Contains($needle)){throw "Updater hook missing: $needle"}
+          }
+
+          Write-Host 'AFZ_BLOG_PRODUCTION_DEPLOY_SAFETY_PASS'
