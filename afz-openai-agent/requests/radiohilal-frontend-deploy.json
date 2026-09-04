@@ -2,15 +2,15 @@
   "schema": 1,
   "project": "radiohilal",
   "action": "queue-github-frontend-exact",
-  "job_id": "radiohilal-frontend-f74d0501-20260904-r1",
+  "job_id": "radiohilal-frontend-f74d0501-20260904-r2",
   "status": "active",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
   "repository": "f3arif/RadioHilal",
   "expected_main_commit": "f74d0501d9f4fd65d14a9ca1b83e94a652965b6b",
-  "validation_job_id": "000-critical-radiohilal-build-api-f74d0501-20260904T1025",
+  "validation_job_id": "20260904T132300Z-build-api-f74d0501",
   "rollback_on_failure": true,
   "allow_api_restart": false,
   "allow_database_mutation": false,
-  "note": "Queue exact current-main frontend deployment through the existing rollback-protected RemoteOps action. Do not restart the API."
+  "note": "Exact current-main frontend deployment using successful Windows-main BuildApi validation completed 2026-09-04T13:27:48Z. Restart only RadioHilal.Frontend; preserve API, database, and rollback protection."
 }
