@@ -17,7 +17,7 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -26,23 +26,49 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Read AFZ control and Blog health without mutation
+      - name: Relay read-only windows-main probe through H3
         shell: bash
         run: |
           set -euo pipefail
-          host='100.70.25.8'
-          tailscale ping --timeout=5s -c 2 "$host"
+          h3='100.106.186.118'
+          tailscale ping --timeout=5s -c 2 "$h3"
 
-          for url in \
-            "http://$host:8797/health" \
-            "http://$host:8796/health" \
-            "http://$host:3015/"; do
-            echo "=== $url ==="
-            set +e
-            code=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/afz-body -w '%{http_code}' "$url" 2>/tmp/afz-err)
-            rc=$?
-            set -e
-            echo "CURL_EXIT=$rc HTTP=$code"
-            if [ -s /tmp/afz-body ]; then head -c 20000 /tmp/afz-body; echo; fi
-            if [ -s /tmp/afz-err ]; then cat /tmp/afz-err; fi
-          done
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='SilentlyContinue'
+          if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+          $target='100.70.25.8'
+          function Port([int]$p){
+            try{return [bool](Test-NetConnection -ComputerName $target -Port $p -InformationLevel Quiet -WarningAction SilentlyContinue)}catch{return $false}
+          }
+          $health=$null
+          try{
+            $r=Invoke-WebRequest -UseBasicParsing -Uri ('http://'+$target+':8797/health') -TimeoutSec 8
+            $health=[ordered]@{ok=$true;status=[int]$r.StatusCode;body=[string]$r.Content}
+          }catch{
+            $health=[ordered]@{ok=$false;error=$_.Exception.Message}
+          }
+          $blog=$null
+          try{
+            $r=Invoke-WebRequest -UseBasicParsing -Uri ('http://'+$target+':3015/') -TimeoutSec 8
+            $blog=[ordered]@{ok=$true;status=[int]$r.StatusCode;length=[int]$r.Content.Length}
+          }catch{
+            $blog=[ordered]@{ok=$false;error=$_.Exception.Message}
+          }
+          [ordered]@{
+            host=$env:COMPUTERNAME
+            time=(Get-Date -Format o)
+            windowsMain=$target
+            ping=(Test-Connection -ComputerName $target -Count 1 -Quiet -ErrorAction SilentlyContinue)
+            port22=Port 22
+            port445=Port 445
+            port5985=Port 5985
+            port8797=Port 8797
+            port3015=Port 3015
+            controlHealth=$health
+            blogHealth=$blog
+          } | ConvertTo-Json -Depth 10 -Compress
+          REMOTE
+          )
+
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 220s tailscale ssh "Faiz@$h3" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
