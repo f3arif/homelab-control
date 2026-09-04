@@ -62,9 +62,9 @@ jobs:
             "C:\Users\Faiz\.ollama\models",
             "H3_HEADLESS_PHASE1_ACTIVE",
             "H3_HEADLESS_PHASE1_FAILED_ROLLED_BACK",
-            "oldInteractiveTasksChanged=$false",
-            "hermesChanged=$false",
-            "radioHilalWorkerChanged=$false"
+            'oldInteractiveTasksChanged=$false',
+            'hermesChanged=$false',
+            'radioHilalWorkerChanged=$false'
           )){if(-not $c.Contains($needle)){throw "Missing installer invariant: $needle"}}
           foreach($forbidden in @(
             'Remove-LocalUser',
