@@ -147,18 +147,22 @@ const done = arguments[arguments.length - 1];
   let addons = JSON.parse(JSON.stringify(before));
   let afzManifestRefreshed = false;
   let afzRefreshError = null;
-  const afz = addons.find(a => a?.manifest?.id === 'com.afzengineering.releasecatalog' || a?.manifest?.name === 'AFZ New Movie Releases');
-  if (afz) {
-    try {
-      const mr = await fetch(afzManifestUrl, {cache:'no-store'});
-      if (!mr.ok) throw new Error('HTTP ' + mr.status);
-      const live = await mr.json();
-      if (live?.id !== 'com.afzengineering.releasecatalog') throw new Error('unexpected manifest id');
+  let afz = addons.find(a => a?.manifest?.id === 'com.afzengineering.releasecatalog' || a?.manifest?.name === 'AFZ New Movie Releases');
+  try {
+    const mr = await fetch(afzManifestUrl, {cache:'no-store'});
+    if (!mr.ok) throw new Error('HTTP ' + mr.status);
+    const live = await mr.json();
+    if (live?.id !== 'com.afzengineering.releasecatalog') throw new Error('unexpected manifest id');
+    if (afz) {
       afz.manifest = live;
-      afzManifestRefreshed = true;
-    } catch (e) {
-      afzRefreshError = String(e);
+      afz.transportUrl = afzManifestUrl;
+    } else {
+      afz = {transportUrl:afzManifestUrl, manifest:live, flags:{}};
+      addons.push(afz);
     }
+    afzManifestRefreshed = true;
+  } catch (e) {
+    afzRefreshError = String(e);
   }
 
   const trakt = addons.find(a => a?.manifest?.name === 'Trakt Integration');
@@ -204,6 +208,11 @@ const done = arguments[arguments.length - 1];
   const verifyData = await api('addonCollectionGet', {authKey});
   const after = verifyData?.result?.addons || [];
   const afterSummary = summary(after);
+  const expectedAfz = afzManifestRefreshed ? '0.3.1' : summary(before).afzVersion;
+  if (afzManifestRefreshed && afterSummary.afzVersion !== expectedAfz) {
+    await api('addonCollectionSet', {authKey, addons:before});
+    return done({ok:false,error:'AFZ manifest refresh did not persist; original collection restored',backupKey,before:summary(before),after:afterSummary});
+  }
 
   done({
     ok:true,
