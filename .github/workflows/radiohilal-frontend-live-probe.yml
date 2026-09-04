@@ -1,0 +1,76 @@
+name: RadioHilal Frontend Live Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/radiohilal-frontend-live-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe RadioHilal admin review
+        shell: bash
+        run: |
+          set -u
+          host='100.70.25.8'
+          tailscale ping --timeout=5s -c 2 "$host" || true
+          echo '=== TCP ==='
+          for p in 3002 5149; do
+            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+
+          echo '=== REVIEW ==='
+          tmp=$(mktemp)
+          code=$(curl -L -sS --connect-timeout 4 --max-time 15 -o "$tmp" -w '%{http_code}' "http://$host:3002/review" || true)
+          echo "REVIEW_HTTP=$code"
+          echo "REVIEW_BYTES=$(wc -c < "$tmp" | tr -d ' ')"
+          python3 - "$tmp" <<'PY'
+          import re,sys
+          p=sys.argv[1]
+          try:
+              s=open(p,'r',encoding='utf-8',errors='replace').read()
+          except Exception:
+              s=''
+          for label,pat in [
+              ('HAS_SPEAKER_LITERAL',r'Speaker:'),
+              ('HAS_SERIES_LITERAL',r'Series:'),
+              ('HAS_SOURCE_LITERAL',r'Source:'),
+              ('HAS_ACTIVE_REVIEW_QUEUE',r'Active review queue'),
+          ]:
+              print(f'{label}={bool(re.search(pat,s,re.I))}')
+          bids=re.findall(r'["\\/]_next["\\/][^"\\']*',s)
+          nextdata=re.search(r'<script[^>]+id=["\\']__NEXT_DATA__["\\'][^>]*>(.*?)</script>',s,re.S|re.I)
+          if nextdata:
+              import json
+              try:
+                  o=json.loads(nextdata.group(1)); print('BUILD_ID='+str(o.get('buildId','')))
+              except Exception: pass
+          m=re.search(r'buildId["\\']?\s*[:=]\s*["\\']([^"\\']+)',s,re.I)
+          if m: print('BUILD_ID_FALLBACK='+m.group(1))
+          print('NEXT_ASSET_HINT='+str(bids[0] if bids else ''))
+          PY
+
+          echo '=== HEALTH ==='
+          hcode=$(curl -sS --connect-timeout 4 --max-time 10 -o /tmp/rh-health -w '%{http_code}' "http://$host:5149/api/system/health" || true)
+          echo "HEALTH_HTTP=$hcode"
+          if [ -s /tmp/rh-health ]; then
+            head -c 1000 /tmp/rh-health | tr '\n' ' '; echo
+          fi
