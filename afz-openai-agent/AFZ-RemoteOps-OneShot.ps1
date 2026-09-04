@@ -169,6 +169,186 @@ if($phase -eq 'hpenvy-hermes-codex-primary-only'){
   if($ok){exit 0}else{exit 22}
 }
 
+# Targeted stale-worker recovery phase. This phase is intentionally narrow:
+# it only inspects/restarts the pre-existing AFZ Remote Ops scheduled task.
+# No H3/Tailscale/Surfshark/FamilyPTT/Hermes hooks are invoked.
+if($phase -eq 'remoteops-recover-stale-only'){
+  $heartbeatPath='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Heartbeat\windows-main.txt'
+  function Get-HeartbeatAgeSeconds {
+    param([string]$Path)
+    if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+    try{
+      $line=Get-Content -LiteralPath $Path -Encoding UTF8 | Where-Object { $_ -match '^Timestamp=(.+)
+# device-code regeneration requests; unrelated hooks retain their previous behavior.
+Invoke-HPEnvyHermesOpenAICodexAuth
+Invoke-H3SshKeyAclRepair
+Invoke-H3TailscaleUnattended
+Invoke-HPEnvySurfsharkExitNode
+Invoke-Phase1FamilyPttPrep
+Invoke-FamilyPttOnePlusInstall
+
+if(Test-Path -LiteralPath $statePath -PathType Leaf){
+  try{
+    $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if([string]$existing.classification -eq 'REMOTEOPS_TASK_RUNNING'){
+      Write-Result $existing $statePath
+      Write-Output ($existing | ConvertTo-Json -Depth 12 -Compress)
+      exit 0
+    }
+  }catch{}
+}
+
+$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if(-not $task){
+  $r=[ordered]@{schema=1;requestId=$id;taskName=$taskName;classification='REMOTEOPS_TASK_MISSING';time=(Get-Date -Format o)}
+  Write-Result $r $statePath
+  Write-Output ($r|ConvertTo-Json -Compress)
+  exit 20
+}
+
+$before=[string]$task.State
+$startAttempted=$false
+if($before -ne 'Running'){
+  Start-ScheduledTask -TaskName $taskName
+  $startAttempted=$true
+  Start-Sleep -Seconds 3
+}
+$afterTask=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+$after=[string]$afterTask.State
+$info=$null
+try{$info=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop}catch{}
+$class=$(if($after -eq 'Running'){'REMOTEOPS_TASK_RUNNING'}else{'REMOTEOPS_TASK_START_NOT_RUNNING'})
+$r=[ordered]@{
+  schema=1
+  requestId=$id
+  taskName=$taskName
+  classification=$class
+  startAttempted=$startAttempted
+  stateBefore=$before
+  stateAfter=$after
+  lastRunTime=$(if($info){$info.LastRunTime}else{$null})
+  lastTaskResult=$(if($info){$info.LastTaskResult}else{$null})
+  nextRunTime=$(if($info){$info.NextRunTime}else{$null})
+  time=(Get-Date -Format o)
+}
+Write-Result $r $statePath
+Write-Output ($r | ConvertTo-Json -Depth 12 -Compress)
+if($class -ne 'REMOTEOPS_TASK_RUNNING'){exit 21}
+ } | Select-Object -First 1
+      if(-not $line){return $null}
+      $raw=([regex]::Match([string]$line,'^Timestamp=(.+)
+# device-code regeneration requests; unrelated hooks retain their previous behavior.
+Invoke-HPEnvyHermesOpenAICodexAuth
+Invoke-H3SshKeyAclRepair
+Invoke-H3TailscaleUnattended
+Invoke-HPEnvySurfsharkExitNode
+Invoke-Phase1FamilyPttPrep
+Invoke-FamilyPttOnePlusInstall
+
+if(Test-Path -LiteralPath $statePath -PathType Leaf){
+  try{
+    $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if([string]$existing.classification -eq 'REMOTEOPS_TASK_RUNNING'){
+      Write-Result $existing $statePath
+      Write-Output ($existing | ConvertTo-Json -Depth 12 -Compress)
+      exit 0
+    }
+  }catch{}
+}
+
+$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if(-not $task){
+  $r=[ordered]@{schema=1;requestId=$id;taskName=$taskName;classification='REMOTEOPS_TASK_MISSING';time=(Get-Date -Format o)}
+  Write-Result $r $statePath
+  Write-Output ($r|ConvertTo-Json -Compress)
+  exit 20
+}
+
+$before=[string]$task.State
+$startAttempted=$false
+if($before -ne 'Running'){
+  Start-ScheduledTask -TaskName $taskName
+  $startAttempted=$true
+  Start-Sleep -Seconds 3
+}
+$afterTask=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+$after=[string]$afterTask.State
+$info=$null
+try{$info=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop}catch{}
+$class=$(if($after -eq 'Running'){'REMOTEOPS_TASK_RUNNING'}else{'REMOTEOPS_TASK_START_NOT_RUNNING'})
+$r=[ordered]@{
+  schema=1
+  requestId=$id
+  taskName=$taskName
+  classification=$class
+  startAttempted=$startAttempted
+  stateBefore=$before
+  stateAfter=$after
+  lastRunTime=$(if($info){$info.LastRunTime}else{$null})
+  lastTaskResult=$(if($info){$info.LastTaskResult}else{$null})
+  nextRunTime=$(if($info){$info.NextRunTime}else{$null})
+  time=(Get-Date -Format o)
+}
+Write-Result $r $statePath
+Write-Output ($r | ConvertTo-Json -Depth 12 -Compress)
+if($class -ne 'REMOTEOPS_TASK_RUNNING'){exit 21}
+)).Groups[1].Value
+      $stamp=[DateTimeOffset]::Parse($raw,[Globalization.CultureInfo]::InvariantCulture)
+      return [math]::Round(([DateTimeOffset]::Now-$stamp).TotalSeconds,1)
+    }catch{return $null}
+  }
+
+  $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if(-not $task){
+    $r=[ordered]@{schema=1;requestId=$id;taskName=$taskName;phase=$phase;classification='REMOTEOPS_TASK_MISSING';unrelatedHooksInvoked=$false;time=(Get-Date -Format o)}
+    Write-Result $r $statePath
+    Write-Output ($r|ConvertTo-Json -Depth 8 -Compress)
+    exit 20
+  }
+
+  $before=[string]$task.State
+  $heartbeatAgeBefore=Get-HeartbeatAgeSeconds $heartbeatPath
+  $heartbeatStale=($null -eq $heartbeatAgeBefore -or [double]$heartbeatAgeBefore -gt 180)
+  $restartAttempted=$false
+  $startAttempted=$false
+
+  if($before -eq 'Running' -and $heartbeatStale){
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    Start-Sleep -Seconds 1
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $restartAttempted=$true
+  }elseif($before -ne 'Running'){
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $startAttempted=$true
+  }
+
+  Start-Sleep -Seconds 4
+  $afterTask=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+  $after=[string]$afterTask.State
+  $heartbeatAgeAfter=Get-HeartbeatAgeSeconds $heartbeatPath
+  $class=$(if($after -eq 'Running'){'REMOTEOPS_TASK_RUNNING'}else{'REMOTEOPS_TASK_RECOVERY_FAILED'})
+  $r=[ordered]@{
+    schema=1
+    requestId=$id
+    taskName=$taskName
+    phase=$phase
+    classification=$class
+    stateBefore=$before
+    stateAfter=$after
+    heartbeatAgeSecondsBefore=$heartbeatAgeBefore
+    heartbeatAgeSecondsAfter=$heartbeatAgeAfter
+    staleThresholdSeconds=180
+    restartAttempted=$restartAttempted
+    startAttempted=$startAttempted
+    unrelatedHooksInvoked=$false
+    radioHilalServicesTouched=$false
+    time=(Get-Date -Format o)
+  }
+  Write-Result $r $statePath
+  Write-Output ($r | ConvertTo-Json -Depth 8 -Compress)
+  if($class -eq 'REMOTEOPS_TASK_RUNNING'){exit 0}else{exit 21}
+}
+
 # Legacy/default startup phase. The OAuth hook remains available for explicit future
 # device-code regeneration requests; unrelated hooks retain their previous behavior.
 Invoke-HPEnvyHermesOpenAICodexAuth
