@@ -35,6 +35,36 @@ function Invoke-NativeGit([string[]]$ArgumentVector,[switch]$AllowFailure){
 function Get-ListenerCount{
   try{return @((Get-NetTCPConnection -LocalPort 3015 -State Listen -ErrorAction SilentlyContinue)).Count}catch{return 0}
 }
+function Get-TaskProof($Task){
+  if(-not $Task){return $null}
+  $actions=@($Task.Actions)
+  $triggers=@($Task.Triggers)
+  $triggerTypes=@($triggers|ForEach-Object{[string]$_.CimClass.CimClassName})
+  $execute=$(if($actions.Count -eq 1){[string]$actions[0].Execute}else{$null})
+  $arguments=$(if($actions.Count -eq 1){[string]$actions[0].Arguments}else{$null})
+  $workingDirectory=$(if($actions.Count -eq 1){[string]$actions[0].WorkingDirectory}else{$null})
+  $actionOk=($actions.Count -eq 1 -and ([IO.Path]::GetFileName($execute)) -ieq 'powershell.exe' -and $arguments -like ('*'+$startScript+'*') -and $workingDirectory -eq $root)
+  $principalUser=[string]$Task.Principal.UserId
+  $principalOk=($principalUser -in @('SYSTEM','NT AUTHORITY\SYSTEM') -and [string]$Task.Principal.LogonType -eq 'ServiceAccount' -and [string]$Task.Principal.RunLevel -eq 'Highest')
+  $startupTriggerOk=($triggerTypes -contains 'MSFT_TaskBootTrigger')
+  $settingsOk=([string]$Task.Settings.MultipleInstances -eq 'IgnoreNew' -and [bool]$Task.Settings.StartWhenAvailable)
+  [ordered]@{
+    valid=($actionOk -and $principalOk -and $startupTriggerOk -and $settingsOk)
+    actionOk=$actionOk
+    execute=$execute
+    arguments=$arguments
+    workingDirectory=$workingDirectory
+    principalUser=$principalUser
+    logonType=[string]$Task.Principal.LogonType
+    runLevel=[string]$Task.Principal.RunLevel
+    principalOk=$principalOk
+    triggerTypes=$triggerTypes
+    startupTriggerOk=$startupTriggerOk
+    multipleInstances=[string]$Task.Settings.MultipleInstances
+    startWhenAvailable=[bool]$Task.Settings.StartWhenAvailable
+    settingsOk=$settingsOk
+  }
+}
 
 $result=[ordered]@{
   schema=1
@@ -74,13 +104,13 @@ try{
   }
 
   $beforeListeners=Get-ListenerCount
-  $result.before=[ordered]@{port3015Listeners=$beforeListeners;taskExists=$false;taskState=$null}
+  $result.before=[ordered]@{port3015Listeners=$beforeListeners;taskExists=$false;taskState=$null;taskProof=$null}
   $existing=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if($existing){
     $result.before.taskExists=$true;$result.before.taskState=[string]$existing.State
-    $action=@($existing.Actions|Select-Object -First 1)
-    $canonicalAction=($action.Count -eq 1 -and ([IO.Path]::GetFileName([string]$action[0].Execute)) -ieq 'powershell.exe' -and [string]$action[0].Arguments -like ('*'+$startScript+'*'))
-    if(-not $canonicalAction){$result.classification='AFZ_BLOG_RUNTIME_ENSURE_BLOCKED_EXISTING_TASK_MISMATCH';$result.time=(Get-Date -Format o);Save-Result $result;exit 41}
+    $beforeProof=Get-TaskProof $existing
+    $result.before.taskProof=$beforeProof
+    if(-not [bool]$beforeProof.valid){$result.classification='AFZ_BLOG_RUNTIME_ENSURE_BLOCKED_EXISTING_TASK_MISMATCH';$result.time=(Get-Date -Format o);Save-Result $result;exit 41}
   }else{
     $arg="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$startScript`""
     $action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg -WorkingDirectory $root
@@ -106,9 +136,11 @@ try{
     Start-Sleep -Seconds 2
   }
   $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  $taskInfo=Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-  $result.after=[ordered]@{port3015Listeners=(Get-ListenerCount);listenerPid=$listenerPid;httpStatus=$httpStatus;httpError=$httpError;taskExists=[bool]$task;taskState=$(if($task){[string]$task.State}else{$null});lastTaskResult=$(if($taskInfo){[int64]$taskInfo.LastTaskResult}else{$null})}
-  if($result.after.port3015Listeners -gt 0 -and $null -ne $httpStatus -and $httpStatus -ge 200 -and $httpStatus -lt 500){$result.ok=$true;$result.classification='AFZ_BLOG_RUNTIME_READY'}
+  $taskInfo=$(if($task){Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue}else{$null})
+  $taskProof=Get-TaskProof $task
+  $result.after=[ordered]@{port3015Listeners=(Get-ListenerCount);listenerPid=$listenerPid;httpStatus=$httpStatus;httpError=$httpError;taskExists=[bool]$task;taskState=$(if($task){[string]$task.State}else{$null});lastTaskResult=$(if($taskInfo){[int64]$taskInfo.LastTaskResult}else{$null});taskProof=$taskProof}
+  if($taskProof -and [bool]$taskProof.valid -and $result.after.port3015Listeners -gt 0 -and $null -ne $httpStatus -and $httpStatus -ge 200 -and $httpStatus -lt 500){$result.ok=$true;$result.classification='AFZ_BLOG_RUNTIME_PERSISTENCE_VERIFIED'}
+  elseif($task -and -not [bool]$taskProof.valid){$result.ok=$false;$result.classification='AFZ_BLOG_RUNTIME_TASK_PERSISTENCE_MISMATCH'}
   elseif($existing -and $beforeListeners -eq 0){$result.ok=$false;$result.classification='AFZ_BLOG_RUNTIME_TASK_PRESENT_BUT_NOT_RUNNING'}
   else{$result.ok=$false;$result.classification='AFZ_BLOG_RUNTIME_ENSURE_FAILED_HEALTH'}
 }catch{
