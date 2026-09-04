@@ -1,0 +1,42 @@
+name: AFZ Prospect Engine Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/prospect-engine/ProspectEngine.ps1'
+      - 'afz-openai-agent/prospect-engine/Test-ProspectEngine.ps1'
+      - 'afz-openai-agent/prospect-engine/index.html'
+      - '.github/workflows/afz-prospect-engine-validate.yml'
+  pull_request:
+    paths:
+      - 'afz-openai-agent/prospect-engine/ProspectEngine.ps1'
+      - 'afz-openai-agent/prospect-engine/Test-ProspectEngine.ps1'
+      - 'afz-openai-agent/prospect-engine/index.html'
+      - '.github/workflows/afz-prospect-engine-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Prospect Engine PowerShell tests
+        shell: pwsh
+        run: ./afz-openai-agent/prospect-engine/Test-ProspectEngine.ps1
+
+      - name: Parse browser JavaScript
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const html = fs.readFileSync('afz-openai-agent/prospect-engine/index.html', 'utf8');
+          const script = html.match(/<script>([\s\S]*?)<\/script>/);
+          if (!script) throw new Error('Prospect Engine script is missing');
+          new Function(script[1]);
+          console.log('Prospect Engine JavaScript: PASS');
+          NODE
