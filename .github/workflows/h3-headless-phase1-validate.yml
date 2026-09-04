@@ -1,0 +1,94 @@
+name: Validate H3 Headless Phase1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/h3-headless/**'
+      - 'afz-openai-agent/requests/h3-headless-phase1.json'
+      - '.github/workflows/h3-headless-phase1-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @(
+            'afz-openai-agent\h3-headless\Install-H3-Headless-Phase1.ps1',
+            'afz-openai-agent\h3-headless\Run-H3-Ollama-Headless.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+            if(@($errors).Count){$errors|Format-List|Out-String|Write-Error;throw "Parse failed: $p"}
+            Write-Output "PARSE_PASS=$p"
+          }
+
+      - name: Enforce staged request
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=Get-Content 'afz-openai-agent\requests\h3-headless-phase1.json' -Raw|ConvertFrom-Json
+          if([int]$r.schema -ne 1){throw 'schema mismatch'}
+          if([string]$r.action -ne 'migrate-h3-headless-phase1'){throw 'action mismatch'}
+          if([string]$r.status -ne 'STAGED_NOT_AUTHORIZED'){throw 'request must remain inactive'}
+          if([string]$r.host -ne 'DESKTOP-H3R6CQN'){throw 'host mismatch'}
+          if(-not [bool]$r.rollback){throw 'rollback must remain enabled'}
+          if(-not [bool]$r.activation_requires_protected_authorization){throw 'protected activation gate missing'}
+          if([bool]$r.changes.hermes){throw 'Phase1 must not mutate Hermes'}
+          if([bool]$r.changes.radiohilal_worker){throw 'Phase1 must not mutate RadioHilal worker'}
+          'REQUEST_STAGE=PASS'
+
+      - name: Enforce installer boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $c=Get-Content 'afz-openai-agent\h3-headless\Install-H3-Headless-Phase1.ps1' -Raw
+          foreach($needle in @(
+            "ValidateSet('Audit','Activate','Rollback')",
+            "DESKTOP-H3R6CQN",
+            "AFZ H3 Headless Ollama",
+            "Set-Service sshd -StartupType Automatic",
+            "New-ScheduledTaskTrigger -AtStartup",
+            "New-ScheduledTaskPrincipal -UserId 'SYSTEM'",
+            "C:\Users\Faiz\.ollama\models",
+            "H3_HEADLESS_PHASE1_ACTIVE",
+            "H3_HEADLESS_PHASE1_FAILED_ROLLED_BACK",
+            "oldInteractiveTasksChanged=$false",
+            "hermesChanged=$false",
+            "radioHilalWorkerChanged=$false"
+          )){if(-not $c.Contains($needle)){throw "Missing installer invariant: $needle"}}
+          foreach($forbidden in @(
+            'Remove-LocalUser',
+            'net user',
+            'Enable-LocalUser',
+            'Disable-LocalUser',
+            'AutoAdminLogon',
+            'DefaultPassword',
+            'Unregister-ScheduledTask -TaskName ''AFZ H3 Generic Worker''',
+            'Unregister-ScheduledTask -TaskName ''AFZ RadioHilal35B Worker'''
+          )){if($c.Contains($forbidden)){throw "Forbidden Phase1 operation: $forbidden"}}
+          'INSTALLER_BOUNDARIES=PASS'
+
+      - name: Enforce Ollama runner boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $c=Get-Content 'afz-openai-agent\h3-headless\Run-H3-Ollama-Headless.ps1' -Raw
+          foreach($needle in @(
+            "OLLAMA_HOST='127.0.0.1:11434'",
+            "OLLAMA_MODELS='C:\Users\Faiz\.ollama\models'",
+            '& $ollama serve'
+          )){if(-not $c.Contains($needle)){throw "Missing Ollama invariant: $needle"}}
+          foreach($forbidden in @('OLLAMA_HOST=0.0.0.0','ollama pull','ollama rm','Remove-Item','docker')){
+            if($c.Contains($forbidden)){throw "Forbidden Ollama operation: $forbidden"}
+          }
+          'OLLAMA_RUNNER=PASS'
