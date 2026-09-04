@@ -1,0 +1,58 @@
+name: Stremio Organize Validate
+
+on:
+  pull_request:
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/Invoke-Stremio-Organize.ps1'
+      - 'afz-openai-agent/tools/Stremio-Organize.py'
+      - '.github/workflows/stremio-organize.yml'
+      - '.github/workflows/stremio-organize-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'afz-openai-agent/AFZ-Agent-Control-Core.ps1',
+            'afz-openai-agent/Invoke-Stremio-Organize.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){
+              $errors | ForEach-Object { Write-Error "$file: $($_.Message)" }
+              exit 1
+            }
+            Write-Host "PowerShell parse OK: $file"
+          }
+
+      - name: Compile Python helper
+        shell: powershell
+        run: |
+          python -m py_compile afz-openai-agent/tools/Stremio-Organize.py
+
+      - name: Verify typed route wiring
+        shell: powershell
+        run: |
+          $core=Get-Content afz-openai-agent/AFZ-Agent-Control-Core.ps1 -Raw
+          foreach($needle in @(
+            'function Invoke-StremioOrganize',
+            '/api/stremio-organize',
+            'Invoke-Stremio-Organize.ps1',
+            'stremioOrganize=@{typed=$true'
+          )){
+            if(-not $core.Contains($needle)){throw "Missing Stremio route wiring: $needle"}
+          }
+          $wf=Get-Content .github/workflows/stremio-organize.yml -Raw
+          if(-not $wf.Contains('/api/stremio-organize')){throw 'Workflow does not call typed Stremio route'}
