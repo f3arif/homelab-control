@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "radiohilal-h3-wake-20260904T1106",
+  "action": "wake-h3-for-radiohilal-cron-repair",
+  "status": "ACTIVE",
+  "target": {
+    "host": "DESKTOP-H3R6CQN",
+    "tailscaleIp": "100.106.186.118",
+    "lanIp": "192.168.50.185",
+    "mac": "4C-ED-FB-3F-B0-9E",
+    "broadcast": "192.168.50.255"
+  }
+}
