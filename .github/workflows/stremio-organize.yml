@@ -1,0 +1,117 @@
+name: Stremio Organize Direct
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/stremio-organize-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: stremio-organize-direct
+  cancel-in-progress: true
+
+jobs:
+  organize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Exact-sync Windows-main to this GitHub SHA
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 15 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy
+
+      - name: Wait for exact source
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              if [ "$commit" = "${AFZ_SHA,,}" ]; then
+                echo "Windows-main exact source confirmed: $commit"
+                exit 0
+              fi
+              echo "Attempt $attempt: Windows-main source=$commit expected=${AFZ_SHA,,}"
+            else
+              echo "Attempt $attempt: control health unavailable"
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Audit current Stremio state
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"action":"audit","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 60 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/stremio-organize | tee /tmp/stremio-audit.json
+
+      - name: Apply Stremio cleanup and organization
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"action":"apply","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 90 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/stremio-organize | tee /tmp/stremio-apply.json
+
+      - name: Validate organized state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/stremio-apply.json',encoding='utf-8'))
+          assert d.get('ok') is True, d
+          after=d.get('after') or {}
+          assert after.get('count',0) >= 12, after
+          assert after.get('afzVersion') == '0.3.1', after
+          trakt=after.get('traktCatalogs') or []
+          assert set(trakt) == {'Trakt Watchlist','Trakt Recommendations'}, trakt
+          tv=after.get('debridioTvCatalogs') or []
+          assert set(tv) == {'Canada TV','India TV'}, tv
+          order=after.get('order') or []
+          expected=['AFZ New Movie Releases','Cinemeta','Trakt Integration','Kids Shows Age 3 to 8','EinthusanTV - Hindi']
+          assert order[:5] == expected, order[:8]
+          assert int(d.get('homeRowCount',999)) <= 26, d.get('homeRowCount')
+          print('Stremio organizer verification passed')
+          print('Installed addons:', after.get('count'))
+          print('AFZ addon version:', after.get('afzVersion'))
+          print('Home rows:', d.get('homeRowCount'))
+          print('Top order:', ' -> '.join(order[:8]))
+          with open('/tmp/stremio-summary.md','w',encoding='utf-8') as f:
+              f.write('## Stremio organization result\n\n')
+              f.write(f"- Installed addons: {after.get('count')}\n")
+              f.write(f"- AFZ New Movie Releases: v{after.get('afzVersion')}\n")
+              f.write(f"- Home rows: {d.get('homeRowCount')}\n")
+              f.write(f"- Trakt rows: {', '.join(trakt)}\n")
+              f.write(f"- Debridio TV rows: {', '.join(tv)}\n")
+              f.write(f"- Top addon order: {' -> '.join(order[:8])}\n")
+          PY
+          cat /tmp/stremio-summary.md >> "$GITHUB_STEP_SUMMARY"
