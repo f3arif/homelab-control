@@ -1,2 +1,1 @@
-probe=windows-main
-nonce=20260904T1055EDT
+probe windows-main LAN for Stremio tailnet recovery 2026-09-04T14:57:45.497Z
