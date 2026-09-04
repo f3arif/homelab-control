@@ -1,4 +1,3 @@
 target=h3
 action=wake-once
-reason=radiohilal-cron-reasoning-low-repair
-requested_at=2026-09-04T10:34:00-04:00
+reason=radiohilal-windowsmain-recovery
