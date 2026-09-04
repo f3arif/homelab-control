@@ -1,0 +1,77 @@
+name: H3 Wake Via HP Envy Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-wake-via-hpenvy-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-wake-via-hpenvy-once
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'target=h3' .github/h3-wake-via-hpenvy-signal.txt
+          grep -Fx 'action=wake-via-hpenvy' .github/h3-wake-via-hpenvy-signal.txt
+          grep -Eq '^nonce=[A-Za-z0-9._-]+$' .github/h3-wake-via-hpenvy-signal.txt
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Send H3 WOL from HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.71.26.69
+          py=$(cat <<'PY'
+          import socket,time,json
+          mac='4c:ed:fb:3f:b0:9e'
+          m=bytes.fromhex(mac.replace(':',''))
+          packet=b'\xff'*6+m*16
+          sent=[]
+          for target in ['192.168.50.255','255.255.255.255']:
+              for port in (9,7):
+                  for attempt in range(1,4):
+                      s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+                      s.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1)
+                      try:
+                          n=s.sendto(packet,(target,port))
+                          sent.append((target,port,attempt,n))
+                      finally:
+                          s.close()
+                      time.sleep(.15)
+          print('WOL_SENT=TRUE MAC='+mac+' ATTEMPTS='+str(len(sent)))
+          PY
+          )
+          enc=$(printf '%s' "$py" | base64 -w0)
+          timeout 45s tailscale ssh coolyo@100.71.26.69 "python3 -c \"import base64;exec(base64.b64decode('$enc'))\""
+      - name: Prove H3 SSH return
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            echo "attempt=$attempt"
+            tailscale ping --timeout=3s -c 1 100.106.186.118 || true
+            if nc -z -w 3 100.106.186.118 22; then
+              echo 'H3_SSH_REACHABLE=PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          exit 1
