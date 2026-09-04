@@ -1,0 +1,95 @@
+name: Windows-main RadioHilal Transcription Pause Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-radiohilal-transcription-pause-once.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-radiohilal-transcription-pause-once
+  cancel-in-progress: false
+
+jobs:
+  pause:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Pause current RadioHilal lecture transcription
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.70.25.8'
+          tailscale ping --timeout=5s -c 2 "$host"
+
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+
+          $taskName='AFZ RadioHilal Series Intake'
+          $allowedNames=@('python','pythonw','powershell','pwsh','ffmpeg','whisper-cli','whisper')
+          $stopped=[System.Collections.Generic.List[object]]::new()
+
+          $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $taskBefore=if($null -ne $task){[string]$task.State}else{'NOT_FOUND'}
+          if($null -ne $task -and [string]$task.State -eq 'Running'){
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 750
+          }
+
+          $matches=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name=[IO.Path]::GetFileNameWithoutExtension([string]$_.Name)
+            $cmd=[string]$_.CommandLine
+            if([string]::IsNullOrWhiteSpace($cmd)){return $false}
+            if($allowedNames -notcontains $name){return $false}
+            (($cmd -match '(?i)RadioHilal') -and ($cmd -match '(?i)(whisper|faster-whisper|whisperx|transcrib|lecture)'))
+          })
+
+          foreach($p in $matches | Sort-Object ProcessId -Descending){
+            try{
+              Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction Stop
+              $stopped.Add([pscustomobject]@{pid=[int]$p.ProcessId;name=[string]$p.Name})
+            }catch{}
+          }
+
+          Start-Sleep -Seconds 2
+          $remaining=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name=[IO.Path]::GetFileNameWithoutExtension([string]$_.Name)
+            $cmd=[string]$_.CommandLine
+            if([string]::IsNullOrWhiteSpace($cmd)){return $false}
+            if($allowedNames -notcontains $name){return $false}
+            (($cmd -match '(?i)RadioHilal') -and ($cmd -match '(?i)(whisper|faster-whisper|whisperx|transcrib|lecture)'))
+          })
+
+          $taskAfter=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $taskAfterState=if($null -ne $taskAfter){[string]$taskAfter.State}else{'NOT_FOUND'}
+          [ordered]@{
+            host=$env:COMPUTERNAME
+            taskBefore=$taskBefore
+            taskAfter=$taskAfterState
+            schedulerDisabled=$false
+            stoppedCount=$stopped.Count
+            stopped=@($stopped)
+            remainingCount=$remaining.Count
+            apiFrontendChanged=$false
+            restartPolicy='Existing 00:30-07:00 gate plus RAM<80 CPU<85 no-active-Whisper queue-idle gates remain authoritative'
+            time=(Get-Date -Format o)
+          } | ConvertTo-Json -Depth 6 -Compress
+
+          if($remaining.Count -ne 0){exit 4}
+          REMOTE
+          )
+
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 420s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
