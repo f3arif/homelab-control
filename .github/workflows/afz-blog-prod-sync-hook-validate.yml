@@ -43,7 +43,8 @@ jobs:
           )){
             if(-not $text.Contains($needle)){throw "Missing sync-hook invariant: $needle"}
           }
-          if(($text.Split('AFZ_BLOG_PRODUCTION_DEPLOY_SYNC_HOOK_V1').Count-1) -ne 1){
+          $marker='AFZ_BLOG_PRODUCTION_DEPLOY_SYNC_HOOK_V1'
+          if(([regex]::Matches($text,[regex]::Escape($marker))).Count -ne 1){
             throw 'Production deploy sync hook must occur exactly once.'
           }
           Write-Host 'SYNC_HOOK_SAFETY_PASS'
