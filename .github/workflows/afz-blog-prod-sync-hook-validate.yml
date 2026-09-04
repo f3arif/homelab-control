@@ -6,6 +6,7 @@ on:
       - chatgpt/afz-blog-prod-deploy-sync-hook
     paths:
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
+      - 'afz-openai-agent/requests/afz-blog-production-deploy.json'
       - '.github/workflows/afz-blog-prod-sync-hook-validate.yml'
 
 permissions:
@@ -47,4 +48,11 @@ jobs:
           if(([regex]::Matches($text,[regex]::Escape($marker))).Count -ne 1){
             throw 'Production deploy sync hook must occur exactly once.'
           }
+          $request=Get-Content 'afz-openai-agent/requests/afz-blog-production-deploy.json' -Raw | ConvertFrom-Json
+          if([string]$request.id -ne 'afz-blog-production-deploy-896679ff-r1'){throw 'request id mismatch'}
+          if([string]$request.expected_current_sha -ne 'a37e71aa0e0c9fad41ecdc9652a7024c485666f4'){throw 'current production SHA mismatch'}
+          if([string]$request.expected_blog_sha -ne '896679ff84a6aee4700eed0dfb0a227de2f541b9'){throw 'target Blog SHA mismatch'}
+          if([bool]$request.allow_database_mutation -or [bool]$request.allow_schema_or_migration_change -or [bool]$request.allow_website_publish){throw 'unsafe mutation flag enabled'}
+          if(-not [bool]$request.rollback_on_failure){throw 'rollback must remain enabled'}
+
           Write-Host 'SYNC_HOOK_SAFETY_PASS'
