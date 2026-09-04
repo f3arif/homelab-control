@@ -1,0 +1,93 @@
+name: H3 RadioHilal Hermes Cron Repair Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-radiohilal-hermes-cron-repair-signal.txt'
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: h3-radiohilal-hermes-cron-repair-once
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate one-shot signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          signal='.github/h3-radiohilal-hermes-cron-repair-signal.txt'
+          grep -Fx 'target=h3' "$signal"
+          grep -Fx 'action=radiohilal-hermes-cron-rh1' "$signal"
+          grep -Fx 'job=9d9eea1b7618' "$signal"
+          grep -Eq '^nonce=[A-Za-z0-9._-]+$' "$signal"
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: \${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: \${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Ensure H3 is awake
+        shell: bash
+        run: |
+          set -euo pipefail
+          if nc -z -w 3 100.106.186.118 22; then
+            echo 'H3_ALREADY_REACHABLE=YES'
+            exit 0
+          fi
+          echo 'H3_WAKE_REQUEST=PI'
+          curl --silent --show-error --fail-with-body --max-time 8 http://100.91.50.9:8087/wake/h3
+          for attempt in $(seq 1 24); do
+            echo "wake_attempt=$attempt"
+            if nc -z -w 3 100.106.186.118 22; then
+              echo 'H3_SSH_REACHABLE=PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          exit 40
+
+      - name: Run guarded H3 repair and record result
+        env:
+          AFZ_SHA: \${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/\${AFZ_SHA}/.github/scripts/h3-radiohilal-hermes-cron-rh1.ps1"
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
+          set +e
+          result=$(timeout 600s tailscale ssh Faiz@100.106.186.118 "$remote" 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$result"
+          {
+            printf 'workflowSha=%s\n' "$AFZ_SHA"
+            printf 'exitCode=%s\n' "$rc"
+            printf 'timestamp=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '%s\n' "$result"
+          } > .github/h3-radiohilal-hermes-cron-repair-result.txt
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add .github/h3-radiohilal-hermes-cron-repair-result.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record H3 RadioHilal Hermes cron repair result'
+            git push origin HEAD:main
+          fi
+          exit "$rc"
