@@ -120,6 +120,17 @@ function Invoke-MovieRecommenderCatalogDirect([string]$Action){
   try{return ($raw|ConvertFrom-Json)}catch{throw "MovieRecommender catalog runner returned invalid JSON: $raw"}
 }
 
+function Invoke-StremioOrganize([string]$Action){
+  if($Action -notin @('audit','apply')){throw 'unsupported Stremio organize action'}
+  $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Stremio-Organize.ps1'
+  if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){throw "Stremio organizer runner missing: $runner"}
+  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Action $Action -InstallRoot $InstallRoot 2>&1 | Out-String).Trim()
+  $code=$LASTEXITCODE
+  if($code -ne 0){throw "Stremio organizer failed exit=$code output=$raw"}
+  if([string]::IsNullOrWhiteSpace($raw)){throw 'Stremio organizer returned empty output'}
+  try{return ($raw|ConvertFrom-Json)}catch{throw "Stremio organizer returned invalid JSON: $raw"}
+}
+
 function Invoke-HermesRadioHilalCronAudit {
   $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Hermes-RadioHilalCronAudit.ps1'
   if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){throw "Hermes RadioHilal cron audit runner missing: $runner"}
@@ -151,7 +162,7 @@ $listener=New-Object Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")}
 $listener.Start()
-Log "START version=1.10.0 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly jellyfinVisibilityRepair=typed hpEnvySurfsharkExitNode=typed-fixed-target prospectEngineProbe=enabled"
+Log "START version=1.10.2 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly jellyfinVisibilityRepair=typed hpEnvySurfsharkExitNode=typed-fixed-target prospectEngineProbe=enabled"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
@@ -220,6 +231,22 @@ try{
       continue
     }
 
+    if($path -eq '/api/stremio-organize' -and $ctx.Request.HttpMethod -eq 'POST'){
+      if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='Stremio organizer peer not authorized';client=$ip};continue}
+      $req=Read-Json $ctx
+      $action=([string]$req.action).Trim().ToLowerInvariant()
+      $repo=[string]$req.repository
+      $ref=[string]$req.ref
+      $sha=([string]$req.sha).Trim().ToLowerInvariant()
+      $current=([string](Get-Commit)).Trim().ToLowerInvariant()
+      if($action -notin @('audit','apply')){Send-Json $ctx 400 @{ok=$false;error='unsupported Stremio organize action'};continue}
+      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}$' -or $sha -ne $current){Send-Json $ctx 409 @{ok=$false;error='Stremio organizer source mismatch';current=$current;requested=$sha};continue}
+      $r=Invoke-StremioOrganize $action
+      Log "Stremio organize action=$action changed=$([string]$r.changed) sha=$sha requested by $ip"
+      Send-Json $ctx 200 $r
+      continue
+    }
+
     if($path -eq '/api/hermes-radiohilal-cron' -and $ctx.Request.HttpMethod -eq 'POST'){
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='Hermes RadioHilal cron audit peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx
@@ -252,7 +279,7 @@ try{
 '@;Send-Html $ctx $html;continue}
     if($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET'){
       $u=Get-LastUpdate;$w=Get-WatcherState;$b=Get-BenchmarkState;$p=Get-ProspectEngineHealth;$task=Get-ScheduledTask -TaskName 'AFZ OpenAI Agent Updater' -ErrorAction SilentlyContinue
-      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.10.1';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});queueOrphanRemediation=@{typed=$true;route='/api/queue-orphan-remediation';actions=@('audit','apply');arbitraryShell=$false};hermesRadioHilalCron=@{typed=$true;route='/api/hermes-radiohilal-cron';actions=@('audit');jobId='9d9eea1b7618';readOnly=$true;arbitraryShell=$false};windowsWslMemoryAudit=@{typed=$true;route='/api/windows-wsl-memory-audit';actions=@('audit');readOnly=$true;arbitraryShell=$false};jellyfinVisibilityRepair=@{typed=$true;route='/api/jellyfin-visibility-repair';actions=@('audit','repair-exact-screenshot-user');exactScreenshotMatchRequired=$true;arbitraryShell=$false};hpEnvySurfsharkExitNode=@{typed=$true;route='/api/hpenvy-surfshark-exitnode';actions=@('audit','apply');fixedTarget='coolyo@100.71.26.69';localAuthorizationSentinelRequired=$true;arbitraryShell=$false};time=(Get-Date -Format o)};continue
+      Send-Json $ctx 200 @{ok=$true;service='AFZ-Agent-Control';version='1.10.2';commit=(Get-Commit);transport='github-fast-signal+exact-sha+codeload';fastAutoDeploy=$true;fastSignalIntervalSeconds=3;watcherStatus=$(if($w){$w.status}else{'starting'});watcherSignalSha=$(if($w){$w.signalSha}else{$null});watcherTime=$(if($w){$w.time}else{$null});fallbackCadenceSeconds=60;updateTask=$(if($task){[string]$task.State}else{'Missing'});lastUpdate=$(if($u){$u.finishedAt}else{$null});lastUpdateOk=$(if($u){[bool]$u.ok}else{$null});lastTrigger=$(if($u){$u.trigger}else{$null});prospectEngine=$p;h3QwenBenchmark=$(if($b){$b}else{$null});queueOrphanRemediation=@{typed=$true;route='/api/queue-orphan-remediation';actions=@('audit','apply');arbitraryShell=$false};hermesRadioHilalCron=@{typed=$true;route='/api/hermes-radiohilal-cron';actions=@('audit');jobId='9d9eea1b7618';readOnly=$true;arbitraryShell=$false};windowsWslMemoryAudit=@{typed=$true;route='/api/windows-wsl-memory-audit';actions=@('audit');readOnly=$true;arbitraryShell=$false};jellyfinVisibilityRepair=@{typed=$true;route='/api/jellyfin-visibility-repair';actions=@('audit','repair-exact-screenshot-user');exactScreenshotMatchRequired=$true;arbitraryShell=$false};stremioOrganize=@{typed=$true;route='/api/stremio-organize';actions=@('audit','apply');arbitraryShell=$false};hpEnvySurfsharkExitNode=@{typed=$true;route='/api/hpenvy-surfshark-exitnode';actions=@('audit','apply');fixedTarget='coolyo@100.71.26.69';localAuthorizationSentinelRequired=$true;arbitraryShell=$false};time=(Get-Date -Format o)};continue
     }
     if($path -eq '/api/update-now' -and $ctx.Request.HttpMethod -eq 'POST'){$r=Start-Update;Log "fallback update requested by $ip";Send-Json $ctx 202 $r;continue}
     if($path -eq '/api/control' -and $ctx.Request.HttpMethod -eq 'POST'){$req=Read-Json $ctx;$action=[string]$req.action;if($action -notin @('update-agent','update-openai-agent','pull-agent-now')){Send-Json $ctx 400 @{ok=$false;error='unsupported action'};continue};$r=Start-Update;Log "control action=$action requested by $ip";Send-Json $ctx 202 $r;continue}
