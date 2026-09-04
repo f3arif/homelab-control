@@ -74,7 +74,7 @@ jobs:
 
           $taskAfter=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
           $taskAfterState=if($null -ne $taskAfter){[string]$taskAfter.State}else{'NOT_FOUND'}
-          [ordered]@{
+          $resultObj=[ordered]@{
             host=$env:COMPUTERNAME
             taskBefore=$taskBefore
             taskAfter=$taskAfterState
@@ -85,7 +85,14 @@ jobs:
             apiFrontendChanged=$false
             restartPolicy='Existing 00:30-07:00 gate plus RAM<80 CPU<85 no-active-Whisper queue-idle gates remain authoritative'
             time=(Get-Date -Format o)
-          } | ConvertTo-Json -Depth 6 -Compress
+          }
+          $oneDrive=[string]$env:OneDriveCommercial
+          if([string]::IsNullOrWhiteSpace($oneDrive)){$oneDrive='C:\Users\Faiz\OneDrive - AFZ Engineering Inc'}
+          $resultDir=Join-Path $oneDrive 'AFZ Shared\AFZ Workers\Results'
+          New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
+          $resultJson=Join-Path $resultDir 'radiohilal-transcription-pause-github-latest.json'
+          $resultObj | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $resultJson -Encoding UTF8
+          $resultObj | ConvertTo-Json -Depth 6 -Compress
 
           if($remaining.Count -ne 0){exit 4}
           REMOTE
