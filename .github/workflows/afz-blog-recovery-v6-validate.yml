@@ -1,5 +1,5 @@
 name: AFZ Blog Recovery V6 Validate
-# retrigger: v1
+# retrigger: v2
 
 on:
   push:
