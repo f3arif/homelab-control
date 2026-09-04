@@ -1,6 +1,1 @@
-schema=1
-purpose=hermes-r32-control-health
-mutation=none
-job_id=h3-hermes-chat-gateway-recovery-20260903-r32
-source_signal=d40fa713dc8abc7cfa45b64b528407f5d8eb41ff
-probe_only=true
+radiohilal-cron-reasoning-repair=2026-09-04T10:47:00-04:00
