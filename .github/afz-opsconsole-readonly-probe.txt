@@ -1,3 +1,1 @@
-probe=windows-main-opsconsole-readonly
-reason=hermes-r18-control-plane-route-discovery
-mutation=none
+radiohilal-refresh-check 2026-09-04T01:53:58.448Z
