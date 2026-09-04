@@ -1,0 +1,56 @@
+name: H3 To Windows-main Recovery Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-to-windowsmain-recovery-probe.yml'
+      - '.github/h3-to-windowsmain-recovery-probe.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Windows-main from H3
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.106.186.118
+          ps=$(cat <<'PS'
+          $ErrorActionPreference='Continue'
+          Write-Output ('H3_HOST=' + $env:COMPUTERNAME)
+          Write-Output ('H3_TIME=' + (Get-Date -Format o))
+          foreach($hostName in @('100.70.25.8','192.168.50.94')){
+            Write-Output ('=== HOST=' + $hostName + ' ===')
+            try{Test-Connection -ComputerName $hostName -Count 1 -Quiet | ForEach-Object { Write-Output ('PING=' + $_) }}catch{Write-Output ('PING_ERROR=' + $_.Exception.Message)}
+            foreach($port in @(22,445,3389,5985,5986,8787,8790,8796,8797)){
+              try{
+                $c=New-Object Net.Sockets.TcpClient
+                $ar=$c.BeginConnect($hostName,$port,$null,$null)
+                $ok=$ar.AsyncWaitHandle.WaitOne(2500,$false)
+                if($ok -and $c.Connected){$c.EndConnect($ar);Write-Output ('TCP_' + $port + '=OPEN')}else{Write-Output ('TCP_' + $port + '=CLOSED_OR_FILTERED')}
+                $c.Close()
+              }catch{Write-Output ('TCP_' + $port + '=CLOSED_OR_FILTERED')}
+            }
+          }
+          try{
+            $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://100.70.25.8:8790/api/status' -TimeoutSec 8
+            Write-Output ('OPS_HTTP=' + [int]$r.StatusCode)
+            Write-Output $r.Content
+          }catch{Write-Output ('OPS_ERROR=' + $_.Exception.Message)}
+          PS
+          )
+          enc=$(printf '%s' "$ps" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 120s tailscale ssh Faiz@100.106.186.118 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
