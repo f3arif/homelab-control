@@ -1,0 +1,82 @@
+name: Validate H3 RadioHilal Maintenance Controller
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/tools/Run-H3-Qwen27B-WebsiteBenchmark.ps1'
+      - '.github/scripts/h3-radiohilal-hermes-cron-rh1.ps1'
+      - '.github/workflows/h3-radiohilal-maintenance-controller-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @(
+            'afz-openai-agent\tools\Run-H3-Qwen27B-WebsiteBenchmark.ps1',
+            '.github\scripts\h3-radiohilal-hermes-cron-rh1.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+            if(@($errors).Count){$errors|Format-List|Out-String|Write-Error;throw "Parse failed: $p"}
+            Write-Output "PARSE_PASS=$p"
+          }
+
+      - name: Enforce maintenance isolation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='afz-openai-agent\tools\Run-H3-Qwen27B-WebsiteBenchmark.ps1'
+          $c=Get-Content -LiteralPath $p -Raw
+          foreach($needle in @(
+            'RADIOHILAL_HERMES_CRON_MAINTENANCE_GATE_V1',
+            "maintenance_action -ne 'radiohilal-hermes-cron-rh1'",
+            "DESKTOP-H3R6CQN",
+            "maintenance_cron_job_id -ne '9d9eea1b7618'",
+            'allow_global_hermes_config_change',
+            'fail_closed_pause_on_test_failure',
+            '.github/scripts/h3-radiohilal-hermes-cron-rh1.ps1',
+            'WaitForExit(600000)',
+            'AFZ_RESULT_JSON=',
+            'MAINTENANCE_PASS',
+            'MAINTENANCE_FAIL'
+          )){if(-not $c.Contains($needle)){throw "Missing maintenance invariant: $needle"}}
+          $gate=$c.IndexOf('RADIOHILAL_HERMES_CRON_MAINTENANCE_GATE_V1')
+          $benchmark=$c.IndexOf("Set-Location $ProjectRoot")
+          $modelCall=$c.IndexOf("http://127.0.0.1:11434/api/generate")
+          if($gate -lt 0 -or $benchmark -lt 0 -or $modelCall -lt 0 -or $gate -gt $benchmark -or $gate -gt $modelCall){
+            throw 'Maintenance gate does not precede benchmark/model execution.'
+          }
+          foreach($forbidden in @('Invoke-Expression','iex ','cmd.exe /c')){
+            if($c -match [regex]::Escape($forbidden)){throw "Forbidden primitive in controller: $forbidden"}
+          }
+          Write-Output 'MAINTENANCE_ISOLATION=PASS'
+
+      - name: Enforce repair fail-closed contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $c=Get-Content -LiteralPath '.github\scripts\h3-radiohilal-hermes-cron-rh1.ps1' -Raw
+          foreach($needle in @(
+            "9d9eea1b7618",
+            "qwen3.8-ridge:27b-64k",
+            "qwen3.8-ridge:27b-64k-rh1",
+            "reasoning_effort='high'",
+            'SMOKE=PASS',
+            'TEST=FAIL_REPAUSE',
+            'FINAL_STATE=PAUSED',
+            'FINAL_STATE=RESUMED',
+            'GLOBAL_HERMES_CONFIG_MUTATION=NONE',
+            'BASE_MODELS_MUTATION=NONE'
+          )){if(-not $c.Contains($needle)){throw "Missing repair invariant: $needle"}}
+          Write-Output 'REPAIR_FAIL_CLOSED=PASS'
