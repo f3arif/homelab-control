@@ -1,6 +1,7 @@
 name: H3 Ollama 0.33.2 Corruption Repair Once
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -12,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
   id-token: write
 
 concurrency:
@@ -19,7 +21,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  relay:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - name: Dispatch main-branch repair and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='h3-ollama-0332-corruption-repair-once.yml'
+          before=$(gh run list --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+          gh workflow run "$workflow" --ref main
+          run_id=''
+          for attempt in $(seq 1 30); do
+            candidate=$(gh run list --workflow "$workflow" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [ -n "$candidate" ] && [ "$candidate" != "$before" ]; then
+              run_id="$candidate"
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$run_id" ]; then
+            echo 'Failed to resolve dispatched repair run ID' >&2
+            exit 1
+          fi
+          echo "DISPATCHED_REPAIR_RUN=$run_id"
+          gh run watch "$run_id" --exit-status --interval 10
+
   repair:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
