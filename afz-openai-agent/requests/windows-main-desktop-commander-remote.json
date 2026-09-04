@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "project": "desktop-commander-remote",
+  "action": "launch-windows-main-pairing",
+  "job_id": "windows-main-desktop-commander-pairing-20260904-r1",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "persistent_startup": false,
+  "capture_auth_material": false
+}
