@@ -101,6 +101,44 @@ try{
   if($dirty){throw 'MAIN_CHECKOUT_DIRTY'}
 
   $before=Git-Text $repo @('rev-parse','HEAD')
+  # Prefer the existing interactive GitHub bridge as the private-repo trust boundary.
+  # SYSTEM verifies recent bridge success plus clean, coherent local refs only.
+  $trackedMainLocal=(Git-Text $repo @('rev-parse',"refs/remotes/origin/$mainBranch")).ToLowerInvariant()
+  $trackedOpsLocal=''
+  try{$trackedOpsLocal=(Git-Text $repo @('rev-parse',"refs/remotes/origin/$opsBranch")).ToLowerInvariant()}catch{}
+  $opsHeadLocal='';$opsBranchLocal='';$opsDirtyLocal=@()
+  if(Test-Path -LiteralPath $ops){
+    try{$opsHeadLocal=(Git-Text $ops @('rev-parse','HEAD')).ToLowerInvariant()}catch{}
+    try{$opsBranchLocal=Git-Text $ops @('symbolic-ref','--quiet','--short','HEAD')}catch{}
+    try{$opsDirtyLocal=@((Invoke-Git $ops @('status','--porcelain=v1') -AllowFailure).Lines|Where-Object{$_})}catch{$opsDirtyLocal=@('probe-failed')}
+  }
+  $bridgeInfo=$null
+  try{$bridgeInfo=Get-ScheduledTaskInfo -TaskName $bridgeTask -ErrorAction Stop}catch{}
+  $bridgeAgeSeconds=$null
+  if($bridgeInfo -and $bridgeInfo.LastRunTime -gt [datetime]'2000-01-01'){
+    $bridgeAgeSeconds=[math]::Floor(((Get-Date)-$bridgeInfo.LastRunTime).TotalSeconds)
+  }
+  $bridgeFresh=($bridgeInfo -and [int64]$bridgeInfo.LastTaskResult -eq 0 -and $bridgeAgeSeconds -ne $null -and $bridgeAgeSeconds -ge 0 -and $bridgeAgeSeconds -le 300)
+  $localRefsCoherent=(
+    $trackedMainLocal -match '^[0-9a-f]{40}$' -and
+    $before.ToLowerInvariant() -eq $trackedMainLocal -and
+    $trackedOpsLocal -match '^[0-9a-f]{40}$' -and
+    $opsHeadLocal -eq $trackedOpsLocal -and
+    $opsBranchLocal -eq $opsBranch -and
+    @($opsDirtyLocal).Count -eq 0 -and
+    (Test-Ancestor $repo $requiredMain $trackedMainLocal)
+  )
+  if($bridgeFresh -and $localRefsCoherent){
+    Publish ([ordered]@{
+      schema=1;project='radiohilal';status='completed';classification='RADIOHILAL_GIT_TRACKING_CURRENT_VIA_USER_BRIDGE';retryable=$false
+      host=$expectedComputer;mainBefore=$before;remoteMain=$trackedMainLocal;mainAfter=$before
+      remoteOps=$trackedOpsLocal;opsStatus='current';requiredMain=$requiredMain
+      bridgeTaskState=$(if($task){[string]$task.State}else{'Missing'});bridgeLastResult=[int64]$bridgeInfo.LastTaskResult;bridgeAgeSeconds=$bridgeAgeSeconds
+      privateGitNetworkFromSystem=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)
+    })
+    exit 0
+  }
+
   $ls=Invoke-Git $repo @('ls-remote','--exit-code','origin',"refs/heads/$mainBranch","refs/heads/$opsBranch") -AllowFailure
   if($ls.Code -ne 0){
     Publish ([ordered]@{
