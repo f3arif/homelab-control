@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - chatgpt/afz-blog-prod-deploy-sync-hook
+      - chatgpt/afz-blog-prod-deploy-a223b14b
     paths:
       - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
       - 'afz-openai-agent/requests/afz-blog-production-deploy.json'
@@ -49,10 +50,11 @@ jobs:
             throw 'Production deploy sync hook must occur exactly once.'
           }
           $request=Get-Content 'afz-openai-agent/requests/afz-blog-production-deploy.json' -Raw | ConvertFrom-Json
-          if([string]$request.id -ne 'afz-blog-production-deploy-896679ff-r1'){throw 'request id mismatch'}
+          if([string]$request.id -ne 'afz-blog-production-deploy-a223b14b-r2'){throw 'request id mismatch'}
           if([string]$request.expected_current_sha -ne 'a37e71aa0e0c9fad41ecdc9652a7024c485666f4'){throw 'current production SHA mismatch'}
-          if([string]$request.expected_blog_sha -ne '896679ff84a6aee4700eed0dfb0a227de2f541b9'){throw 'target Blog SHA mismatch'}
+          if([string]$request.expected_blog_sha -ne 'a223b14b38260d097343b8cdb4499f4122140321'){throw 'target Blog SHA mismatch'}
           if([bool]$request.allow_database_mutation -or [bool]$request.allow_schema_or_migration_change -or [bool]$request.allow_website_publish){throw 'unsafe mutation flag enabled'}
+          if(-not [bool]$request.allow_database_untrack_migration){throw 'database untrack migration must remain enabled'}
           if(-not [bool]$request.rollback_on_failure){throw 'rollback must remain enabled'}
 
           Write-Host 'SYNC_HOOK_SAFETY_PASS'

@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "id": "afz-blog-production-deploy-896679ff-r1",
+  "id": "afz-blog-production-deploy-a223b14b-r2",
   "status": "ACTIVE",
   "action": "deploy-validated-main",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
   "production_root": "C:\\docker\\afz-blog-manager",
   "expected_current_sha": "a37e71aa0e0c9fad41ecdc9652a7024c485666f4",
-  "expected_blog_sha": "896679ff84a6aee4700eed0dfb0a227de2f541b9",
+  "expected_blog_sha": "a223b14b38260d097343b8cdb4499f4122140321",
   "require_clean": true,
   "require_fast_forward": true,
   "allow_build": true,
@@ -15,5 +15,6 @@
   "allow_database_mutation": false,
   "allow_schema_or_migration_change": false,
   "allow_website_publish": false,
-  "rollback_on_failure": true
+  "rollback_on_failure": true,
+  "allow_database_untrack_migration": true
 }
