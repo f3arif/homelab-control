@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "afz-blog-production-deploy-a223b14b-r2",
-  "status": "ACTIVE",
+  "status": "HOLD",
   "action": "deploy-validated-main",
   "target": "windows-main",
   "host": "DESKTOP-10SKF0M",
