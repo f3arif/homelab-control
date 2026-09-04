@@ -304,7 +304,7 @@ try{
   $hindiLines=@(
     '    start=(datetime.now(timezone.utc)-timedelta(days=540)).date().isoformat()',
     '    end=datetime.now(timezone.utc).date().isoformat()',
-    '    # AFZ_HINDI_TARGETED_DISCOVERY_V3',
+    '    # AFZ_HINDI_TARGETED_DISCOVERY_V4_SCOPE_SAFE',
     '    hindi_ids=set()',
     '    for p in range(1,min(6,MAX_PAGES)+1):',
     '        try:',
@@ -321,12 +321,19 @@ try{
   $hindiReplacement=$hindiLines -join $nl
   $text=Replace-One $text '(?m)^    start=\(datetime\.now\(timezone\.utc\)-timedelta\(days=540\)\)\.date\(\)\.isoformat\(\)\r?\n    end=datetime\.now\(timezone\.utc\)\.date\(\)\.isoformat\(\)$' $hindiReplacement 'hindi-targeted-discovery'
 
+  # AFZ_HINDI_SCOPE_SAFE_V1
+  # Keep targeted IDs in the same refresh scope as their enriched details.
+  $text=Replace-One $text '(?m)^    return list\(pool\)\[:500\]$' '    return list(pool)[:500], hindi_ids' 'hindi-candidates-return-scope'
+  $text=Replace-One $text '(?m)^    ids=candidates\(\)$' '    ids,hindi_ids=candidates()' 'hindi-refresh-unpack'
+  $text=Replace-One $text '(?m)^            if isinstance\(d,dict\): details\.append\(d\)$' '            if isinstance(d,dict): details.append((fut[f],d))' 'hindi-detail-id-retention'
+  $text=Replace-One $text '(?m)^    for d in details:$' '    for tid,d in details:' 'hindi-refresh-detail-id-unpack'
+
   $gidsLine="        gids={int(x.get('id')) for x in (d.get('genres') or []) if isinstance(x,dict) and x.get('id') is not None}"
   $gidsReplacement=$gidsLine+$nl+"        olang=(d.get('originalLanguage') or d.get('original_language') or '').lower()"
   $text=Replace-One $text ([regex]::Escape($gidsLine)) $gidsReplacement 'original-language'
 
   $digitalLine="                cats['new_digital'].append((dr['dt'],m))"
-  $digitalReplacement=$digitalLine+$nl+"                if olang=='hi' or int(tid) in hindi_ids: cats['hindi_bollywood'].append((dr['dt'],m))"
+  $digitalReplacement=$digitalLine+$nl+"                if olang=='hi' or tid in hindi_ids: cats['hindi_bollywood'].append((dr['dt'],m))"
   $text=Replace-One $text ([regex]::Escape($digitalLine)) $digitalReplacement 'hindi-catalog-append'
 
   $blurayOld="                cats['bluray_4k'].append(((premium,pr['dt']),m))"
@@ -336,6 +343,18 @@ try{
   $descOld='Read-only new digital, genre, Blu-ray and 4K movie catalogs from the existing AFZ media metadata stack.'
   $descNew='Read-only new digital, genre, Hindi/Bollywood, Blu-ray and 4K movie catalogs from the existing AFZ media metadata stack.'
   if($text.Contains($descOld)){$text=$text.Replace($descOld,$descNew)}
+
+  foreach($requiredScopeMarker in @(
+    'AFZ_HINDI_TARGETED_DISCOVERY_V4_SCOPE_SAFE',
+    'return list(pool)[:500], hindi_ids',
+    'ids,hindi_ids=candidates()',
+    'details.append((fut[f],d))',
+    'for tid,d in details:',
+    "if olang=='hi' or tid in hindi_ids:"
+  )){
+    if(-not $text.Contains($requiredScopeMarker)){throw "HINDI_SCOPE_MARKER_MISSING marker=$requiredScopeMarker"}
+  }
+  if($text.Contains("if olang=='hi' or int(tid) in hindi_ids:")){throw 'HINDI_SCOPE_LEAK_STILL_PRESENT'}
 
   [IO.File]::WriteAllText($sourcePath,$text,$utf8)
   $changed=$true
