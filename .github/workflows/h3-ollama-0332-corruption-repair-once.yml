@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 14
     steps:
+      - uses: actions/checkout@v4
       - name: Dispatch main-branch repair and wait
         env:
           GH_TOKEN: ${{ github.token }}
