@@ -1,5 +1,5 @@
-name: AFZ Blog HP Envy Relay Probe
-# retrigger: relay probe v2
+name: AFZ Blog HP Envy Control Hub Probe
+# retrigger: control-hub-http-v1
 
 on:
   push:
@@ -18,10 +18,8 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@v4
-
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
@@ -29,56 +27,20 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Probe from HP Envy relay
+      - name: Read-only Control Hub probes
         shell: bash
         run: |
           set -u
-          remote=$(cat <<'REMOTE'
-          set -u
-          echo "RELAY_HOST=$(hostname)"
-          echo "RELAY_USER=$(id -un)"
-          echo "RELAY_TS_BEGIN"
-          tailscale status 2>/dev/null || true
-          echo "RELAY_TS_END"
-
-          echo "WINDOWS_MAIN_TS_PING_BEGIN"
-          tailscale ping -c 2 --timeout=5s 100.70.25.8 2>&1 || true
-          echo "WINDOWS_MAIN_TS_PING_END"
-
-          code=$(curl -sS --connect-timeout 3 --max-time 8 -o /tmp/wmain-health -w '%{http_code}' http://100.70.25.8:8797/health 2>/tmp/wmain-curl.err || true)
-          echo "WINDOWS_MAIN_8797_HTTP=$code"
-          if [ -s /tmp/wmain-health ]; then
-            echo "WINDOWS_MAIN_8797_BODY_BEGIN"
-            head -c 2000 /tmp/wmain-health
-            echo
-            echo "WINDOWS_MAIN_8797_BODY_END"
-          fi
-          if [ -s /tmp/wmain-curl.err ]; then
-            echo "WINDOWS_MAIN_8797_ERROR_BEGIN"
-            cat /tmp/wmain-curl.err
-            echo "WINDOWS_MAIN_8797_ERROR_END"
-          fi
-
-          echo "H3_TS_PING_BEGIN"
-          tailscale ping -c 2 --timeout=5s 100.106.186.118 2>&1 || true
-          echo "H3_TS_PING_END"
-
-          echo "H3_TS_SSH_BEGIN"
-          timeout 12s tailscale ssh Faiz@100.106.186.118 'hostname && whoami' 2>&1 || true
-          echo "H3_TS_SSH_END"
-
-          for port in 22 9119 11434; do
-            if timeout 4 bash -c "</dev/tcp/100.106.186.118/$port" 2>/dev/null; then
-              echo "H3_TCP_$port=OPEN"
-            else
-              echo "H3_TCP_$port=CLOSED_OR_FILTERED"
-            fi
+          for url in \
+            http://100.71.26.69:8789/api/state \
+            http://100.71.26.69:8791/api/status \
+            http://100.71.26.69:8791/api/control-hub/state; do
+            echo "=== $url ==="
+            set +e
+            code=$(curl -sS --connect-timeout 4 --max-time 12 -o /tmp/afz-probe-body -w '%{http_code}' "$url" 2>/tmp/afz-probe-err)
+            rc=$?
+            set -e
+            echo "CURL_EXIT=$rc HTTP=$code"
+            if [ -s /tmp/afz-probe-body ]; then head -c 12000 /tmp/afz-probe-body; echo; fi
+            if [ -s /tmp/afz-probe-err ]; then cat /tmp/afz-probe-err; fi
           done
-          REMOTE
-          )
-          set +e
-          printf '%s\n' "$remote" | timeout 90s tailscale ssh coolyo@100.71.26.69 'bash -s'
-          rc=$?
-          set -e
-          echo "HPENVY_RELAY_SSH_EXIT=$rc"
-          exit "$rc"
