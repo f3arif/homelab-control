@@ -1,0 +1,77 @@
+name: Windows-main RadioHilal Updater Kick
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windowsmain-radiohilal-updater-kick.yml'
+      - '.github/windowsmain-radiohilal-updater-kick.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-radiohilal-updater-kick
+  cancel-in-progress: false
+
+jobs:
+  kick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Kick SYSTEM updater twice and report RadioHilal deploy state
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.70.25.8'
+          tailscale ping --timeout=5s -c 2 "$host"
+
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+          $taskName='AFZ OpenAI Agent Updater'
+          function Run-UpdaterPass {
+            $t=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            if([string]$t.State -eq 'Running'){
+              $deadline=(Get-Date).AddSeconds(240)
+              do{Start-Sleep -Seconds 2;$t=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop}while([string]$t.State -eq 'Running' -and (Get-Date) -lt $deadline)
+              if([string]$t.State -eq 'Running'){throw 'UPDATER_PREEXISTING_TIMEOUT'}
+            }
+            Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            $deadline=(Get-Date).AddSeconds(240)
+            do{Start-Sleep -Seconds 2;$t=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop}while([string]$t.State -eq 'Running' -and (Get-Date) -lt $deadline)
+            if([string]$t.State -eq 'Running'){throw 'UPDATER_PASS_TIMEOUT'}
+          }
+          Run-UpdaterPass
+          Run-UpdaterPass
+          $updatePath='C:\ProgramData\AFZ\OpenAIAgent\last-update.json'
+          $deployPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\radiohilal-api-deploy\latest.json'
+          $update=$null;$deploy=$null
+          if(Test-Path -LiteralPath $updatePath -PathType Leaf){try{$update=Get-Content -LiteralPath $updatePath -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
+          if(Test-Path -LiteralPath $deployPath -PathType Leaf){try{$deploy=Get-Content -LiteralPath $deployPath -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
+          [ordered]@{
+            host=$env:COMPUTERNAME
+            updaterOk=$(if($update){[bool]$update.ok}else{$false})
+            updaterRemoteSha=$(if($update){[string]$update.remoteSha}else{$null})
+            deployStatus=$(if($deploy){[string]$deploy.status}else{'missing'})
+            deployClassification=$(if($deploy){[string]$deploy.classification}else{'missing'})
+            deployExpectedMainCommit=$(if($deploy){[string]$deploy.expectedMainCommit}else{$null})
+            deployValidationJobId=$(if($deploy){[string]$deploy.validationJobId}else{$null})
+            serviceStatus=$(if($deploy){[string]$deploy.serviceStatus}else{$null})
+            api=$(if($deploy){[string]$deploy.api}else{$null})
+            library=$(if($deploy){[string]$deploy.library}else{$null})
+            queue=$(if($deploy){[string]$deploy.queue}else{$null})
+            time=(Get-Date -Format o)
+          } | ConvertTo-Json -Depth 8 -Compress
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 540s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
