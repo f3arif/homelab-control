@@ -390,6 +390,16 @@ if(Test-Path -LiteralPath $movieReleaseFixRunner -PathType Leaf){
   }catch{}
 }
 
+# MOVIERECOMMENDER_CATALOG_V2_GITHUB_HOOK_V1
+# GitHub-primary one-shot MovieRecommender catalog-v2 repair. The request and
+# runner arrive in the exact source sync; OneDrive is backup-only.
+$movieCatalogV2GitHubRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-MovieRecommender-CatalogV2-GitHub.ps1'
+if(Test-Path -LiteralPath $movieCatalogV2GitHubRunner -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $movieCatalogV2GitHubRunner -InstallRoot $InstallRoot -SyncedSha $resolvedSha *> $null
+  }catch{}
+}
+
 # MOVIERECOMMENDER_CATALOG_AUDIT_SYNC_HOOK_V1
 # Fixed read-only one-shot. Core sync has already installed the typed runner and
 # request at this point. Run it before unrelated post-sync hooks can block.
