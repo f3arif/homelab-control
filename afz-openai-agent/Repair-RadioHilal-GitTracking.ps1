@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param([string]$InstallRoot='C:\AFZ\homelab-control')
 
@@ -33,11 +33,29 @@ function Normalize-Remote([string]$Value){
 }
 function Invoke-Git([string]$WorkingDirectory,[string[]]$Arguments,[switch]$AllowFailure){
   $old=$ErrorActionPreference
+  $tag=[guid]::NewGuid().ToString('n')
+  $outFile=Join-Path $env:TEMP ($tag+'.git.out.txt')
+  $errFile=Join-Path $env:TEMP ($tag+'.git.err.txt')
   try{
     $ErrorActionPreference='Continue'
-    $lines=@(& git.exe -C $WorkingDirectory @Arguments 2>&1|ForEach-Object{[string]$_})
-    $code=$LASTEXITCODE
-  }finally{$ErrorActionPreference=$old}
+    $env:GIT_TERMINAL_PROMPT='0'
+    $env:GCM_INTERACTIVE='Never'
+    $gitArgs=@('-C',$WorkingDirectory)+@($Arguments)
+    $p=Start-Process -FilePath 'git.exe' -ArgumentList $gitArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -NoNewWindow -PassThru
+    if(-not $p.WaitForExit(45000)){
+      try{& taskkill.exe /PID $p.Id /T /F *> $null}catch{}
+      $code=124
+      $lines=@('git operation timed out after 45 seconds')
+    }else{
+      $code=[int]$p.ExitCode
+      $lines=@()
+      if(Test-Path -LiteralPath $outFile){$lines+=@(Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue|ForEach-Object{[string]$_})}
+      if(Test-Path -LiteralPath $errFile){$lines+=@(Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue|ForEach-Object{[string]$_})}
+    }
+  }finally{
+    $ErrorActionPreference=$old
+    Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+  }
   $text=($lines -join [Environment]::NewLine).Trim()
   if($code -ne 0 -and -not $AllowFailure){throw "git $($Arguments -join ' ') failed exit=$code detail=$text"}
   return [pscustomobject]@{Code=[int]$code;Lines=$lines;Text=$text}
