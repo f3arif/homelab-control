@@ -1,0 +1,57 @@
+name: AFZ Tailnet Peer State Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-tailnet-peer-state-probe.yml'
+      - '.github/afz-tailnet-peer-state-probe.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read peer state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess
+          data=json.loads(subprocess.check_output(['tailscale','status','--json'], text=True))
+          wanted={'100.70.25.8','100.71.26.69','100.106.186.118','100.91.50.9'}
+          print('SELF', json.dumps({k:data.get(k) for k in ('BackendState','TailscaleIPs','CurrentTailnet')}, default=str))
+          for _,p in (data.get('Peer') or {}).items():
+              ips=set(p.get('TailscaleIPs') or [])
+              if ips & wanted:
+                  safe={
+                    'HostName':p.get('HostName'),
+                    'DNSName':p.get('DNSName'),
+                    'TailscaleIPs':p.get('TailscaleIPs'),
+                    'Online':p.get('Online'),
+                    'Active':p.get('Active'),
+                    'LastSeen':p.get('LastSeen'),
+                    'Relay':p.get('Relay'),
+                    'RxBytes':p.get('RxBytes'),
+                    'TxBytes':p.get('TxBytes'),
+                    'Tags':p.get('Tags'),
+                    'Capabilities':p.get('Capabilities')
+                  }
+                  print('PEER', json.dumps(safe, default=str))
+          PY
+          echo '=== PING DETAIL ==='
+          for ip in 100.70.25.8 100.71.26.69 100.106.186.118 100.91.50.9; do
+            echo "--- $ip ---"
+            tailscale ping --timeout=5s -c 2 "$ip" || true
+          done
