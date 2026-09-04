@@ -2,6 +2,7 @@ import argparse
 import json
 import socket
 import time
+import urllib.request
 from urllib.parse import urlsplit
 
 MARIONETTE_HOST = "127.0.0.1"
@@ -86,8 +87,17 @@ def main():
     parser.add_argument("--action", choices=("audit", "apply"), default="audit")
     args = parser.parse_args()
 
+    live_manifest = None
+    if args.action == "apply":
+        with urllib.request.urlopen(AFZ_MANIFEST, timeout=8) as response:
+            live_manifest = json.load(response)
+        if live_manifest.get("id") != "com.afzengineering.releasecatalog":
+            raise RuntimeError("Unexpected AFZ manifest id")
+        if live_manifest.get("version") != "0.3.1":
+            raise RuntimeError(f"Unexpected AFZ manifest version: {live_manifest.get('version')!r}")
+
     sock = socket.create_connection((MARIONETTE_HOST, MARIONETTE_PORT), 6)
-    sock.settimeout(55)
+    sock.settimeout(75)
     hello = recv_message(sock)
     if hello.get("applicationType") != "gecko":
         raise RuntimeError(f"Unexpected Marionette peer: {hello!r}")
@@ -96,29 +106,40 @@ def main():
     command(sock, seq, "WebDriver:NewSession", {"capabilities": {"alwaysMatch": {}}})
     seq += 1
     seq, _ = find_stremio_window(sock, seq)
+    command(sock, seq, "WebDriver:SetTimeouts", {"script": 60000, "pageLoad": 300000, "implicit": 0})
+    seq += 1
 
     action_json = json.dumps(args.action)
     manifest_json = json.dumps(AFZ_MANIFEST)
+    manifest_payload_json = json.dumps(live_manifest)
     js = r"""
 const done = arguments[arguments.length - 1];
 (async () => {
   const action = ACTION_VALUE;
   const afzManifestUrl = AFZ_MANIFEST_VALUE;
+  const liveManifest = AFZ_MANIFEST_PAYLOAD;
   const profile = JSON.parse(localStorage.getItem('profile') || '{}');
   const authKey = profile?.auth?.key;
   if (!authKey) return done({ok:false,error:'stremio-auth-missing'});
 
   async function api(path, body) {
-    const r = await fetch('https://api.strem.io/api/' + path, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)
-    });
-    const text = await r.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch (_) {}
-    if (!r.ok) throw new Error(path + ' HTTP ' + r.status);
-    return data;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const r = await fetch('https://api.strem.io/api/' + path, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body),
+        signal:controller.signal
+      });
+      const text = await r.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch (_) {}
+      if (!r.ok) throw new Error(path + ' HTTP ' + r.status);
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   const beforeData = await api('addonCollectionGet', {authKey});
@@ -148,22 +169,17 @@ const done = arguments[arguments.length - 1];
   let afzManifestRefreshed = false;
   let afzRefreshError = null;
   let afz = addons.find(a => a?.manifest?.id === 'com.afzengineering.releasecatalog' || a?.manifest?.name === 'AFZ New Movie Releases');
-  try {
-    const mr = await fetch(afzManifestUrl, {cache:'no-store'});
-    if (!mr.ok) throw new Error('HTTP ' + mr.status);
-    const live = await mr.json();
-    if (live?.id !== 'com.afzengineering.releasecatalog') throw new Error('unexpected manifest id');
-    if (afz) {
-      afz.manifest = live;
-      afz.transportUrl = afzManifestUrl;
-    } else {
-      afz = {transportUrl:afzManifestUrl, manifest:live, flags:{}};
-      addons.push(afz);
-    }
-    afzManifestRefreshed = true;
-  } catch (e) {
-    afzRefreshError = String(e);
+  if (!liveManifest || liveManifest?.id !== 'com.afzengineering.releasecatalog' || liveManifest?.version !== '0.3.1') {
+    return done({ok:false,error:'validated AFZ manifest payload missing'});
   }
+  if (afz) {
+    afz.manifest = liveManifest;
+    afz.transportUrl = afzManifestUrl;
+  } else {
+    afz = {transportUrl:afzManifestUrl, manifest:liveManifest, flags:{}};
+    addons.push(afz);
+  }
+  afzManifestRefreshed = true;
 
   const trakt = addons.find(a => a?.manifest?.name === 'Trakt Integration');
   if (trakt?.manifest?.catalogs) {
@@ -230,7 +246,7 @@ const done = arguments[arguments.length - 1];
   });
 })().catch(e => done({ok:false,error:String(e)}));
 """
-    js = js.replace("ACTION_VALUE", action_json).replace("AFZ_MANIFEST_VALUE", manifest_json)
+    js = js.replace("ACTION_VALUE", action_json).replace("AFZ_MANIFEST_VALUE", manifest_json).replace("AFZ_MANIFEST_PAYLOAD", manifest_payload_json)
     seq, result = execute_async(sock, seq, js)
 
     if args.action == "apply" and result and result.get("ok"):
