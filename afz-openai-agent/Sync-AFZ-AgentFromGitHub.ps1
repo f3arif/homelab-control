@@ -419,6 +419,20 @@ if(Test-Path -LiteralPath $blogRuntimeEnsure -PathType Leaf){
   try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogRuntimeEnsure *> $null}catch{}
 }
 
+
+# AFZ_BLOG_PRODUCTION_DEPLOY_SYNC_HOOK_V1
+# The sync wrapper is fetched fresh on every exact-SHA updater pass, so this
+# typed one-shot runs even when the long-lived updater AST predates the hook.
+# The helper remains SYSTEM-only, exact-target, fast-forward-only, DB/schema
+# blocking, health-checked, and rollback-protected.
+$blogProductionDeploy=Join-Path $InstallRoot 'afz-openai-agent\Invoke-AFZBlog-ProductionDeploy.ps1'
+$blogProductionDeployRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\afz-blog-production-deploy.json'
+if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path -LiteralPath $blogProductionDeployRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $blogProductionDeploy -InstallRoot $InstallRoot -RequestPath $blogProductionDeployRequest *> $null
+  }catch{}
+}
+
   # Missing-only repair of the canonical one-minute SYSTEM fallback updater.
   # This never starts/stops a task and never rewrites an existing task.
   $fallbackUpdaterRepair=Ensure-FallbackUpdaterTask
