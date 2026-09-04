@@ -206,7 +206,14 @@ try{
       $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
       $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
       if($action -ne 'apply'){Send-Json $ctx 400 @{ok=$false;error='unsupported H3 Ollama repair action'};continue}
-      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}
+      if($repo -ne 'f3arif/homelab-control' -or $ref -ne 'refs/heads/main' -or $sha -notmatch '^[0-9a-f]{40}$' -or $sha -ne $current){Send-Json $ctx 409 @{ok=$false;error='H3 Ollama repair source mismatch';current=$current;requested=$sha};continue}
+      $r=Invoke-H3OllamaRepair0332
+      Log "H3 Ollama repair action=apply classification=$([string]$r.classification) sha=$sha requested by $ip"
+      Send-Json $ctx 200 $r
+      continue
+    }
+
+    if($path -eq '/api/queue-orphan-remediation' -and $ctx.Request.HttpMethod -eq 'POST'){
       if(-not(Test-DeployPeer $ip)){Send-Json $ctx 403 @{ok=$false;error='queue remediation peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant();$taskId=[string]$req.taskId
       $repo=[string]$req.repository;$ref=[string]$req.ref;$sha=([string]$req.sha).Trim().ToLowerInvariant();$current=([string](Get-Commit)).Trim().ToLowerInvariant()
