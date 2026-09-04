@@ -35,6 +35,7 @@ function Write-TransportDiagnosticAck {
     $h3PostMarkerPath='C:\ProgramData\AFZ\OpenAIAgent\jobs\h3-return-publisher-postmortem\postmortem-v1.json'
     # H3_OLLAMA_WATCHDOG_AUDIT_ACK_BIND_V1
     $h3OllamaWatchdogAuditPath='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\ChatGPT_Termius\H3-GENERIC-WORKER-RECOVERY-LATEST.json'
+    $movierecommenderCatalogV2StatePath='C:\ProgramData\AFZ\OpenAIAgent\jobs\movierecommender-catalog-v2-github\movierecommender-catalog-v2-github-20260903-r1.json'
     $h3Hotfix=Read-DiagnosticJson $h3HotfixPath
     $h3PostHook=Read-DiagnosticJson $h3PostHookPath
     $h3PostMarker=Read-DiagnosticJson $h3PostMarkerPath
@@ -86,6 +87,7 @@ function Write-TransportDiagnosticAck {
       h3ReturnPostmortemMarkerExists=(Test-Path -LiteralPath $h3PostMarkerPath -PathType Leaf)
       h3ReturnPostmortem=$h3PostMarker
       h3OllamaWatchdogAudit=Read-DiagnosticJson $h3OllamaWatchdogAuditPath
+      movierecommenderCatalogV2State=Read-DiagnosticJson $movierecommenderCatalogV2StatePath
       time=(Get-Date -Format o)
     }
     $diagJson=$diag | ConvertTo-Json -Depth 30
