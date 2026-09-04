@@ -45,8 +45,8 @@ function Invoke-Native([string]$File,[string[]]$ArgumentList,[int]$TimeoutSec=12
   }
   return [pscustomobject]@{Code=[int]$p.ExitCode;Stdout=[string]$stdoutTask.Result;Stderr=[string]$stderrTask.Result}
 }
-function Invoke-Docker([string[]]$Args,[int]$TimeoutSec=120){
-  return Invoke-Native -File 'docker.exe' -ArgumentList $Args -TimeoutSec $TimeoutSec -WorkingDirectory $projectRoot
+function Invoke-Docker([string[]]$ArgumentList,[int]$TimeoutSec=120){
+  return Invoke-Native -File 'docker.exe' -ArgumentList $ArgumentList -TimeoutSec $TimeoutSec -WorkingDirectory $projectRoot
 }
 function Http-Json([string]$Uri,[int]$TimeoutSec=30){
   $r=Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec $TimeoutSec
@@ -110,7 +110,90 @@ try{
   $ver=Invoke-Docker @('version','--format','{{.Server.Version}}') 30
   if($ver.Code -ne 0){throw "DOCKER_ENGINE_UNAVAILABLE exit=$($ver.Code)"}
   $cfg=Invoke-Docker @('compose','config','--services') 30
-  if($cfg.Code -ne 0 -or $cfg.Stdout -notmatch '(?m)^stremio-catalog\s*$'){throw 'COMPOSE_SIDECAR_MISSING'}
+  if($cfg.Code -ne 0 -or $cfg.Stdout -notmatch '(?m)^stremio-catalog\s*
+
+  $build=Invoke-Docker @('compose','build','--pull=false','stremio-catalog') 300
+  if($build.Code -ne 0){throw "SIDECAR_BUILD_FAILED exit=$($build.Code)"}
+  $up=Invoke-Docker @('compose','up','-d','--no-deps','--force-recreate','--pull','never','stremio-catalog') 180
+  if($up.Code -ne 0){throw "SIDECAR_UP_FAILED exit=$($up.Code)"}
+
+  $health=$null
+  for($i=0;$i -lt 30;$i++){
+    Start-Sleep -Seconds 2
+    try{
+      $health=Http-Json 'http://127.0.0.1:18766/health' 10
+      if($health -and [bool]$health.ok){break}
+    }catch{}
+  }
+  if(-not $health -or -not [bool]$health.ok){throw 'HEALTH_ACCEPTANCE_FAILED'}
+
+  $manifest=Http-Json 'http://127.0.0.1:18766/manifest.json' 15
+  if([string]$manifest.id -ne 'com.afzengineering.releasecatalog'){throw 'MANIFEST_ID_MISMATCH'}
+  $catalogDefs=@($manifest.catalogs)
+  if($catalogDefs.Count -lt 4){throw "MANIFEST_CATALOG_COUNT_LOW count=$($catalogDefs.Count)"}
+
+  $counts=[ordered]@{}
+  foreach($c in $catalogDefs){
+    $cid=[string]$c.id
+    $type=[string]$c.type
+    if(-not $cid -or -not $type){throw 'INVALID_CATALOG_DEFINITION'}
+    $url='http://127.0.0.1:18766/catalog/'+[Uri]::EscapeDataString($type)+'/'+[Uri]::EscapeDataString($cid)+'.json'
+    $data=Http-Json $url 240
+    if(-not ($data.PSObject.Properties.Name -contains 'metas')){throw "CATALOG_METAS_MISSING id=$cid"}
+    $counts[$cid]=@($data.metas).Count
+  }
+  if(-not $counts.Contains('new_digital')){throw 'NEW_DIGITAL_CATALOG_MISSING'}
+  if([int]$counts['new_digital'] -lt 1){throw 'NEW_DIGITAL_STILL_EMPTY'}
+
+  $result=[ordered]@{
+    schema=1;project='movierecommender';job_id=$job;status='completed'
+    classification='RELEASE_RESULTS_NORMALIZATION_ACCEPTED'
+    host=$env:COMPUTERNAME;changed=$changed;backup=$backup
+    sourceHashBefore=$beforeHash;sourceHashAfter=$afterHash
+    hostPort=18766;containerPort=8766
+    healthPass=$true;manifestPass=$true;catalogCounts=$counts
+    rollbackAttempted=$false;secretExposed=$false
+    startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)
+  }
+  Write-Json $stateFile $result
+  Write-Diag $result
+  $result | ConvertTo-Json -Compress -Depth 20 | Write-Output
+  exit 0
+}catch{
+  $err=$_.Exception.Message
+  if($changed -and $backup -and (Test-Path -LiteralPath $backup -PathType Leaf)){
+    $rollbackAttempted=$true
+    try{
+      Copy-Item -LiteralPath $backup -Destination $sourcePath -Force
+      if($dockerEnvPrepared){
+        $rbBuild=Invoke-Docker @('compose','build','--pull=false','stremio-catalog') 300
+        $rbUp=Invoke-Docker @('compose','up','-d','--no-deps','--force-recreate','--pull','never','stremio-catalog') 180
+        $rollbackSucceeded=($rbBuild.Code -eq 0 -and $rbUp.Code -eq 0)
+      }else{$rollbackSucceeded=$true}
+    }catch{$rollbackSucceeded=$false}
+  }
+  $result=[ordered]@{
+    schema=1;project='movierecommender';job_id=$job;status='failed'
+    classification='RELEASE_RESULTS_NORMALIZATION_FAILED'
+    host=$env:COMPUTERNAME;changed=$changed;backup=$backup
+    sourceHashBefore=$beforeHash;sourceHashAfter=$afterHash;error=$err
+    rollbackAttempted=$rollbackAttempted;rollbackSucceeded=$rollbackSucceeded
+    secretExposed=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o)
+  }
+  Write-Json $stateFile $result
+  Write-Diag $result
+  $result | ConvertTo-Json -Compress -Depth 20 | Write-Output
+  exit 1
+}finally{
+  if($null -eq $oldDockerConfig){Remove-Item Env:DOCKER_CONFIG -ErrorAction SilentlyContinue}else{$env:DOCKER_CONFIG=$oldDockerConfig}
+  if($null -eq $oldDockerHost){Remove-Item Env:DOCKER_HOST -ErrorAction SilentlyContinue}else{$env:DOCKER_HOST=$oldDockerHost}
+  if($tempConfig -and (Test-Path -LiteralPath $tempConfig -PathType Container)){Remove-Item -LiteralPath $tempConfig -Recurse -Force -ErrorAction SilentlyContinue}
+}
+){
+    $cfgOut=($cfg.Stdout -replace '\r?\n','; ').Trim()
+    $cfgErr=($cfg.Stderr -replace '\r?\n','; ').Trim()
+    throw "COMPOSE_SIDECAR_MISSING exit=$($cfg.Code) stdout=$cfgOut stderr=$cfgErr"
+  }
 
   $build=Invoke-Docker @('compose','build','--pull=false','stremio-catalog') 300
   if($build.Code -ne 0){throw "SIDECAR_BUILD_FAILED exit=$($build.Code)"}
