@@ -1,0 +1,4 @@
+MovieRecommender catalog-v2 r4 re-signal
+job_id=movierecommender-catalog-v2-github-20260903-r4
+purpose=trigger-existing-one-shot-via-fast-signal
+requested_at=2026-09-03T23:10:00-04:00
