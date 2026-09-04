@@ -1,0 +1,74 @@
+name: Windows-main RadioHilal Bridge Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windowsmain-radiohilal-bridge-once.yml'
+      - '.github/windowsmain-radiohilal-bridge-once.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-radiohilal-bridge-once
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Run RadioHilal bridge once
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.70.25.8'
+          tailscale ping --timeout=5s -c 2 "$host"
+
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+
+          $taskName='RadioHilal-GitHub-Bridge'
+          $jobId='000-critical-radiohilal-build-api-033c191d-20260903T2339'
+          $resultPath="C:\AFZ\RadioHilalGit-ops\github-ops\results\$jobId.json"
+
+          function Wait-Idle([int]$Seconds=360){
+            $deadline=(Get-Date).AddSeconds($Seconds)
+            do{
+              $t=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+              if([string]$t.State -ne 'Running'){return}
+              Start-Sleep -Seconds 2
+            }while((Get-Date)-lt $deadline)
+            throw 'BRIDGE_TIMEOUT'
+          }
+
+          Wait-Idle
+          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          Wait-Idle
+
+          if(Test-Path -LiteralPath $resultPath -PathType Leaf){
+            Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8
+          } else {
+            [ordered]@{
+              host=$env:COMPUTERNAME
+              taskState=[string](Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
+              result='missing'
+              resultPath=$resultPath
+              time=(Get-Date -Format o)
+            } | ConvertTo-Json -Compress
+            exit 3
+          }
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 540s tailscale ssh "Faiz@${host}" "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
