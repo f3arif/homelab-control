@@ -53,8 +53,9 @@ function Get-CurrentState {
   }
 }
 
-if($env:COMPUTERNAME -ne $expectedHost){
-  Save-State ([ordered]@{schema=1;ok=$false;classification='WRONG_HOST';mode=$Mode;actualHost=$env:COMPUTERNAME;expectedHost=$expectedHost;time=(Get-Date -Format o)})
+$actualHost=[Environment]::MachineName
+if($actualHost -ne $expectedHost){
+  Save-State ([ordered]@{schema=1;ok=$false;classification='WRONG_HOST';mode=$Mode;actualHost=$actualHost;expectedHost=$expectedHost;time=(Get-Date -Format o)})
   exit 20
 }
 
