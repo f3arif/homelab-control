@@ -1,0 +1,83 @@
+name: H3 Wake Via Windows-main Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/h3-wake-via-windowsmain-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-wake-via-windowsmain-once
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'target=h3' .github/h3-wake-via-windowsmain-signal.txt
+          grep -Fx 'action=wake-via-windowsmain' .github/h3-wake-via-windowsmain-signal.txt
+          grep -Eq '^nonce=[A-Za-z0-9._-]+$' .github/h3-wake-via-windowsmain-signal.txt
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Send H3 WOL from windows-main
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.70.25.8
+          remote_script=$(cat <<'REMOTE'
+          $ErrorActionPreference='Stop'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "WRONG_HOST $($env:COMPUTERNAME)"}
+          $mac='4C-ED-FB-3F-B0-9E'
+          $broadcast='192.168.50.255'
+          $m=[byte[]](($mac -split '[:-]') | ForEach-Object {[Convert]::ToByte($_,16)})
+          $packet=New-Object byte[] 102
+          0..5 | ForEach-Object {$packet[$_]=0xFF}
+          for($i=0;$i -lt 16;$i++){[Array]::Copy($m,0,$packet,6+($i*6),6)}
+          $udp=New-Object Net.Sockets.UdpClient
+          $udp.EnableBroadcast=$true
+          foreach($port in @(9,7)){
+            1..3 | ForEach-Object {
+              [void]$udp.Send($packet,$packet.Length,$broadcast,$port)
+              Start-Sleep -Milliseconds 150
+            }
+          }
+          $udp.Close()
+          Write-Output "WOL_SENT=TRUE MAC=$mac BROADCAST=$broadcast"
+          REMOTE
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 45s tailscale ssh Faiz@100.70.25.8 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+      - name: Prove H3 SSH return
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            echo "attempt=$attempt"
+            tailscale ping --timeout=3s -c 1 100.106.186.118 || true
+            if nc -z -w 3 100.106.186.118 22; then
+              echo 'H3_SSH_REACHABLE=PASS'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'H3_SSH_REACHABLE=FAIL' >&2
+          exit 1
