@@ -158,6 +158,22 @@ try{
     }catch{}
   }
 
+
+# RADIOHILAL_GITHUB_FRONTEND_QUEUE_POSTSYNC_HOOK_V1
+  # GitHub-first recovery path for the RadioHilal admin UI. This helper does not
+  # deploy directly: it requires the exact BuildApi validation, confirms the
+  # RadioHilal checkout is at the requested SHA, writes one rollback-protected
+  # github-main-frontend-deploy job into the local RemoteOps queue, and starts
+  # the existing AFZ Remote Ops task. The downstream action retains RAM/CPU
+  # admission control and restarts only RadioHilal.Frontend.
+  $radioHilalFrontendQueueRunner=Join-Path $InstallRoot 'afz-openai-agent\Queue-RadioHilal-FrontendDeploy.ps1'
+  $radioHilalFrontendQueueRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\radiohilal-frontend-deploy.json'
+  if((Test-Path -LiteralPath $radioHilalFrontendQueueRunner -PathType Leaf) -and (Test-Path -LiteralPath $radioHilalFrontendQueueRequest -PathType Leaf)){
+    try{
+      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $radioHilalFrontendQueueRunner -InstallRoot $InstallRoot -RequestPath $radioHilalFrontendQueueRequest *> $null
+    }catch{}
+  }
+
 # RADIOHILAL_HERMES_CRON_AUDIT_POSTSYNC_HOOK_V1
   # Read-only fixed-job audit for Hermes cron 9d9eea1b7618. The helper emits
   # sanitized routing/state only; this hook mirrors that JSON for remote
