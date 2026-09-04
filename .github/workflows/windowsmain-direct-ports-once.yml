@@ -1,4 +1,4 @@
-# probe refresh 2026-09-03T21:52-04:00
+# probe refresh 2026-09-03T23:27-04:00 lan-bypass-readonly
 name: Windows-main Direct Ports Once
 
 on:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -23,24 +23,25 @@ jobs:
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:afz-deploy
 
-      - name: Probe read-only direct control surfaces
+      - name: Probe read-only direct and LAN control surfaces
         shell: bash
         run: |
           set +e
-          for p in 8787 8790 8796 8797; do
-            if timeout 3 bash -c "</dev/tcp/100.70.25.8/$p" 2>/dev/null; then
-              echo "WM_TCP_${p}=OPEN"
-            else
-              echo "WM_TCP_${p}=CLOSED_OR_FILTERED"
-            fi
-          done
-          for target in \
-            'http://100.70.25.8:8787/api/status' \
-            'http://100.70.25.8:8790/api/status' \
-            'http://100.70.25.8:8790/health' \
-            'http://100.70.25.8:8796/health' \
-            'http://100.70.25.8:8797/health'; do
-            echo "GET_BEGIN=$target"
-            curl --silent --show-error --connect-timeout 3 --max-time 6 --write-out '\nHTTP_CODE=%{http_code}\n' "$target" || true
-            echo "GET_END=$target"
+          sudo tailscale set --accept-routes=true
+          echo '=== ROUTE WINDOWS-MAIN LAN ==='
+          ip route get 192.168.50.94 || true
+          for host in 100.70.25.8 192.168.50.94; do
+            echo "=== HOST=$host ==="
+            for p in 22 445 5985 5986 8787 8790 8796 8797; do
+              if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+                echo "WM_"$host"_TCP_"$p"=OPEN"
+              else
+                echo "WM_"$host"_TCP_"$p"=CLOSED_OR_FILTERED"
+              fi
+            done
+            for path in 8787/api/status 8790/api/status 8790/health 8796/health 8797/health; do
+              echo "GET_BEGIN=http://$host/$path"
+              curl --silent --show-error --connect-timeout 3 --max-time 6 --write-out '\nHTTP_CODE=%{http_code}\n' "http://$host/$path" || true
+              echo "GET_END=http://$host/$path"
+            done
           done
