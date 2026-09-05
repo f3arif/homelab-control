@@ -39,6 +39,10 @@ jobs:
           if([string]$r.secondary.host -ne 'DESKTOP-10SKF0M' -or [string]$r.secondary.role -ne 'windows-execution-and-fallback'){throw 'windows-main secondary'}
           if([string]$r.secondary.base_url -ne 'http://127.0.0.1:11434/v1'){throw 'Ollama must remain loopback-only'}
           if([string]$r.accelerator.host -ne 'DESKTOP-H3R6CQN' -or [bool]$r.accelerator.change_in_this_phase){throw 'H3 must remain unchanged'}
+          if([string]$r.primary.provider -ne 'openai-codex' -or [string]$r.primary.model -ne 'gpt-5.6-luna' -or [string]$r.primary.provider_source -ne 'hermes-managed-oauth-auth-json'){throw 'Codex OAuth primary'}
+          if([string]$r.accelerator.preferred_model -ne 'qwen3.6:35b-a3b-hermes64k' -or [int]$r.accelerator.context_length -ne 65536){throw 'H3 64K model'}
+          if([string]$r.accelerator.fallback_provider -ne 'custom:h3-qwen35b' -or [string]$r.accelerator.fallback_base_url -ne 'http://100.106.186.118:11438/v1'){throw 'H3 fallback route'}
+          if([string]$r.accelerator.adapter_health_url -ne 'http://100.106.186.118:11438/health' -or [string]$r.accelerator.fallback_transport -ne 'tailscale-serve-loopback-openai-adapter'){throw 'H3 adapter transport'}
           if([int]$r.context_length -ne 65536){throw '64K context'}
           if([string]$r.hermes_commit -ne 'f50b5bb0fa5b48caef753c790bf0b09a3570918a'){throw 'Hermes commit pin'}
           if([bool]$r.start_gateway -or [bool]$r.run_generation_test -or [bool]$r.expose_ollama){throw 'unsafe preflight flags'}
@@ -50,6 +54,13 @@ jobs:
             'StrictHostKeyChecking=yes',
             'coolyo@100.71.26.69',
             'http://127.0.0.1:11434/api/tags',
+            'openAiCodexAuthVerified',
+            'openai-codex',
+            'gpt-5.6-luna',
+            'custom:h3-qwen35b',
+            'http://100.106.186.118:11438/v1',
+            'adapterHealth',
+            'adapterModelPresent',
             'HERMES_FABRIC_PREFLIGHT_READY',
             'HERMES_FABRIC_PREFLIGHT_PARTIAL',
             'HERMES_FABRIC_PREFLIGHT_BLOCKED',
@@ -68,5 +79,7 @@ jobs:
             'apt install',
             'systemctl enable',
             'Register-ScheduledTask',
-            'Invoke-Expression'
+            'Invoke-Expression',
+            'OPENAI_API_KEY',
+            '/proc/$pid/environ'
           )){if($s.ToLowerInvariant().Contains($forbidden.ToLowerInvariant())){throw "Forbidden mutation in preflight: $forbidden"}}
