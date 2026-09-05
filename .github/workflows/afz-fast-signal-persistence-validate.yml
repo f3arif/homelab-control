@@ -90,6 +90,8 @@ jobs:
           control=Path('afz-openai-agent/AFZ-Agent-Control-Core.ps1').read_text()
           assert "$controlRemoteAddresses+='100.64.0.0/10'" in update
           assert "-LocalPort 8797 -RemoteAddress $controlRemoteAddresses" in update
+          assert "$controlFwHasDeploySubnet" in update
+          assert "-not $controlFwHasDeploySubnet" in update
           assert "$controlRemoteAddresses+='100.64.0.0/10'" in install
           assert "-LocalPort 8797 -RemoteAddress $controlRemoteAddresses" in install
           assert "$deployHealthPeer=($path -eq '/health'" in control
