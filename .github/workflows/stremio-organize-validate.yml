@@ -74,7 +74,7 @@ jobs:
             'github-pull-typed-request',
             'Global\AFZStremioOrganizeRequestWatcher',
             'Invoke-Stremio-Organize.ps1',
-            "if(-not [bool]$r.enabled){return $false}"
+            'if(-not [bool]$r.enabled){return $false}'
           )){
             if(-not $watcher.Contains($needle)){throw "Missing watcher contract: $needle"}
           }
