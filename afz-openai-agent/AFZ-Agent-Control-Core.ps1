@@ -296,7 +296,9 @@ try{
       $r=Invoke-HPEnvySurfsharkExitNode $action;Log "HP Envy Surfshark action=$action classification=$([string]$r.classification) sha=$sha requested by $ip";Send-Json $ctx 200 $r;continue
     }
 
-    if(-not ((Get-AllowedClients) -contains $ip)){Send-Json $ctx 403 @{ok=$false;error='client not allowlisted';client=$ip};continue}
+    $fixedClient=((Get-AllowedClients) -contains $ip)
+    $deployHealthPeer=($path -eq '/health' -and $ctx.Request.HttpMethod -eq 'GET' -and (Test-DeployPeer $ip))
+    if(-not($fixedClient -or $deployHealthPeer)){Send-Json $ctx 403 @{ok=$false;error='client not allowlisted';client=$ip};continue}
     if($ctx.Request.HttpMethod -eq 'OPTIONS'){Send-Json $ctx 200 @{ok=$true};continue}
     if($path -eq ''){$html=@'
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AFZ Agent Control</title><style>body{font:16px system-ui;background:#0b1220;color:#e6edf7;margin:0;padding:32px}.card{max-width:760px;background:#111b2e;border:1px solid #26344d;border-radius:14px;padding:20px}.good{color:#79e2a8}.muted{color:#95a8c7}pre{white-space:pre-wrap;background:#08101d;padding:16px;border-radius:10px;overflow:auto}</style></head><body><div class="card"><h2>AFZ Agent Control</h2><p><span class="good">FAST AUTO DEPLOY ENABLED</span> ┬╖ GitHub publishes the exact pushed SHA and Windows-main watches it every 3 seconds.</p><p class="muted">Typed H3 Qwen benchmark, guarded queue-orphan remediation, read-only Windows WSL audit, guarded Jellyfin visibility recovery, and fixed-target HP Envy Surfshark exit-node control are available to the authorized GitHub/Tailscale deploy identity. No arbitrary shell is exposed.</p><pre id="o">Loading statusΓÇª</pre></div><script>const o=document.getElementById('o');async function refresh(){try{const r=await fetch('/health',{cache:'no-store'});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent=e.message}}refresh();setInterval(refresh,3000)</script></body></html>
