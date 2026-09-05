@@ -1,1 +1,3 @@
-nonce=20260904T1100EDT
+AFZ tailnet peer state probe
+purpose=diagnose-github-deploy-runner-to-windows-main-8797
+requested_at=2026-09-05T18:19:00-04:00
