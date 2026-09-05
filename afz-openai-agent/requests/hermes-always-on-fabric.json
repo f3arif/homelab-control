@@ -31,7 +31,11 @@
     "preferred_model": "qwen3.6:35b-a3b-hermes64k",
     "context_length": 65536,
     "ollama_exposed": false,
-    "change_in_this_phase": false
+    "change_in_this_phase": false,
+    "fallback_provider": "custom:h3-qwen35b",
+    "fallback_base_url": "http://100.106.186.118:11438/v1",
+    "adapter_health_url": "http://100.106.186.118:11438/health",
+    "fallback_transport": "tailscale-serve-loopback-openai-adapter"
   },
   "context_length": 65536,
   "hermes_commit": "f50b5bb0fa5b48caef753c790bf0b09a3570918a",
