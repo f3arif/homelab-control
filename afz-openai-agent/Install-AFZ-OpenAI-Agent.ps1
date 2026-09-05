@@ -56,8 +56,11 @@ $updaterTask='AFZ OpenAI Agent Updater';$updaterAction=New-ScheduledTaskAction -
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -ErrorAction SilentlyContinue|Remove-NetFirewallRule
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -ErrorAction SilentlyContinue|Remove-NetFirewallRule
 Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -ErrorAction SilentlyContinue|Remove-NetFirewallRule
+$controlRemoteAddresses=@($ips)
+$controlRemoteAddresses+='100.64.0.0/10'
+$controlRemoteAddresses=@($controlRemoteAddresses|Sort-Object -Unique)
 New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress $ips -Profile Any|Out-Null
-New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8797 -RemoteAddress $ips -Profile Any|Out-Null
+New-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8797 -RemoteAddress $controlRemoteAddresses -Profile Any|Out-Null
 $shortcutPath=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ OpenAI Agent.url';@('[InternetShortcut]',"URL=http://127.0.0.1:$Port/",'IconFile=%SystemRoot%\System32\shell32.dll','IconIndex=14')|Set-Content -LiteralPath $shortcutPath -Encoding ASCII
 $controlShortcut=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'AFZ Agent Update.url';@('[InternetShortcut]','URL=http://127.0.0.1:8797/','IconFile=%SystemRoot%\System32\shell32.dll','IconIndex=238')|Set-Content -LiteralPath $controlShortcut -Encoding ASCII
 Start-ScheduledTask -TaskName $agentTask;Start-ScheduledTask -TaskName $controlTask;Start-ScheduledTask -TaskName $pushWatcherTask
