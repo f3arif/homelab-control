@@ -1,0 +1,42 @@
+name: Media Public DNS R1
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/media-public-dns-r1.yml'
+      - '.github/scripts/media_public_dns_r1.py'
+      - '.github/media-public-dns-signal.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provision request and Jellyfin A records
+        env:
+          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+          PORKBUN_SECRET_API_KEY: ${{ secrets.PORKBUN_SECRET_API_KEY }}
+        run: python3 .github/scripts/media_public_dns_r1.py
+
+      - name: Validate sanitized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          d=json.load(open('media-public-dns-r1-result.json',encoding='utf-8'))
+          assert d.get('classification')=='MEDIA_PUBLIC_DNS_PROVISIONED_VERIFIED', d
+          rows=d.get('records') or []
+          assert {r.get('host') for r in rows}=={'request.afzeng.ca','jellyfin.afzeng.ca'}, rows
+          assert all(r.get('verified') for r in rows), rows
+          print('DNS provisioning verified')
+          for r in rows:
+              print(f"{r['host']} -> {r['content']} ({r['action']})")
+          PY
