@@ -19,18 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Probe public media endpoints
+      - name: Probe public media boundary
         shell: bash
         run: |
           set -euo pipefail
+
           request_code=$(curl -L -sS -o /tmp/request.html -w '%{http_code}' --connect-timeout 5 --max-time 20 https://request.afzeng.ca/login)
-          jellyfin_code=$(curl -L -sS -o /tmp/jellyfin.json -w '%{http_code}' --connect-timeout 5 --max-time 20 https://jellyfin.afzeng.ca/System/Info/Public)
           test "$request_code" = "200"
-          test "$jellyfin_code" = "200"
-          python - <<'PY'
-          import json
-          d=json.load(open('/tmp/jellyfin.json',encoding='utf-8'))
-          assert d.get('ServerName') or d.get('Version'), d
-          PY
-          echo "request.afzeng.ca/login: HTTP $request_code"
-          echo "jellyfin.afzeng.ca/System/Info/Public: HTTP $jellyfin_code"
+          echo "request.afzeng.ca/login: HTTP $request_code (public as intended)"
+
+          set +e
+          jellyfin_code=$(curl -L -sS -o /tmp/jellyfin-public.out -w '%{http_code}' --connect-timeout 5 --max-time 20 https://jellyfin.afzeng.ca/System/Info/Public)
+          jellyfin_rc=$?
+          set -e
+
+          if [ "$jellyfin_rc" -eq 0 ]; then
+            case "$jellyfin_code" in
+              2*|3*)
+                echo "ERROR: jellyfin.afzeng.ca is publicly reachable with HTTP $jellyfin_code"
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "jellyfin.afzeng.ca: public access blocked as intended (curl_rc=$jellyfin_rc http=$jellyfin_code)"
