@@ -1,5 +1,3 @@
 Stremio organize request
-action=apply
-target=DESKTOP-10SKF0M
-purpose=clean-home-refresh-afz-addon
-requested_at=2026-09-04T17:02:00-04:00
+purpose=sync-authoritative-v062-and-verify-compact-layout
+requested_at=2026-09-04T22:39:30-04:00
