@@ -1,3 +1,3 @@
 Media public smoke request
-purpose=verify-request-and-jellyfin-public-routes
-requested_at=2026-09-04T20:36:30-04:00
+purpose=verify-request-public-and-jellyfin-private-boundary
+requested_at=2026-09-04T22:38:30-04:00
