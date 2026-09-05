@@ -95,6 +95,8 @@ def main():
             raise RuntimeError("Unexpected AFZ manifest id")
         if not str(live_manifest.get("version") or "").strip():
             raise RuntimeError("AFZ manifest version missing")
+        keep_catalogs = {"downloaded_movies","new_digital","action_thriller","scifi_fantasy","bluray_4k","hindi_bollywood"}
+        live_manifest["catalogs"] = [c for c in (live_manifest.get("catalogs") or []) if c.get("id") in keep_catalogs]
 
     sock = socket.create_connection((MARIONETTE_HOST, MARIONETTE_PORT), 6)
     sock.settimeout(75)
@@ -206,6 +208,7 @@ const done = arguments[arguments.length - 1];
   }
 
   const priority = [
+    'AFZ Movies & TV',
     'AFZ Movies',
     'AFZ New Movie Releases',
     'Cinemeta',
@@ -292,4 +295,3 @@ if __name__ == "__main__":
     except Exception as exc:
         print(json.dumps({"ok":False,"error":str(exc)}, ensure_ascii=True, separators=(",", ":")))
         raise
-

@@ -97,7 +97,7 @@ jobs:
           tv=after.get('debridioTvCatalogs') or []
           assert set(tv) == {'Canada TV','India TV'}, tv
           order=after.get('order') or []
-          expected=['AFZ Movies','Cinemeta','Trakt Integration','Kids Shows Age 3 to 8','EinthusanTV - Hindi']
+          expected=['AFZ Movies & TV','Cinemeta','Trakt Integration','Kids Shows Age 3 to 8','EinthusanTV - Hindi']
           assert order[:5] == expected, order[:8]
           cinemeta=after.get('cinemetaCatalogs') or []
           assert all(x.get('id') != 'imdbRating' for x in cinemeta), cinemeta
@@ -110,7 +110,7 @@ jobs:
           with open('/tmp/stremio-summary.md','w',encoding='utf-8') as f:
               f.write('## Stremio organization result\n\n')
               f.write(f"- Installed addons: {after.get('count')}\n")
-              f.write(f"- AFZ Movies: v{after.get('afzVersion')}\n")
+              f.write(f"- AFZ Movies & TV: v{after.get('afzVersion')}\n")
               f.write(f"- Home rows: {d.get('homeRowCount')}\n")
               f.write(f"- Trakt rows: {', '.join(trakt)}\n")
               f.write(f"- Debridio TV rows: {', '.join(tv)}\n")
