@@ -340,13 +340,16 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   $benchmarkRelay=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-Qwen27B-WebsiteBenchmark.ps1'
   $benchmarkRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\H3-Qwen27B-Request-Watcher.ps1'
   $siteDeployRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\AFZ-Site-Deploy-Request-Watcher.ps1'
+  $stremioRequestWatcher=Join-Path $InstallRoot 'afz-openai-agent\Stremio-Organize-Request-Watcher.ps1'
+  $stremioRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Stremio-Organize.ps1'
+  $stremioHelper=Join-Path $InstallRoot 'afz-openai-agent\tools\Stremio-Organize.py'
   $siteDeployExecutor=Join-Path $InstallRoot 'afz-openai-agent\Deploy-AFZ-WebsiteToPi.ps1'
   $familyPttEdgeWatcher=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Preflight-Watcher-R12.ps1'
   $familyPttProvisionWatcher=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Provision-Watcher-R17.ps1'
   $familyPttProvisionExecutor=Join-Path $InstallRoot 'afz-openai-agent\FamilyPTT-Edge-Provision-R17.ps1'
   $prospectModule=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\ProspectEngine.ps1'
   $prospectUi=Join-Path $InstallRoot 'afz-openai-agent\prospect-engine\index.html'
-  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$siteDeployExecutor,$familyPttEdgeWatcher,$familyPttProvisionWatcher,$familyPttProvisionExecutor,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
+  foreach($p in @($allowFile,$wrapper,$control,$updater,$pushWatcher,$benchmarkRelay,$benchmarkRequestWatcher,$siteDeployRequestWatcher,$stremioRequestWatcher,$stremioRunner,$stremioHelper,$siteDeployExecutor,$familyPttEdgeWatcher,$familyPttProvisionWatcher,$familyPttProvisionExecutor,$prospectModule,$prospectUi)){if(-not(Test-Path $p)){throw "Required agent file missing after sync: $p"}}
 
   # The push watcher is a long-lived PowerShell process. Updating its script on disk
   # does not update the already-running AST. Track the installed watcher hash and let
@@ -410,6 +413,11 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   $siteWatcherTask=Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue
   if($siteWatcherTask){Set-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $siteWatcherTaskName -Action $siteWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
 
+  $stremioWatcherTaskName='AFZ Stremio Organize Request Watcher'
+  $stremioWatcherAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$stremioRequestWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
+  $stremioWatcherTask=Get-ScheduledTask -TaskName $stremioWatcherTaskName -ErrorAction SilentlyContinue
+  if($stremioWatcherTask){Set-ScheduledTask -TaskName $stremioWatcherTaskName -Action $stremioWatcherAction | Out-Null}else{Register-ScheduledTask -TaskName $stremioWatcherTaskName -Action $stremioWatcherAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $serviceSettings -Principal $principal -Force | Out-Null;$changed=$true}
+
   $familyPttEdgeTaskName='AFZ FamilyPTT Edge Preflight Watcher R12'
   $familyPttEdgeTaskAction=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$familyPttEdgeWatcher`" -InstallRoot `"$InstallRoot`" -IntervalSeconds 5"
   $familyPttEdgeTask=Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction SilentlyContinue
@@ -465,6 +473,7 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   }
   Ensure-Running $benchmarkWatcherTaskName $changed
   Ensure-Running $siteWatcherTaskName $changed
+  Ensure-Running $stremioWatcherTaskName $changed
   $familyPttCarrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
   $safeToRefreshFamilyPttWatchers=($changed -and (-not $familyPttCarrier -or [string]$familyPttCarrier.State -ne 'Running'))
   Ensure-Running $familyPttEdgeTaskName $safeToRefreshFamilyPttWatchers
@@ -473,11 +482,12 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   $trigger=$(if($ExpectedSha){'fast-signal-exact-sha'}else{'fallback-poll'})
   $pushTaskState=[string](Get-ScheduledTask -TaskName $pushWatcherTaskName -ErrorAction SilentlyContinue).State
   $siteTaskState=[string](Get-ScheduledTask -TaskName $siteWatcherTaskName -ErrorAction SilentlyContinue).State
+  $stremioTaskState=[string](Get-ScheduledTask -TaskName $stremioWatcherTaskName -ErrorAction SilentlyContinue).State
   $familyPttEdgeTaskState=[string](Get-ScheduledTask -TaskName $familyPttEdgeTaskName -ErrorAction SilentlyContinue).State
   $familyPttProvisionTaskState=[string](Get-ScheduledTask -TaskName $familyPttProvisionTaskName -ErrorAction SilentlyContinue).State
   Write-TransportDiagnosticAck $remoteSha $ExpectedSha $trigger $pushTaskState $siteTaskState
 
-  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;pushWatcherSourceHash=$pushWatcherSourceHash;pushWatcherAppliedHash=$pushWatcherAppliedHash;pushWatcherRestarted=$pushWatcherRestarted;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;familyPttEdgeProvisionWatcherTask=$familyPttProvisionTaskName;familyPttEdgeProvisionWatcherState=$familyPttProvisionTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
+  $result=[ordered]@{ok=$true;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);remoteSha=$remoteSha;expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});trigger=$trigger;changed=$changed;fastSignalIntervalSeconds=3;fallbackCadenceSeconds=60;agentPort=8796;controlPort=8797;pushDeployWatcherTask=$pushWatcherTaskName;pushDeployWatcherState=$pushTaskState;pushWatcherSourceHash=$pushWatcherSourceHash;pushWatcherAppliedHash=$pushWatcherAppliedHash;pushWatcherRestarted=$pushWatcherRestarted;benchmarkRequestWatcherTask=$benchmarkWatcherTaskName;siteDeployRequestWatcherTask=$siteWatcherTaskName;siteDeployRequestWatcherState=$siteTaskState;stremioRequestWatcherTask=$stremioWatcherTaskName;stremioRequestWatcherState=$stremioTaskState;familyPttEdgePreflightWatcherTask=$familyPttEdgeTaskName;familyPttEdgePreflightWatcherState=$familyPttEdgeTaskState;familyPttEdgeProvisionWatcherTask=$familyPttProvisionTaskName;familyPttEdgeProvisionWatcherState=$familyPttProvisionTaskState;diagnosticAck='OneDrive emergency observability only';clients=$ips;transport=[string]$syncResult.refTransport}
   $result|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $statusFile -Encoding UTF8
 } catch {
   $result=[ordered]@{ok=$false;startedAt=$started.ToString('o');finishedAt=(Get-Date -Format o);expectedSha=$(if($ExpectedSha){$ExpectedSha}else{$null});error=$_.Exception.Message}
