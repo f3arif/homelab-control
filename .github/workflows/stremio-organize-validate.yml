@@ -5,6 +5,10 @@ on:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
       - 'afz-openai-agent/Invoke-Stremio-Organize.ps1'
+      - 'afz-openai-agent/Stremio-Organize-Request-Watcher.ps1'
+      - 'afz-openai-agent/requests/stremio-organize.json'
+      - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/tools/Stremio-Organize.py'
       - '.github/workflows/stremio-organize.yml'
       - '.github/workflows/stremio-organize-validate.yml'
@@ -25,7 +29,10 @@ jobs:
           $ErrorActionPreference='Stop'
           $files=@(
             'afz-openai-agent/AFZ-Agent-Control-Core.ps1',
-            'afz-openai-agent/Invoke-Stremio-Organize.ps1'
+            'afz-openai-agent/Invoke-Stremio-Organize.ps1',
+            'afz-openai-agent/Stremio-Organize-Request-Watcher.ps1',
+            'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
           )
           foreach($file in $files){
             $tokens=$null;$errors=$null
@@ -56,3 +63,38 @@ jobs:
           }
           $wf=Get-Content .github/workflows/stremio-organize.yml -Raw
           if(-not $wf.Contains('/api/stremio-organize')){throw 'Workflow does not call typed Stremio route'}
+
+      - name: Verify GitHub pull request watcher wiring
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $watcher=Get-Content afz-openai-agent/Stremio-Organize-Request-Watcher.ps1 -Raw
+          foreach($needle in @(
+            'afz-openai-agent\requests\stremio-organize.json',
+            'github-pull-typed-request',
+            'Global\AFZStremioOrganizeRequestWatcher',
+            'Invoke-Stremio-Organize.ps1',
+            "if(-not [bool]$r.enabled){return $false}"
+          )){
+            if(-not $watcher.Contains($needle)){throw "Missing watcher contract: $needle"}
+          }
+          $update=Get-Content afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1 -Raw
+          foreach($needle in @(
+            'AFZ Stremio Organize Request Watcher',
+            'Stremio-Organize-Request-Watcher.ps1',
+            'Ensure-Running $stremioWatcherTaskName $changed'
+          )){
+            if(-not $update.Contains($needle)){throw "Missing updater watcher wiring: $needle"}
+          }
+          $install=Get-Content afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1 -Raw
+          foreach($needle in @(
+            'AFZ Stremio Organize Request Watcher',
+            'Stremio-Organize-Request-Watcher.ps1',
+            'Start-ScheduledTask -TaskName $stremioWatcherTask'
+          )){
+            if(-not $install.Contains($needle)){throw "Missing installer watcher wiring: $needle"}
+          }
+          $req=Get-Content afz-openai-agent/requests/stremio-organize.json -Raw | ConvertFrom-Json
+          if([int]$req.schema -ne 1 -or [string]$req.project -ne 'stremio-organize' -or [bool]$req.enabled){
+            throw 'Bootstrap request must be schema 1, project stremio-organize, and disabled'
+          }
