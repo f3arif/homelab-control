@@ -1,3 +1,3 @@
 Stremio organize request
-purpose=sync-authoritative-v062-and-verify-compact-layout
-requested_at=2026-09-04T22:39:30-04:00
+purpose=verify-deploy-tag-transport-and-v062-layout
+requested_at=2026-09-04T22:56:30-04:00
