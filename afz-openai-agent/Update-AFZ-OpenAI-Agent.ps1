@@ -364,7 +364,14 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
 
   $agentFw=Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -ErrorAction SilentlyContinue
   $controlFw=Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -ErrorAction SilentlyContinue
-  if($changed -or -not $agentFw -or -not $controlFw){
+  $controlFwHasDeploySubnet=$false
+  if($controlFw){
+    try{
+      $controlRemote=@(($controlFw|Get-NetFirewallAddressFilter -ErrorAction Stop).RemoteAddress)
+      $controlFwHasDeploySubnet=(([string]::Join(',',@($controlRemote))) -match '100\.64\.0\.0')
+    }catch{}
+  }
+  if($changed -or -not $agentFw -or -not $controlFw -or -not $controlFwHasDeploySubnet){
     Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - Tailscale Fleet' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent - HP Tailscale' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     Get-NetFirewallRule -DisplayName 'AFZ OpenAI Agent Control - Tailscale Fleet' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
