@@ -2,12 +2,14 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 HERMES_HOME = Path(r"C:\Users\Faiz\AppData\Local\hermes")
 HERMES = HERMES_HOME / "bin" / "hermes.exe"
 MONITOR = HERMES_HOME / "scripts" / "radiohilal_intake_monitor.py"
 STATE_FILE = HERMES_HOME / "radiohilal-monitor-state.json"
+INTAKE_SUCCESS_FILE = HERMES_HOME / "radiohilal-intake-success.json"
 WORKDIR = Path(r"C:\Users\Faiz")
 PROVIDER = "openai-codex"
 MODEL = "gpt-5.6-luna"
@@ -34,6 +36,23 @@ def restore_monitor_state(existed, payload):
                 pass
     except OSError:
         pass
+
+def mark_intake_success(answer):
+    now = datetime.now().astimezone()
+    payload = {
+        "date": now.date().isoformat(),
+        "recorded_at": now.isoformat(),
+        "result": answer[:500],
+    }
+    tmp = INTAKE_SUCCESS_FILE.with_name(
+        INTAKE_SUCCESS_FILE.name + f".tmp-{os.getpid()}"
+    )
+    tmp.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, INTAKE_SUCCESS_FILE)
+
 
 def run_agent(prompt, timeout=120):
     cp = subprocess.run(
@@ -169,6 +188,13 @@ if not any(answer == p or answer.startswith(p + " ") for p in valid_prefixes):
 if answer == "CONTROLLER_TIMEOUT" or answer.startswith("CONTROLLER_TIMEOUT ") or answer == "FAILURE" or answer.startswith("FAILURE "):
     if monitor_touched:
         restore_monitor_state(prior_state_existed, prior_state_payload)
+
+if answer == "SUBMITTED" or answer.startswith("SUBMITTED "):
+    try:
+        mark_intake_success(answer)
+    except OSError:
+        print("FAILURE blocker=intake-marker-write-failed next=manual-check")
+        sys.exit(0)
 
 print(answer)
 sys.exit(0)
