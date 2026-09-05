@@ -84,7 +84,7 @@ function Handle-Request{
   if($exitCode -ne 0){
     $msg=$raw
     if($msg.Length -gt 800){$msg=$msg.Substring(0,800)}
-    Save-State ([ordered]@{ok=$false;status='failed';jobId=$job;action=$action;sourceSha=$sha;message=("Organizer exited $exitCode: "+$msg)})
+    Save-State ([ordered]@{ok=$false;status='failed';jobId=$job;action=$action;sourceSha=$sha;message=("Organizer exited ${exitCode}: "+$msg)})
     Log "FAIL job=$job action=$action exit=$exitCode"
     return
   }
