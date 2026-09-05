@@ -12,6 +12,8 @@ on:
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
       - '.github/workflows/afz-agent-push-deploy.yml'
       - '.github/workflows/afz-fast-signal-persistence-validate.yml'
   pull_request:
@@ -42,7 +44,8 @@ jobs:
             'afz-openai-agent/Push-Deploy-Watcher.ps1',
             'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
             'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1',
-            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1',
+            'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
           )
           foreach($file in $files){
             $tokens=$null;$errors=$null
@@ -83,6 +86,15 @@ jobs:
                 assert 'Get-Content' not in line
           assert "controlPlane='github'" in push
           assert "controlPlane='github'" in update
+
+          control=Path('afz-openai-agent/AFZ-Agent-Control-Core.ps1').read_text()
+          assert "$controlRemoteAddresses+='100.64.0.0/10'" in update
+          assert "-LocalPort 8797 -RemoteAddress $controlRemoteAddresses" in update
+          assert "$controlRemoteAddresses+='100.64.0.0/10'" in install
+          assert "-LocalPort 8797 -RemoteAddress $controlRemoteAddresses" in install
+          assert "$deployHealthPeer=($path -eq '/health'" in control
+          assert "(Test-DeployPeer $ip)" in control
+          assert "$fixedClient -or $deployHealthPeer" in control
 
           # Fast signals are acceleration hints, not rollback authority. A delayed
           # signal already contained by the deployed commit must be marked handled
