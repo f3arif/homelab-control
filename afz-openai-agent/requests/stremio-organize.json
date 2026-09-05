@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "project": "stremio-organize",
-  "enabled": false,
+  "enabled": true,
   "action": "audit",
-  "job_id": "stremio-bootstrap-disabled"
+  "job_id": "stremio-audit-20260905-1837"
 }
