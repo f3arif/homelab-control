@@ -1,0 +1,36 @@
+name: Media Public Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/media-public-smoke-signal.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media-public-smoke
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe public media endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_code=$(curl -L -sS -o /tmp/request.html -w '%{http_code}' --connect-timeout 5 --max-time 20 https://request.afzeng.ca/login)
+          jellyfin_code=$(curl -L -sS -o /tmp/jellyfin.json -w '%{http_code}' --connect-timeout 5 --max-time 20 https://jellyfin.afzeng.ca/System/Info/Public)
+          test "$request_code" = "200"
+          test "$jellyfin_code" = "200"
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/jellyfin.json',encoding='utf-8'))
+          assert d.get('ServerName') or d.get('Version'), d
+          PY
+          echo "request.afzeng.ca/login: HTTP $request_code"
+          echo "jellyfin.afzeng.ca/System/Info/Public: HTTP $jellyfin_code"
