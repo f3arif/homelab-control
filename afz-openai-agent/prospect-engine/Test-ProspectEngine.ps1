@@ -18,6 +18,10 @@ try{
   Assert-True ($agentSource.Contains("-Body `$jsonBytes")) 'OpenAI request transport must send the validated UTF-8 byte array'
   Assert-True ($engineSource.Contains('broad regional coverage alone is allowed')) 'Sol audit prompt must allow broad regional coverage without explicit Brampton evidence'
   Assert-True ($uiSource.Contains('General GTA, Peel, Southern Ontario, or Ontario-wide coverage is allowed')) 'UI must explain the explicit-evidence exclusion rule'
+  Assert-True ($engineSource.Contains('You are Astra, AFZ Prospect Engine independent verifier')) 'Astra must be a dedicated independent verification stage'
+  Assert-True ($engineSource.Contains("Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})")) 'Astra must use the configured Sol model rather than a client-supplied model id'
+  Assert-True ($uiSource.Contains('/api/prospects/astra-review')) 'UI must call the Astra saved-lead verification endpoint'
+  Assert-True ($uiSource.Contains('Original research is preserved')) 'UI must explain that Astra is additive'
   Assert-True (-not $engineSource.Contains('Mail.Send')) 'Prospect Engine must remain draft-only'
   $sol=Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})
   Assert-True ($sol.model -eq 'test-sol' -and $sol.searchContextSize -eq 'high') 'Sol selection should use the configured Sol model'
@@ -70,7 +74,26 @@ try{
   Set-ProspectExclusionAudit $loaded.leads[0] 'clear' 'Official service area excludes Brampton.' @('https://example.com/services') $luna
   Assert-True ((Get-ProspectExclusionAuditStatus $loaded.leads[0]) -eq 'clear') 'clear territory audit should be persisted on the lead'
   Assert-True ([int]$loaded.leads[0].exclusionAudit.policyVersion -eq 2) 'territory audit must record the explicit-evidence policy version'
+  Assert-True (Test-ProspectNeedsAstraReview $loaded.leads[0]) 'eligible lead should be queued for Astra when no review exists'
+  $originalScore=$loaded.leads[0].fitScore;$originalSubject=$loaded.leads[0].subject;$originalBody=$loaded.leads[0].emailBody
+  $astraReview=[pscustomobject]@{
+    recommendation='approve';verifiedFitScore=88;serviceFit='strong';bramptonCheck='clear';contactConfidence='verified';emailQuality='ready'
+    summary='Official website confirms complementary residential work and a public business contact.';evidenceGaps=@()
+    suggestedSubject='Astra suggested subject';suggestedEmailBody='Astra suggested body';sourceUrls=@('https://example.com/services','https://third-party.example/listing')
+  }
+  $astra=Set-ProspectAstraReview $loaded.leads[0] $astraReview $sol
+  Assert-True ($astra.agent -eq 'Astra' -and $astra.model -eq 'test-sol' -and $astra.recommendation -eq 'approve') 'Astra review should identify its agent, configured Sol model, and recommendation'
+  Assert-True (@($astra.sourceUrls).Count -eq 1) 'Astra review must retain only official-domain sources'
+  Assert-True ($loaded.leads[0].fitScore -eq $originalScore -and $loaded.leads[0].subject -eq $originalSubject -and $loaded.leads[0].emailBody -eq $originalBody) 'Astra suggestions must not overwrite original research or draft text'
+  Assert-True (-not (Test-ProspectNeedsAstraReview $loaded.leads[0])) 'current Astra review should leave the pending queue'
   Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'complete preflight should open draft gate'
+  $astraReview.recommendation='hold';$astraReview.bramptonCheck='explicit'
+  Set-ProspectAstraReview $loaded.leads[0] $astraReview $sol | Out-Null
+  Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'Astra hold must block Outlook draft creation'
+  $astraReview.recommendation='revise';$astraReview.bramptonCheck='clear';$astraReview.contactConfidence='partial';$astraReview.emailQuality='revise'
+  Set-ProspectAstraReview $loaded.leads[0] $astraReview $sol | Out-Null
+  Assert-True ((Get-ProspectAstraRecommendation $loaded.leads[0]) -eq 'revise') 'Astra revise should remain advisory and visible for human editing'
+  Assert-True (Test-LeadReadyForOutlook $loaded.leads[0]) 'Astra revise may proceed only through the existing human review and CASL gate'
   Set-ProspectExclusionAudit $loaded.leads[0] 'inconclusive' 'No finite official service area was published.' @('https://example.com/services') $sol 'deep'
   Assert-True ([string]$loaded.leads[0].exclusionAudit.resolutionPass -eq 'deep') 'deep territory resolution should be recorded on the lead'
   Assert-True (-not (Test-LeadReadyForOutlook $loaded.leads[0])) 'deep-pass inconclusive lead must remain blocked from Outlook drafts'
