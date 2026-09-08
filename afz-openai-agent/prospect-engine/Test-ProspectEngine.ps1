@@ -12,6 +12,14 @@ try{
   $engineSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ProspectEngine.ps1') -Raw -Encoding UTF8
   $uiSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'index.html') -Raw -Encoding UTF8
   $agentSource=Get-Content -LiteralPath (Join-Path $AgentRoot 'AFZ-OpenAI-Agent-v2.ps1') -Raw -Encoding UTF8
+  $astraRunnerSource=Get-Content -LiteralPath (Join-Path $AgentRoot 'Invoke-ProspectAstra-ReviewAll.ps1') -Raw -Encoding UTF8
+  $syncSource=Get-Content -LiteralPath (Join-Path $AgentRoot 'Sync-AFZ-AgentFromGitHub.ps1') -Raw -Encoding UTF8
+  $astraRequest=Get-Content -LiteralPath (Join-Path $AgentRoot 'requests\prospect-astra-review-all.json') -Raw -Encoding UTF8|ConvertFrom-Json
+  foreach($parsePath in @((Join-Path $AgentRoot 'Invoke-ProspectAstra-ReviewAll.ps1'),(Join-Path $AgentRoot 'Sync-AFZ-AgentFromGitHub.ps1'))){
+    $parseTokens=$null;$parseErrors=$null
+    [Management.Automation.Language.Parser]::ParseFile($parsePath,[ref]$parseTokens,[ref]$parseErrors)|Out-Null
+    Assert-True ($parseErrors.Count -eq 0) "PowerShell parser must accept $parsePath"
+  }
   Assert-True ($engineSource.Contains("type='web_search_preview'")) 'Responses API research must use the documented web-search preview declaration'
   Assert-True (-not $engineSource.Contains("type='web_search';")) 'legacy web_search plus search_context_size declaration must not return'
   Assert-True ($agentSource.Contains("New-Object System.Text.UTF8Encoding(`$false)")) 'OpenAI JSON must use explicit no-BOM UTF-8 encoding on Windows PowerShell'
@@ -22,6 +30,12 @@ try{
   Assert-True ($engineSource.Contains("Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})")) 'Astra must use the configured Sol model rather than a client-supplied model id'
   Assert-True ($uiSource.Contains('/api/prospects/astra-review')) 'UI must call the Astra saved-lead verification endpoint'
   Assert-True ($uiSource.Contains('Original research is preserved')) 'UI must explain that Astra is additive'
+  Assert-True ($syncSource.Contains('PROSPECT_ASTRA_REVIEW_ALL_SYNC_HOOK_V1')) 'Git sync must arm the bounded Astra one-shot'
+  Assert-True ($astraRunnerSource.Contains("'/api/prospects/astra-review'")) 'Astra one-shot must call only the dedicated local verification route'
+  Assert-True (-not $astraRunnerSource.Contains('/api/prospects/outlook-draft')) 'Astra one-shot must not call the Outlook draft route'
+  Assert-True (-not $astraRunnerSource.Contains('Mail.Send')) 'Astra one-shot must not request email-send permission'
+  Assert-True ([bool]$astraRequest.preserve_original_research -and [bool]$astraRequest.preserve_original_drafts) 'Astra one-shot request must preserve existing lead and draft fields'
+  Assert-True (-not [bool]$astraRequest.create_outlook_drafts -and -not [bool]$astraRequest.send_email) 'Astra one-shot request must prohibit drafting and sending'
   Assert-True (-not $engineSource.Contains('Mail.Send')) 'Prospect Engine must remain draft-only'
   $sol=Resolve-ProspectResearchModel ([pscustomobject]@{model='sol'})
   Assert-True ($sol.model -eq 'test-sol' -and $sol.searchContextSize -eq 'high') 'Sol selection should use the configured Sol model'

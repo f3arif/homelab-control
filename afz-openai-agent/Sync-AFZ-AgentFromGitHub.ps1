@@ -433,6 +433,39 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   }catch{}
 }
 
+# PROSPECT_ASTRA_REVIEW_ALL_SYNC_HOOK_V1
+# Git installs the fixed request and runner. The detached SYSTEM one-shot calls
+# only the local Astra review route, preserves existing lead/draft fields, and
+# cannot create Outlook drafts or send email. Its request id is terminally
+# guarded in ProgramData; OneDrive receives diagnostics only.
+$prospectAstraRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-ProspectAstra-ReviewAll.ps1'
+$prospectAstraRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\prospect-astra-review-all.json'
+$prospectAstraActivation=[ordered]@{ok=$true;status='not-armed';mutation='NONE'}
+if((Test-Path -LiteralPath $prospectAstraRunner -PathType Leaf) -and (Test-Path -LiteralPath $prospectAstraRequest -PathType Leaf)){
+  try{
+    $astraReq=Get-Content -LiteralPath $prospectAstraRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $astraId=([string]$astraReq.id).Trim()
+    if([int]$astraReq.schema -ne 1 -or $astraId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$' -or [string]$astraReq.status -ne 'ACTIVE' -or [string]$astraReq.action -ne 'review-all-eligible-leads'){
+      throw 'Prospect Astra request contract invalid.'
+    }
+    if([bool]$astraReq.create_outlook_drafts -or [bool]$astraReq.send_email -or -not [bool]$astraReq.preserve_original_research -or -not [bool]$astraReq.preserve_original_drafts){
+      throw 'Prospect Astra request safety contract invalid.'
+    }
+    $astraState=Join-Path 'C:\ProgramData\AFZ\OpenAIAgent\jobs\prospect-astra-review-all' ($astraId+'.json')
+    $astraDone=$false
+    if(Test-Path -LiteralPath $astraState -PathType Leaf){try{$astraDone=([string]((Get-Content -LiteralPath $astraState -Raw -Encoding UTF8|ConvertFrom-Json).status) -eq 'completed')}catch{}}
+    if($astraDone){
+      $prospectAstraActivation=[ordered]@{ok=$true;status='already-completed';requestId=$astraId;mutation='NONE'}
+    }else{
+      $astraArgs="-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$prospectAstraRunner`" -InstallRoot `"$InstallRoot`" -RequestPath `"$prospectAstraRequest`""
+      $astraProcess=Start-Process -FilePath 'powershell.exe' -ArgumentList $astraArgs -WindowStyle Hidden -PassThru
+      $prospectAstraActivation=[ordered]@{ok=$true;status='started';requestId=$astraId;processId=$astraProcess.Id;mutation='LOCAL_ASTRA_REVIEW_ONLY'}
+    }
+  }catch{
+    $prospectAstraActivation=[ordered]@{ok=$false;status='activation-failed';mutation='LOCAL_ASTRA_REVIEW_ATTEMPTED';error=$_.Exception.Message}
+  }
+}
+
   # Missing-only repair of the canonical one-minute SYSTEM fallback updater.
   # This never starts/stops a task and never rewrites an existing task.
   $fallbackUpdaterRepair=Ensure-FallbackUpdaterTask
@@ -534,6 +567,7 @@ if((Test-Path -LiteralPath $blogProductionDeploy -PathType Leaf) -and (Test-Path
   $out['qwenRidge16KQAActivation']=$ridge16KQAActivation
   $out['qwen35BA3BTransportRecovery']=$qwen35BTransportRecovery
   $out['qwen35BA3BDiagnostic']=$qwen35BDiagnostic
+  $out['prospectAstraActivation']=$prospectAstraActivation
   $out|ConvertTo-Json -Depth 30 -Compress
   exit 0
 }finally{
