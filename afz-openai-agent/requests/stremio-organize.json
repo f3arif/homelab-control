@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "project": "stremio-organize",
-  "enabled": false,
+  "project": "windows-console-flash",
+  "enabled": true,
   "action": "audit",
-  "job_id": "stremio-audit-20260905-1837"
+  "job_id": "windows-console-flash-audit-20260908-1059"
 }
