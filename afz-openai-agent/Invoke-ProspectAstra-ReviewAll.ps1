@@ -44,8 +44,21 @@ function Get-HttpErrorBody($ErrorRecord){
 }
 
 function Get-HttpErrorStatus($ErrorRecord){
-  try{return [int]$ErrorRecord.Exception.Response.StatusCode}catch{}
-  try{if([string]$ErrorRecord.Exception.Message -match '\((\d{3})\)'){return [int]$Matches[1]}}catch{}
+  try{
+    $response=$ErrorRecord.Exception.Response
+    if($response -and $null -ne $response.StatusCode){
+      try{return [int]$response.StatusCode}catch{}
+      try{return [int]$response.StatusCode.value__}catch{}
+    }
+  }catch{}
+  try{
+    $message=([string]$ErrorRecord.Exception.Message)
+    if($message -match '(?<!\\d)(409|429)(?!\\d)'){return [int]$Matches[1]}
+  }catch{}
+  try{
+    $rendered=($ErrorRecord|Out-String)
+    if($rendered -match '(?<!\\d)(409|429)(?!\\d)'){return [int]$Matches[1]}
+  }catch{}
   return 0
 }
 
