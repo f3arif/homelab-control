@@ -29,7 +29,24 @@ function Get-HttpErrorBody($ErrorRecord){
     $message=[string]$ErrorRecord.ErrorDetails.Message
     if(-not [string]::IsNullOrWhiteSpace($message)){return $message|ConvertFrom-Json}
   }catch{}
+  try{
+    $response=$ErrorRecord.Exception.Response
+    if($response){
+      $stream=$response.GetResponseStream()
+      if($stream){
+        $reader=New-Object IO.StreamReader($stream)
+        try{$message=$reader.ReadToEnd()}finally{$reader.Dispose();$stream.Dispose()}
+        if(-not [string]::IsNullOrWhiteSpace($message)){return $message|ConvertFrom-Json}
+      }
+    }
+  }catch{}
   return $null
+}
+
+function Get-HttpErrorStatus($ErrorRecord){
+  try{return [int]$ErrorRecord.Exception.Response.StatusCode}catch{}
+  try{if([string]$ErrorRecord.Exception.Message -match '\((\d{3})\)'){return [int]$Matches[1]}}catch{}
+  return 0
 }
 
 function Get-ProspectSnapshot{
@@ -112,15 +129,16 @@ try{
       Start-Sleep -Seconds ([math]::Max(1,[math]::Min(10,[int]$request.inter_batch_delay_seconds)))
     }catch{
       $errorBody=Get-HttpErrorBody $_
+      $httpStatus=Get-HttpErrorStatus $_
       $code=if($errorBody){[string]$errorBody.code}else{''}
-      $retryable=($code -in @('openai_rate_limit','research_in_progress'))
+      $retryable=($code -in @('openai_rate_limit','research_in_progress')) -or ($httpStatus -in @(409,429) -and $code -ne 'openai_quota')
       if(-not $retryable -or $transientRetries -ge [int]$request.max_transient_retries){throw}
       $transientRetries++
       $delay=10
       if($errorBody -and $errorBody.PSObject.Properties.Name -contains 'retryAfterSeconds' -and [int]$errorBody.retryAfterSeconds -gt 0){$delay=[math]::Min(90,[int]$errorBody.retryAfterSeconds)}
       $state.status='waiting-to-retry'
       $state.updatedAt=(Get-Date -Format o)
-      $state.error="Transient $code; retry $transientRetries after $delay seconds."
+      $state.error="Transient HTTP $httpStatus $code; retry $transientRetries after $delay seconds."
       Write-AstraState $state $statePath
       Start-Sleep -Seconds $delay
       $batch--

@@ -7,12 +7,18 @@ on:
       - 'afz-openai-agent/prospect-engine/ProspectEngine.ps1'
       - 'afz-openai-agent/prospect-engine/Test-ProspectEngine.ps1'
       - 'afz-openai-agent/prospect-engine/index.html'
+      - 'afz-openai-agent/Invoke-ProspectAstra-ReviewAll.ps1'
+      - 'afz-openai-agent/requests/prospect-astra-review-all.json'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
       - '.github/workflows/afz-prospect-engine-validate.yml'
   pull_request:
     paths:
       - 'afz-openai-agent/prospect-engine/ProspectEngine.ps1'
       - 'afz-openai-agent/prospect-engine/Test-ProspectEngine.ps1'
       - 'afz-openai-agent/prospect-engine/index.html'
+      - 'afz-openai-agent/Invoke-ProspectAstra-ReviewAll.ps1'
+      - 'afz-openai-agent/requests/prospect-astra-review-all.json'
+      - 'afz-openai-agent/Sync-AFZ-AgentFromGitHub.ps1'
       - '.github/workflows/afz-prospect-engine-validate.yml'
 
 permissions:
