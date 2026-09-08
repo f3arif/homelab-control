@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "prospect-astra-review-all-20260908-r1",
+  "status": "ACTIVE",
+  "action": "review-all-eligible-leads",
+  "target": "windows-main",
+  "endpoint": "http://127.0.0.1:8796",
+  "batch_limit": 3,
+  "max_batches": 50,
+  "max_transient_retries": 20,
+  "inter_batch_delay_seconds": 2,
+  "preserve_original_research": true,
+  "preserve_original_drafts": true,
+  "create_outlook_drafts": false,
+  "send_email": false
+}
