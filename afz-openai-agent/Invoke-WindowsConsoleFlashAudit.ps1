@@ -111,7 +111,7 @@ foreach($t in @(Get-ScheduledTask -ErrorAction Stop)){
       reason=$reason
       triggers=@($t.Triggers | ForEach-Object { TriggerView $_ })
       lastRunTime=$(if($info){[string]$info.LastRunTime}else{''})
-      lastTaskResult=$(if($info){[int]$info.LastTaskResult}else{$null})
+      lastTaskResult=$(if($info){[long]$info.LastTaskResult}else{$null})
       nextRunTime=$(if($info){[string]$info.NextRunTime}else{''})
     }
   }
