@@ -8,7 +8,10 @@ param(
 $ErrorActionPreference='Stop'
 $IntervalSeconds=[math]::Max(3,[math]::Min($IntervalSeconds,30))
 $requestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\stremio-organize.json'
+$consoleRequestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\windows-console-flash.json'
+$script:currentRequestFile=$requestFile
 $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Stremio-Organize.ps1'
+$consoleAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-WindowsConsoleFlashAudit.ps1'
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $stateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\stremio-organize-request'
 $stateFile=Join-Path $stateRoot 'latest.json'
@@ -40,8 +43,11 @@ function Valid-Request($r){
   if(-not $r){return $false}
   if(-not [bool]$r.enabled){return $false}
   if([int]$r.schema -ne 1){return $false}
-  if([string]$r.project -ne 'stremio-organize'){return $false}
-  if([string]$r.action -notin @('audit','apply')){return $false}
+  $project=[string]$r.project
+  $action=[string]$r.action
+  if($project -notin @('stremio-organize','windows-console-flash')){return $false}
+  if($project -eq 'stremio-organize' -and $action -notin @('audit','apply')){return $false}
+  if($project -eq 'windows-console-flash' -and $action -ne 'audit'){return $false}
   if(([string]$r.job_id) -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){return $false}
   return $true
 }
@@ -60,18 +66,21 @@ function Get-Summary($Result){
     debridioTvCatalogs=@($view.debridioTvCatalogs)
   }
 }
-function Handle-Request{
-  $req=Read-Json $requestFile
+function Handle-Request([string]$ActiveRequestFile){
+  $script:currentRequestFile=$ActiveRequestFile
+  $req=Read-Json $ActiveRequestFile
   if(-not(Valid-Request $req)){return}
 
   $job=[string]$req.job_id
+  $project=[string]$req.project
   $action=([string]$req.action).ToLowerInvariant()
   $state=Read-Json $stateFile
   if($state -and [string]$state.jobId -eq $job -and [string]$state.status -in @('completed','failed')){return}
 
   $sha=Current-Sha
   if($sha -notmatch '^[0-9a-f]{40}$'){throw 'Current exact GitHub source SHA unavailable'}
-  if(-not(Test-Path -LiteralPath $runner -PathType Leaf)){throw "Stremio organizer runner missing: $runner"}
+  $selectedRunner=$(if($project -eq 'windows-console-flash'){$consoleAuditRunner}else{$runner})
+  if(-not(Test-Path -LiteralPath $selectedRunner -PathType Leaf)){throw "Request runner missing: $selectedRunner"}
 
   Save-State ([ordered]@{
     ok=$true;status='running';jobId=$job;action=$action;sourceSha=$sha
@@ -79,7 +88,11 @@ function Handle-Request{
   })
   Log "START job=$job action=$action sha=$sha"
 
-  $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Action $action -InstallRoot $InstallRoot 2>&1 | Out-String).Trim()
+  if($project -eq 'windows-console-flash'){
+    $raw=(& powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $selectedRunner -InstallRoot $InstallRoot 2>&1 | Out-String).Trim()
+  }else{
+    $raw=(& powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $selectedRunner -Action $action -InstallRoot $InstallRoot 2>&1 | Out-String).Trim()
+  }
   $exitCode=$LASTEXITCODE
   if($exitCode -ne 0){
     $msg=$raw
@@ -109,7 +122,7 @@ function Handle-Request{
     return
   }
 
-  $summary=Get-Summary $parsed
+  $summary=$(if($project -eq 'windows-console-flash'){$parsed.summary}else{Get-Summary $parsed})
   Save-State ([ordered]@{
     ok=$true;status='completed';jobId=$job;action=$action;sourceSha=$sha
     result=$summary
@@ -125,10 +138,10 @@ try{
   if(-not $locked){exit 0}
   Log "WATCHER_START interval=$IntervalSeconds"
   while($true){
-    try{Handle-Request}catch{
+    try{Handle-Request $requestFile; Handle-Request $consoleRequestFile}catch{
       $msg=$_.Exception.Message
       Log "ERROR $msg"
-      $req=Read-Json $requestFile
+      $req=Read-Json $script:currentRequestFile
       Save-State ([ordered]@{
         ok=$false;status='failed';jobId=$(if($req){[string]$req.job_id}else{''});action=$(if($req){[string]$req.action}else{''})
         sourceSha=(Current-Sha);message=$msg

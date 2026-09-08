@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "project": "windows-console-flash",
+  "enabled": true,
+  "action": "audit",
+  "job_id": "windows-console-flash-audit-20260908-1106"
+}
