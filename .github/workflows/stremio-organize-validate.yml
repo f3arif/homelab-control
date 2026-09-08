@@ -6,6 +6,8 @@ on:
       - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
       - 'afz-openai-agent/Invoke-Stremio-Organize.ps1'
       - 'afz-openai-agent/Stremio-Organize-Request-Watcher.ps1'
+      - 'afz-openai-agent/Invoke-WindowsConsoleFlashAudit.ps1'
+      - 'afz-openai-agent/requests/windows-console-flash.json'
       - 'afz-openai-agent/requests/stremio-organize.json'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
@@ -31,7 +33,7 @@ jobs:
             'afz-openai-agent/AFZ-Agent-Control-Core.ps1',
             'afz-openai-agent/Invoke-Stremio-Organize.ps1',
             'afz-openai-agent/Stremio-Organize-Request-Watcher.ps1',
-  'afz-openai-agent/Invoke-WindowsConsoleFlashAudit.ps1',
+            'afz-openai-agent/Invoke-WindowsConsoleFlashAudit.ps1',
             'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
             'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
           )
