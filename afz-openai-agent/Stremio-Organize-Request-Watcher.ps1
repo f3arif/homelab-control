@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference='Stop'
 $IntervalSeconds=[math]::Max(3,[math]::Min($IntervalSeconds,30))
 $requestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\stremio-organize.json'
+$consoleRequestFile=Join-Path $InstallRoot 'afz-openai-agent\requests\windows-console-flash.json'
+$script:currentRequestFile=$requestFile
 $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Stremio-Organize.ps1'
 $consoleAuditRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-WindowsConsoleFlashAudit.ps1'
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
@@ -64,8 +66,9 @@ function Get-Summary($Result){
     debridioTvCatalogs=@($view.debridioTvCatalogs)
   }
 }
-function Handle-Request{
-  $req=Read-Json $requestFile
+function Handle-Request([string]$ActiveRequestFile){
+  $script:currentRequestFile=$ActiveRequestFile
+  $req=Read-Json $ActiveRequestFile
   if(-not(Valid-Request $req)){return}
 
   $job=[string]$req.job_id
@@ -135,10 +138,10 @@ try{
   if(-not $locked){exit 0}
   Log "WATCHER_START interval=$IntervalSeconds"
   while($true){
-    try{Handle-Request}catch{
+    try{Handle-Request $requestFile; Handle-Request $consoleRequestFile}catch{
       $msg=$_.Exception.Message
       Log "ERROR $msg"
-      $req=Read-Json $requestFile
+      $req=Read-Json $script:currentRequestFile
       Save-State ([ordered]@{
         ok=$false;status='failed';jobId=$(if($req){[string]$req.job_id}else{''});action=$(if($req){[string]$req.action}else{''})
         sourceSha=(Current-Sha);message=$msg
