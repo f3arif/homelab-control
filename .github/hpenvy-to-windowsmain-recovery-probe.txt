@@ -1,1 +1,2 @@
-probe windows-main LAN for Stremio tailnet recovery 2026-09-04T14:57:45.497Z
+probe windows-main from hp-envy lan relay
+nonce=20260909-commander-r1
