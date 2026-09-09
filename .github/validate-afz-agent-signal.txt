@@ -1,0 +1,2 @@
+validate=AFZ-OpenAI-Agent-v2.ps1
+nonce=20260909T1612
