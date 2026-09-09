@@ -99,14 +99,28 @@ if($existing){
 }else{
   $npx=(Get-Command npx.cmd -ErrorAction SilentlyContinue | Select-Object -First 1).Source
   if(-not $npx){throw 'npx.cmd not found; Node/NPM installation is required before Desktop Commander can run.'}
-  $user="$env:USERDOMAIN\$env:USERNAME"
+  $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal=$null
+  $trigger=$null
+  $owner=''
+  if([string]$identity.User.Value -eq 'S-1-5-18'){
+    $carrier=Get-ScheduledTask -TaskName 'AFZ Edge Backup' -ErrorAction SilentlyContinue
+    if(-not $carrier -or -not $carrier.Principal -or [string]$carrier.Principal.LogonType -notmatch 'Interactive'){
+      throw 'Desktop Commander task missing and no interactive AFZ Edge Backup principal is available.'
+    }
+    $principal=$carrier.Principal
+    $owner=[string]$principal.UserId
+    $trigger=New-ScheduledTaskTrigger -AtLogOn -User $owner
+  }else{
+    $owner="$env:USERDOMAIN\$env:USERNAME"
+    $principal=New-ScheduledTaskPrincipal -UserId $owner -LogonType Interactive -RunLevel Highest
+    $trigger=New-ScheduledTaskTrigger -AtLogOn -User $owner
+  }
   $action=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/d /s /c ""'+$npx+'" --yes @wonderwhy-er/desktop-commander@latest remote"')
-  $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
-  $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
   $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
   Register-ScheduledTask -TaskName $dcTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
   Start-ScheduledTask -TaskName $dcTask
-  Log "Desktop Commander task created for interactive user $user"
+  Log "Desktop Commander task created for interactive principal $owner"
 }
 
 Start-Sleep -Seconds 12
