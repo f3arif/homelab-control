@@ -17,7 +17,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -48,7 +48,13 @@ jobs:
             git commit -m "Temporarily allow direct Commander recovery runner $ip"
             git push origin HEAD:main
           fi
-          echo "ALLOW_SHA=$(git rev-parse HEAD)"
+          allow_sha=$(git rev-parse HEAD)
+          echo "ALLOW_SHA=$allow_sha"
+          echo "$allow_sha" > .github/afz-agent-deploy-signal.txt
+          git add .github/afz-agent-deploy-signal.txt
+          git commit -m "Fast-signal direct Commander recovery $allow_sha"
+          git push origin HEAD:main
+          echo "source_sha=$allow_sha" >> "$GITHUB_OUTPUT"
 
       - name: Wait for direct agent deployment
         shell: bash
