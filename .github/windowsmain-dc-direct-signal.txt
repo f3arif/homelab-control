@@ -1,0 +1,3 @@
+target=windows-main
+action=refresh-desktop-commander-device-code
+nonce=20260909T1200-direct-r1
