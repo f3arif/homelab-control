@@ -1,2 +1,3 @@
 validate=AFZ-OpenAI-Agent-v2.ps1
-nonce=20260909T1612
+source=e382d06487c8fafdf5c71e00ea114bac9a963b8b
+nonce=20260909T1615
