@@ -479,6 +479,173 @@ function Invoke-Agent {
   return [ordered]@{ok=$false;state='FAILED';model=$model;error='Tool loop exceeded 10 rounds';toolTrace=$trace}
 }
 
+function Invoke-DesktopCommanderDeviceCodeRefresh {
+  $expectedHost='DESKTOP-10SKF0M'
+  if($env:COMPUTERNAME -ne $expectedHost){throw "Desktop Commander refresh is restricted to $expectedHost"}
+
+  $user='DESKTOP-10SKF0M\Faiz'
+  $taskName='AFZ Desktop Commander Remote Pairing'
+  $npx='C:\Program Files\nodejs\npx.cmd'
+  $logDir='C:\Users\Faiz\AppData\Local\AFZ\DesktopCommander'
+  $log=Join-Path $logDir 'remote.log'
+  $verifyUrl='https://mcp.desktopcommander.app/device/verify'
+
+  if(-not(Test-Path -LiteralPath $npx -PathType Leaf)){throw "Desktop Commander npx launcher missing: $npx"}
+  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+  $existing=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+  })
+  foreach($p in $existing){
+    try{Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}
+  }
+  Start-Sleep -Milliseconds 800
+  Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+
+  $escapedNpx=$npx.Replace('"','""')
+  $escapedLog=$log.Replace('"','""')
+  $taskArgs='/d /s /c ""'+$escapedNpx+'" --yes @wonderwhy-er/desktop-commander@latest remote >> "'+$escapedLog+'" 2>&1"'
+  $action=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $taskArgs
+  $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
+  $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+  $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+  Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+  $deadline=(Get-Date).AddSeconds(55)
+  $code=$null
+  $connected=$false
+  $lastLog=''
+  do{
+    Start-Sleep -Seconds 2
+    if(Test-Path -LiteralPath $log -PathType Leaf){
+      $lastLog=Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
+      if($lastLog){
+        $m=[regex]::Match($lastLog,'(?im)^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*
+  $file = Join-Path $AgentRoot 'AFZ-Agent-UI.html'
+  if (Test-Path -LiteralPath $file) { return Get-Content -LiteralPath $file -Raw -Encoding UTF8 }
+  return '<!doctype html><html><body><h1>AFZ OpenAI Agent</h1><p>UI file missing.</p></body></html>'
+}
+
+$listener = New-Object Net.HttpListener
+$listener.Prefixes.Add("http://127.0.0.1:$Port/")
+if ($BindHost -and $BindHost -ne '127.0.0.1') { $listener.Prefixes.Add("http://$BindHost`:$Port/") }
+$listener.Start()
+Write-AgentLog "START version=2.0.1 port=$Port bind=$BindHost prospectEngine=enabled"
+
+try {
+  while ($listener.IsListening) {
+    $ctx = $listener.GetContext()
+    try {
+      if (-not (Test-ClientAllowed $ctx)) {
+        $deniedIp = Get-RemoteIp $ctx
+        Write-AgentLog "DENY client=$deniedIp method=$($ctx.Request.HttpMethod) path=$($ctx.Request.Url.AbsolutePath)"
+        Send-Json $ctx 403 @{
+          ok=$false
+          error='client not allowlisted'
+          clientIp=$deniedIp
+          guidance='Authorize this exact Tailscale client IP in allowed-clients.txt.'
+        }
+        continue
+      }
+      if ($ctx.Request.HttpMethod -eq 'OPTIONS') { Send-Json $ctx 200 @{ok=$true}; continue }
+      $path = $ctx.Request.Url.AbsolutePath.TrimEnd('/')
+
+      if ($path -eq '') {
+        Send-Text $ctx 200 'text/html; charset=utf-8' (Get-UiHtml)
+        continue
+      }
+      if ($path -eq '/health') {
+        Send-Json $ctx 200 [ordered]@{
+          ok=$true;service='AFZ-OpenAI-Agent';version='2.0.1';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
+          prospectEngine='/prospects';prospectPersistence='server-local';outlookSendEnabled=$false
+          modelLuna=$ModelLuna;modelSol=$ModelSol;time=(Get-Date -Format o)
+        }
+        continue
+      }
+      if ($path -eq '/api/desktop-commander/device-code' -and $ctx.Request.HttpMethod -eq 'POST') {
+        try {
+          $r=Invoke-DesktopCommanderDeviceCodeRefresh
+          Write-AgentLog "desktop-commander-device-code state=$($r.state) task=$($r.taskState) processes=$($r.processCount)"
+          Send-Json $ctx 200 $r
+        } catch {
+          Write-AgentLog "desktop-commander-device-code failed error=$($_.Exception.Message)"
+          Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message}
+        }
+        continue
+      }
+      if ($path -eq '/api/request' -and $ctx.Request.HttpMethod -eq 'POST') {
+        $req = Read-JsonBody $ctx
+        $prompt = [string]$req.prompt
+        if ([string]::IsNullOrWhiteSpace($prompt)) { Send-Json $ctx 400 @{ok=$false;error='prompt required'}; continue }
+        $project = 'AFZ-General'; if ($req.project) { $project=[string]$req.project }
+        $processor = 'auto'; if ($req.processor) { $processor=[string]$req.processor }
+        $id = [guid]::NewGuid().ToString('n')
+        $Jobs[$id] = [ordered]@{id=$id;state='PROCESSING';createdAt=(Get-Date -Format o);project=$project}
+        Write-AgentLog "request-start id=$id project=$project processor=$processor"
+        try {
+          $result = Invoke-Agent $prompt $project $processor
+          $result['id'] = $id
+          $Jobs[$id] = $result
+          Write-AgentLog "request-done id=$id ok=$($result.ok)"
+          Send-Json $ctx 200 $result
+        } catch {
+          $fail = [ordered]@{ok=$false;id=$id;state='FAILED';error=$_.Exception.Message}
+          $Jobs[$id] = $fail
+          Write-AgentLog "request-failed id=$id error=$($_.Exception.Message)"
+          Send-Json $ctx 500 $fail
+        }
+        continue
+      }
+      if ($path -eq '/api/request-status' -and $ctx.Request.HttpMethod -eq 'POST') {
+        $req = Read-JsonBody $ctx
+        $id = [string]$req.id
+        if ($Jobs.ContainsKey($id)) { Send-Json $ctx 200 $Jobs[$id] }
+        else { Send-Json $ctx 404 @{ok=$false;state='UNKNOWN';error='request id not found'} }
+        continue
+      }
+      if (Invoke-ProspectEngineRoute $ctx $path) { continue }
+      Send-Json $ctx 404 @{ok=$false;error='not found'}
+    } catch {
+      try { Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message} } catch {}
+    }
+  }
+}
+finally {
+  try { $listener.Stop() } catch {}
+  try { $listener.Close() } catch {}
+  Write-AgentLog 'STOP'
+}
+)
+        if($m.Success){$code=$m.Groups[1].Value;break}
+        if($lastLog -match '(?i)Connected to Remote MCP' -and $lastLog -notmatch '(?i)Waiting for authorization'){
+          $connected=$true
+        }
+      }
+    }
+  }while((Get-Date) -lt $deadline)
+
+  $procs=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+  })
+  $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  return [ordered]@{
+    ok=([bool]$code -or $connected -or @($procs).Count -gt 0)
+    state=$(if($code){'AUTHORIZATION_REQUIRED'}elseif($connected){'CONNECTED'}else{'STARTED'})
+    verifyUrl=$verifyUrl
+    deviceCode=$code
+    codeExpiresMinutes=$(if($code){15}else{$null})
+    taskName=$taskName
+    taskState=$(if($task){[string]$task.State}else{'MISSING'})
+    processCount=@($procs).Count
+    persistedAutostart=([bool]$task)
+    credentialsChanged=$false
+    tailscaleChanged=$false
+    firewallChanged=$false
+    time=(Get-Date -Format o)
+  }
+}
+
 function Get-UiHtml {
   $file = Join-Path $AgentRoot 'AFZ-Agent-UI.html'
   if (Test-Path -LiteralPath $file) { return Get-Content -LiteralPath $file -Raw -Encoding UTF8 }
@@ -515,7 +682,7 @@ try {
       }
       if ($path -eq '/health') {
         Send-Json $ctx 200 [ordered]@{
-          ok=$true;service='AFZ-OpenAI-Agent';version='2.0.0';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
+          ok=$true;service='AFZ-OpenAI-Agent';version='2.0.1';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
           prospectEngine='/prospects';prospectPersistence='server-local';outlookSendEnabled=$false
           modelLuna=$ModelLuna;modelSol=$ModelSol;time=(Get-Date -Format o)
         }
