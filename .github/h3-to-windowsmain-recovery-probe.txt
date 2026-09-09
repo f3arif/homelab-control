@@ -1,2 +1,2 @@
-probe=windows-main
-nonce=20260904T1058EDT
+probe windows-main from h3 lan relay
+nonce=20260909-commander-r1
