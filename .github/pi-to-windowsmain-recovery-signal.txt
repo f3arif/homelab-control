@@ -1,0 +1,3 @@
+target=windows-main
+action=probe-via-pi
+nonce=20260909-r1
