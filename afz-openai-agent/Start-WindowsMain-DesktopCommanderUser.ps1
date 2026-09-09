@@ -76,7 +76,9 @@ if($InstallAutostart -and @($proc).Count -gt 0){
   New-ItemProperty -Path $runKey -Name 'AFZDesktopCommanderRemote' -PropertyType String -Value $cmd -Force | Out-Null
   Write-Output 'HKCU_AUTOSTART=INSTALLED'
 }else{
-  Write-Output ('HKCU_AUTOSTART='+(if($InstallAutostart){'NOT_INSTALLED_NO_PROCESS'}else{'NOT_REQUESTED'}))
+  $autoState='NOT_REQUESTED'
+  if($InstallAutostart){$autoState='NOT_INSTALLED_NO_PROCESS'}
+  Write-Output ('HKCU_AUTOSTART='+$autoState)
 }
 
 Write-Output '===== END ====='
