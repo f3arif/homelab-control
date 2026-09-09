@@ -1,0 +1,122 @@
+name: Windows-main Commander SSH Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-commander-ssh-recovery-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-commander-ssh-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Recover AFZ control plane and Desktop Commander via Tailscale SSH
+        shell: bash
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.70.25.8
+          remote_script=$(cat <<'PS'
+          $ErrorActionPreference='Stop'
+          $expected='__SHA__'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw ('WRONG_HOST '+$env:COMPUTERNAME)}
+          Write-Output ('WM_HOST='+$env:COMPUTERNAME)
+          Write-Output ('WM_TIME='+(Get-Date -Format o))
+          Write-Output ('EXPECTED_SHA='+$expected)
+
+          function Show-Task([string]$name){
+            $t=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+            if($t){Write-Output ('TASK '+$name+'='+[string]$t.State)}else{Write-Output ('TASK '+$name+'=MISSING')}
+          }
+
+          $updaterTask='AFZ OpenAI Agent Updater'
+          $agentTask='AFZ OpenAI Agent'
+          $controlTask='AFZ OpenAI Agent Control'
+          $pushTask='AFZ OpenAI Agent Push Deploy Watcher'
+          $dcTask='AFZ Desktop Commander Remote Pairing'
+          foreach($n in @($updaterTask,$agentTask,$controlTask,$pushTask,$dcTask)){Show-Task $n}
+
+          $u=Get-ScheduledTask -TaskName $updaterTask -ErrorAction SilentlyContinue
+          if($u){
+            Start-ScheduledTask -TaskName $updaterTask
+            Write-Output 'UPDATER_KICK=STARTED'
+            Start-Sleep -Seconds 18
+          }else{
+            Write-Output 'UPDATER_KICK=MISSING'
+          }
+
+          foreach($n in @($agentTask,$controlTask,$pushTask)){
+            $t=Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue
+            if($t){
+              if([string]$t.State -ne 'Running'){Start-ScheduledTask -TaskName $n}
+              Write-Output ('SERVICE_TASK_START '+$n+'=REQUESTED')
+            }else{Write-Output ('SERVICE_TASK_START '+$n+'=MISSING')}
+          }
+
+          $dc=Get-ScheduledTask -TaskName $dcTask -ErrorAction SilentlyContinue
+          if($dc){
+            if([string]$dc.State -eq 'Running'){Stop-ScheduledTask -TaskName $dcTask -ErrorAction SilentlyContinue;Start-Sleep -Seconds 1}
+            Start-ScheduledTask -TaskName $dcTask -ErrorAction Stop
+            Write-Output 'DESKTOP_COMMANDER_TASK=RESTARTED_EXISTING'
+          }else{
+            $tmp=Join-Path $env:TEMP ('Bootstrap-WindowsMain-DesktopCommanderRemote-'+[guid]::NewGuid().ToString('n')+'.ps1')
+            $uri=('https://raw.githubusercontent.com/f3arif/homelab-control/'+$expected+'/afz-openai-agent/Bootstrap-WindowsMain-DesktopCommanderRemote.ps1')
+            Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $tmp -TimeoutSec 45
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('BOOTSTRAP_PARSE_ERROR '+(($errors|ForEach-Object{$_.Message}) -join '; '))}
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmp -ExpectedSha $expected -JobId 'desktop-commander-ssh-recovery-r1'
+            $code=$LASTEXITCODE
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            if($code -ne 0){throw ('DESKTOP_COMMANDER_BOOTSTRAP_EXIT='+$code)}
+            Write-Output 'DESKTOP_COMMANDER_TASK=BOOTSTRAPPED'
+          }
+
+          Start-Sleep -Seconds 8
+          foreach($n in @($updaterTask,$agentTask,$controlTask,$pushTask,$dcTask)){Show-Task $n}
+          $node=Get-Command node.exe -ErrorAction SilentlyContinue
+          $npx=Get-Command npx.cmd -ErrorAction SilentlyContinue
+          Write-Output ('NODE_PRESENT='+[bool]$node)
+          Write-Output ('NPX_PRESENT='+[bool]$npx)
+          PS
+          )
+          remote_script="${remote_script//__SHA__/$AFZ_SHA}"
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 180s tailscale ssh Faiz@100.70.25.8 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+      - name: Verify AFZ control listeners returned
+        shell: bash
+        run: |
+          set +e
+          for attempt in $(seq 1 10); do
+            echo "verify_attempt=$attempt"
+            ok=0
+            for port in 8796 8797; do
+              if timeout 3 bash -c "</dev/tcp/100.70.25.8/$port" 2>/dev/null; then
+                echo "TCP_${port}=OPEN"
+                ok=$((ok+1))
+              else
+                echo "TCP_${port}=CLOSED"
+              fi
+            done
+            if [ "$ok" -ge 1 ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
