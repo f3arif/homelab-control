@@ -13,6 +13,7 @@ $mirrorPath=Join-Path $mirrorRoot 'AFZ-PROSPECT-ASTRA-REVIEW-LATEST.json'
 $sharedMirrorRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Workers\Results'
 $sharedMirrorPath=Join-Path $sharedMirrorRoot 'AFZ-PROSPECT-ASTRA-REVIEW-LATEST.json'
 $endpoint='http://127.0.0.1:8796'
+$prospectAuditPath='C:\\ProgramData\\AFZ\\OpenAIAgent\\ProspectEngine\\audit.ndjson'
 if([string]::IsNullOrWhiteSpace($RequestPath)){
   $RequestPath=Join-Path $InstallRoot 'afz-openai-agent\requests\prospect-astra-review-all.json'
 }
@@ -62,6 +63,26 @@ function Get-HttpErrorStatus($ErrorRecord){
   return 0
 }
 
+
+function Get-LatestAstraFailure{
+  if(-not(Test-Path -LiteralPath $prospectAuditPath -PathType Leaf)){return ''}
+  try{
+    $lines=@(Get-Content -LiteralPath $prospectAuditPath -Tail 100 -Encoding UTF8)
+    [array]::Reverse($lines)
+    foreach($line in $lines){
+      try{
+        $entry=$line|ConvertFrom-Json -ErrorAction Stop
+        if([string]$entry.action -eq 'astra-review' -and -not [bool]$entry.ok){
+          $detail=([string]$entry.detail).Trim()
+          if($detail.Length -gt 500){$detail=$detail.Substring(0,500)}
+          return $detail
+        }
+      }catch{}
+    }
+  }catch{}
+  return ''
+}
+
 function Get-ProspectSnapshot{
   return Invoke-RestMethod -Method Get -Uri ($endpoint+'/api/prospects') -TimeoutSec 30
 }
@@ -109,6 +130,7 @@ try{
     status='waiting-for-engine';ok=$false;batchesCompleted=0;leadsChecked=0
     approved=0;revise=0;hold=0;remaining=$null;beforeOutlookDrafts=$null;afterOutlookDrafts=$null
     originalResearchPreserved=$true;originalDraftsPreserved=$true;outlookDraftCreationAllowed=$false;emailSendingAllowed=$false
+    transientRetries=0;errorClass=$null;upstreamError=$null
     startedAt=$started.ToString('o');updatedAt=$started.ToString('o');finishedAt=$null;error=$null
   }
   Write-AstraState $state $statePath
@@ -141,12 +163,25 @@ try{
       if([bool]$result.complete){break}
       Start-Sleep -Seconds ([math]::Max(1,[math]::Min(10,[int]$request.inter_batch_delay_seconds)))
     }catch{
-      $errorBody=Get-HttpErrorBody $_
-      $httpStatus=Get-HttpErrorStatus $_
+      $caught=$_
+      $errorBody=Get-HttpErrorBody $caught
+      $httpStatus=Get-HttpErrorStatus $caught
+      $exceptionMessage=([string]$caught.Exception.Message)
+      $messageHas429=$exceptionMessage.Contains('(429)')
       $code=if($errorBody){[string]$errorBody.code}else{''}
-      $retryable=($code -in @('openai_rate_limit','research_in_progress')) -or ($httpStatus -in @(409,429) -and $code -ne 'openai_quota')
+      $upstreamError=Get-LatestAstraFailure
+      $state.upstreamError=$upstreamError
+      $quotaBlocked=($code -eq 'openai_quota') -or ($upstreamError -match '(?i)quota|billing|credit balance|insufficient[_ ]quota')
+      if($quotaBlocked){
+        $state.errorClass='openai_quota'
+        if([string]::IsNullOrWhiteSpace($upstreamError)){$upstreamError='OpenAI API quota or billing is blocking Astra verification.'}
+        throw $upstreamError
+      }
+      $retryable=($code -in @('openai_rate_limit','research_in_progress')) -or ($httpStatus -in @(409,429)) -or $messageHas429
       if(-not $retryable -or $transientRetries -ge [int]$request.max_transient_retries){throw}
       $transientRetries++
+      $state.transientRetries=$transientRetries
+      $state.errorClass='openai_rate_limit'
       $delay=10
       if($errorBody -and $errorBody.PSObject.Properties.Name -contains 'retryAfterSeconds' -and [int]$errorBody.retryAfterSeconds -gt 0){$delay=[math]::Min(90,[int]$errorBody.retryAfterSeconds)}
       $state.status='waiting-to-retry'
