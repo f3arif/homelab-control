@@ -7,7 +7,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
-if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw "windows-main-only carrier; host=$env:COMPUTERNAME"}
+$actualHost=[Environment]::MachineName
+if($actualHost -ne 'DESKTOP-10SKF0M'){throw "windows-main-only carrier; host=$actualHost"}
 if($ExpectedSha -notmatch '^[0-9a-fA-F]{40}$'){throw 'ExpectedSha must be a 40-character Git commit SHA.'}
 $ExpectedSha=$ExpectedSha.ToLowerInvariant()
 
@@ -42,7 +43,8 @@ $runnerUrl="https://raw.githubusercontent.com/f3arif/homelab-control/$ExpectedSh
 $remoteTemplate=@'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
-if($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: $env:COMPUTERNAME"}
+$actualHost=[Environment]::MachineName
+if($actualHost -ne 'DESKTOP-H3R6CQN'){throw "Wrong host: $actualHost"}
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $runnerUrl='__RUNNER_URL__'
 $imageBase='__IMAGE_BASE__'
