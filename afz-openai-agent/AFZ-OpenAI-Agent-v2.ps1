@@ -502,9 +502,7 @@ function Invoke-DesktopCommanderDeviceCodeRefresh {
   Start-Sleep -Milliseconds 800
   Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
 
-  $escapedNpx=$npx.Replace('"','""')
-  $escapedLog=$log.Replace('"','""')
-  $taskArgs='/d /s /c ""'+$escapedNpx+'" --yes @wonderwhy-er/desktop-commander@latest remote >> "'+$escapedLog+'" 2>&1"'
+  $taskArgs='/d /s /c ""C:\Program Files\nodejs\npx.cmd" --yes @wonderwhy-er/desktop-commander@latest remote >> "C:\Users\Faiz\AppData\Local\AFZ\DesktopCommander\remote.log" 2>&1"'
   $action=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $taskArgs
   $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
   $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
@@ -515,108 +513,12 @@ function Invoke-DesktopCommanderDeviceCodeRefresh {
   $deadline=(Get-Date).AddSeconds(55)
   $code=$null
   $connected=$false
-  $lastLog=''
   do{
     Start-Sleep -Seconds 2
     if(Test-Path -LiteralPath $log -PathType Leaf){
       $lastLog=Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
       if($lastLog){
-        $m=[regex]::Match($lastLog,'(?im)^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*
-  $file = Join-Path $AgentRoot 'AFZ-Agent-UI.html'
-  if (Test-Path -LiteralPath $file) { return Get-Content -LiteralPath $file -Raw -Encoding UTF8 }
-  return '<!doctype html><html><body><h1>AFZ OpenAI Agent</h1><p>UI file missing.</p></body></html>'
-}
-
-$listener = New-Object Net.HttpListener
-$listener.Prefixes.Add("http://127.0.0.1:$Port/")
-if ($BindHost -and $BindHost -ne '127.0.0.1') { $listener.Prefixes.Add("http://$BindHost`:$Port/") }
-$listener.Start()
-Write-AgentLog "START version=2.0.1 port=$Port bind=$BindHost prospectEngine=enabled"
-
-try {
-  while ($listener.IsListening) {
-    $ctx = $listener.GetContext()
-    try {
-      if (-not (Test-ClientAllowed $ctx)) {
-        $deniedIp = Get-RemoteIp $ctx
-        Write-AgentLog "DENY client=$deniedIp method=$($ctx.Request.HttpMethod) path=$($ctx.Request.Url.AbsolutePath)"
-        Send-Json $ctx 403 @{
-          ok=$false
-          error='client not allowlisted'
-          clientIp=$deniedIp
-          guidance='Authorize this exact Tailscale client IP in allowed-clients.txt.'
-        }
-        continue
-      }
-      if ($ctx.Request.HttpMethod -eq 'OPTIONS') { Send-Json $ctx 200 @{ok=$true}; continue }
-      $path = $ctx.Request.Url.AbsolutePath.TrimEnd('/')
-
-      if ($path -eq '') {
-        Send-Text $ctx 200 'text/html; charset=utf-8' (Get-UiHtml)
-        continue
-      }
-      if ($path -eq '/health') {
-        Send-Json $ctx 200 [ordered]@{
-          ok=$true;service='AFZ-OpenAI-Agent';version='2.0.1';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
-          prospectEngine='/prospects';prospectPersistence='server-local';outlookSendEnabled=$false
-          modelLuna=$ModelLuna;modelSol=$ModelSol;time=(Get-Date -Format o)
-        }
-        continue
-      }
-      if ($path -eq '/api/desktop-commander/device-code' -and $ctx.Request.HttpMethod -eq 'POST') {
-        try {
-          $r=Invoke-DesktopCommanderDeviceCodeRefresh
-          Write-AgentLog "desktop-commander-device-code state=$($r.state) task=$($r.taskState) processes=$($r.processCount)"
-          Send-Json $ctx 200 $r
-        } catch {
-          Write-AgentLog "desktop-commander-device-code failed error=$($_.Exception.Message)"
-          Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message}
-        }
-        continue
-      }
-      if ($path -eq '/api/request' -and $ctx.Request.HttpMethod -eq 'POST') {
-        $req = Read-JsonBody $ctx
-        $prompt = [string]$req.prompt
-        if ([string]::IsNullOrWhiteSpace($prompt)) { Send-Json $ctx 400 @{ok=$false;error='prompt required'}; continue }
-        $project = 'AFZ-General'; if ($req.project) { $project=[string]$req.project }
-        $processor = 'auto'; if ($req.processor) { $processor=[string]$req.processor }
-        $id = [guid]::NewGuid().ToString('n')
-        $Jobs[$id] = [ordered]@{id=$id;state='PROCESSING';createdAt=(Get-Date -Format o);project=$project}
-        Write-AgentLog "request-start id=$id project=$project processor=$processor"
-        try {
-          $result = Invoke-Agent $prompt $project $processor
-          $result['id'] = $id
-          $Jobs[$id] = $result
-          Write-AgentLog "request-done id=$id ok=$($result.ok)"
-          Send-Json $ctx 200 $result
-        } catch {
-          $fail = [ordered]@{ok=$false;id=$id;state='FAILED';error=$_.Exception.Message}
-          $Jobs[$id] = $fail
-          Write-AgentLog "request-failed id=$id error=$($_.Exception.Message)"
-          Send-Json $ctx 500 $fail
-        }
-        continue
-      }
-      if ($path -eq '/api/request-status' -and $ctx.Request.HttpMethod -eq 'POST') {
-        $req = Read-JsonBody $ctx
-        $id = [string]$req.id
-        if ($Jobs.ContainsKey($id)) { Send-Json $ctx 200 $Jobs[$id] }
-        else { Send-Json $ctx 404 @{ok=$false;state='UNKNOWN';error='request id not found'} }
-        continue
-      }
-      if (Invoke-ProspectEngineRoute $ctx $path) { continue }
-      Send-Json $ctx 404 @{ok=$false;error='not found'}
-    } catch {
-      try { Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message} } catch {}
-    }
-  }
-}
-finally {
-  try { $listener.Stop() } catch {}
-  try { $listener.Close() } catch {}
-  Write-AgentLog 'STOP'
-}
-)
+        $m=[regex]::Match($lastLog,'(?im)^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*$')
         if($m.Success){$code=$m.Groups[1].Value;break}
         if($lastLog -match '(?i)Connected to Remote MCP' -and $lastLog -notmatch '(?i)Waiting for authorization'){
           $connected=$true
