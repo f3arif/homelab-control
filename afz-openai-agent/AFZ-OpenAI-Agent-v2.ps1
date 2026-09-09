@@ -558,7 +558,7 @@ $listener = New-Object Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 if ($BindHost -and $BindHost -ne '127.0.0.1') { $listener.Prefixes.Add("http://$BindHost`:$Port/") }
 $listener.Start()
-Write-AgentLog "START version=2.0.0 port=$Port bind=$BindHost prospectEngine=enabled"
+Write-AgentLog "START version=2.0.1 port=$Port bind=$BindHost prospectEngine=enabled"
 
 try {
   while ($listener.IsListening) {
@@ -587,6 +587,17 @@ try {
           ok=$true;service='AFZ-OpenAI-Agent';version='2.0.1';mode='typed-ops-plus-prospect-engine';onedriveRequired=$false
           prospectEngine='/prospects';prospectPersistence='server-local';outlookSendEnabled=$false
           modelLuna=$ModelLuna;modelSol=$ModelSol;time=(Get-Date -Format o)
+        }
+        continue
+      }
+      if ($path -eq '/api/desktop-commander/device-code' -and $ctx.Request.HttpMethod -eq 'POST') {
+        try {
+          $r=Invoke-DesktopCommanderDeviceCodeRefresh
+          Write-AgentLog "desktop-commander-device-code state=$($r.state) task=$($r.taskState) processes=$($r.processCount)"
+          Send-Json $ctx 200 $r
+        } catch {
+          Write-AgentLog "desktop-commander-device-code failed error=$($_.Exception.Message)"
+          Send-Json $ctx 500 @{ok=$false;error=$_.Exception.Message}
         }
         continue
       }
