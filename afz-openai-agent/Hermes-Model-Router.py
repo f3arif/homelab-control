@@ -1,5 +1,6 @@
 import argparse
 import json
+import platform
 import subprocess
 import sys
 import time
@@ -11,14 +12,26 @@ ROOT = Path(r"C:\Projects\HermesRouter")
 RUNS = ROOT / "runs"
 RUNS.mkdir(parents=True, exist_ok=True)
 
-LOCAL_DIRECT = {
-    "name": "local-direct",
-    "provider": "ollama-direct",
-    "model": "qwen3.5:4b-hermes96k",
-    "timeout": 90,
-    "num_ctx": 32768,
-    "num_predict": 2048,
-}
+HOSTNAME = platform.node().upper()
+
+if HOSTNAME == "DESKTOP-H3R6CQN":
+    LOCAL_DIRECT = {
+        "name": "local-h3-35b",
+        "provider": "ollama-direct",
+        "model": "qwen3.6:35b-a3b-hermes64k",
+        "timeout": 180,
+        "num_ctx": 65536,
+        "num_predict": 2048,
+    }
+else:
+    LOCAL_DIRECT = {
+        "name": "local-asus-4b",
+        "provider": "ollama-direct",
+        "model": "qwen3.5:4b-hermes96k",
+        "timeout": 90,
+        "num_ctx": 32768,
+        "num_predict": 2048,
+    }
 
 ROUTES = {
     "default": [
