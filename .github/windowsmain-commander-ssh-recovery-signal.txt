@@ -1,0 +1,3 @@
+target=windows-main
+action=recover-commander-and-afz-control
+nonce=20260909-r1
