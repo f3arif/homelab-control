@@ -1,0 +1,110 @@
+name: Windows-main Direct Commander Device Code
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-dc-direct-signal.txt'
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: windowsmain-dc-direct
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Temporarily allowlist this runner
+        id: allow
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=$(tailscale ip -4 | head -n1)
+          test -n "$ip"
+          echo "runner_ip=$ip" >> "$GITHUB_OUTPUT"
+          git config user.name 'afz-recovery-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          grep -qxF "$ip" afz-openai-agent/allowed-clients.txt || echo "$ip" >> afz-openai-agent/allowed-clients.txt
+          if ! git diff --quiet; then
+            git add afz-openai-agent/allowed-clients.txt
+            git commit -m "Temporarily allow direct Commander recovery runner $ip"
+            git push origin HEAD:main
+          fi
+          echo "ALLOW_SHA=$(git rev-parse HEAD)"
+
+      - name: Wait for direct agent deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            if body=$(curl -fsS --connect-timeout 3 --max-time 8 http://100.70.25.8:8796/health 2>/dev/null); then
+              echo "$body"
+              if python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("version")=="2.0.1" else 1)' <<<"$body"; then
+                exit 0
+              fi
+            fi
+            sleep 4
+          done
+          echo 'Direct agent did not reach version 2.0.1' >&2
+          exit 1
+
+      - name: Request fresh Commander device code directly
+        id: refresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(curl -fsS --connect-timeout 3 --max-time 90 -X POST http://100.70.25.8:8796/api/desktop-commander/device-code)
+          echo "$body"
+          python - <<'PY' <<<"$body"
+          import json,sys
+          d=json.load(sys.stdin)
+          assert d.get('ok') is True, d
+          print('DIRECT_STATE='+str(d.get('state')))
+          print('VERIFY_URL='+str(d.get('verifyUrl')))
+          print('DEVICE_CODE='+str(d.get('deviceCode')))
+          print('TASK_STATE='+str(d.get('taskState')))
+          print('PERSISTED_AUTOSTART='+str(d.get('persistedAutostart')))
+          PY
+
+      - name: Remove temporary runner allowlist
+        if: always()
+        shell: bash
+        env:
+          RUNNER_IP: ${{ steps.allow.outputs.runner_ip }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RUNNER_IP:-}" ]; then exit 0; fi
+          git fetch origin main
+          git reset --hard origin/main
+          python - "$RUNNER_IP" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path('afz-openai-agent/allowed-clients.txt')
+          ip=sys.argv[1]
+          lines=p.read_text().splitlines()
+          p.write_text('\n'.join(x for x in lines if x.strip()!=ip)+'\n')
+          PY
+          if ! git diff --quiet; then
+            git config user.name 'afz-recovery-bot'
+            git config user.email 'actions@users.noreply.github.com'
+            git add afz-openai-agent/allowed-clients.txt
+            git commit -m "Remove temporary direct recovery runner $RUNNER_IP"
+            git push origin HEAD:main
+          fi
