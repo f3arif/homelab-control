@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import os
+import platform
 import sys
 import urllib.request
 from pathlib import Path
@@ -145,8 +146,9 @@ async def do_review(async_call_llm, viewport: str, images: list[bytes]):
     }
 
 async def main_async(image_base: str):
-    if os.environ.get("COMPUTERNAME", "").upper() != EXPECTED_HOST:
-        fail(f"H3-only runner; host={os.environ.get('COMPUTERNAME')!r}")
+    actual_host = (os.environ.get("COMPUTERNAME") or platform.node() or "").upper()
+    if actual_host != EXPECTED_HOST:
+        fail(f"H3-only runner; host={actual_host!r}")
     if not HERMES_ROOT.is_dir():
         fail(f"Hermes root missing: {HERMES_ROOT}")
     os.chdir(HERMES_ROOT)
