@@ -1,0 +1,94 @@
+name: AFZ Desktop Commander Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/desktop-commander-recovery-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-desktop-commander-recovery
+  cancel-in-progress: true
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Deploy exact current SHA to Windows-main
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 20 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/push-deploy
+
+      - name: Wait for exact SHA and recovery route
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 10 http://100.70.25.8:8797/health 2>/dev/null); then
+              commit=$(python -c 'import json,sys; print((json.load(sys.stdin).get("commit") or "").strip().lower())' <<<"$health")
+              if [ "$commit" = "${AFZ_SHA,,}" ]; then
+                echo "Windows-main exact source confirmed: $commit"
+                exit 0
+              fi
+              echo "Attempt $attempt: source=$commit expected=${AFZ_SHA,,}"
+            else
+              echo "Attempt $attempt: control API unavailable"
+            fi
+            sleep 5
+          done
+          echo 'Windows-main did not reach exact source SHA' >&2
+          exit 1
+
+      - name: Audit Desktop Commander registration
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"action":"audit","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 90 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/desktop-commander-recovery | tee commander-audit.json
+
+      - name: Recover Desktop Commander and install watchdog
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"action":"apply","repository":"f3arif/homelab-control","ref":"refs/heads/main","sha":"%s"}' "$AFZ_SHA")
+          curl --silent --show-error --fail-with-body --connect-timeout 3 --max-time 120 \
+            -H 'Content-Type: application/json' -X POST --data "$payload" \
+            http://100.70.25.8:8797/api/desktop-commander-recovery | tee commander-apply.json
+          python - <<'PY'
+          import json
+          r=json.load(open('commander-apply.json',encoding='utf-8'))
+          assert r.get('ok') is True, r
+          assert int(r.get('processAfter') or 0) >= 1, r
+          assert r.get('credentialsChanged') is False, r
+          assert r.get('tailscaleChanged') is False, r
+          print('Desktop Commander recovery PASS:', r.get('classification'))
+          print('Actions:', r.get('actions'))
+          print('Watchdog installed:', r.get('watchdogInstalled'))
+          PY
