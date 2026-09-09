@@ -7,7 +7,7 @@ on:
       - '.github/windowsmain-dc-direct-signal.txt'
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -32,7 +32,7 @@ jobs:
           tags: tag:afz-deploy
           args: --accept-dns=false
 
-      - name: Temporarily allowlist this runner
+      - name: Publish runner IP and wait for direct access
         id: allow
         shell: bash
         run: |
@@ -40,23 +40,20 @@ jobs:
           ip=$(tailscale ip -4 | head -n1)
           test -n "$ip"
           echo "runner_ip=$ip" >> "$GITHUB_OUTPUT"
-          git config user.name 'afz-recovery-bot'
-          git config user.email 'actions@users.noreply.github.com'
-          grep -qxF "$ip" afz-openai-agent/allowed-clients.txt || echo "$ip" >> afz-openai-agent/allowed-clients.txt
-          if ! git diff --quiet; then
-            git add afz-openai-agent/allowed-clients.txt
-            git commit -m "Temporarily allow direct Commander recovery runner $ip"
-            git push origin HEAD:main
-          fi
-          allow_sha=$(git rev-parse HEAD)
-          echo "ALLOW_SHA=$allow_sha"
-          echo "$allow_sha" > .github/afz-agent-deploy-signal.txt
-          git add .github/afz-agent-deploy-signal.txt
-          git commit -m "Fast-signal direct Commander recovery $allow_sha"
-          git push origin HEAD:main
-          echo "source_sha=$allow_sha" >> "$GITHUB_OUTPUT"
+          echo "DIRECT_RUNNER_TAILSCALE_IP=$ip"
+          for i in $(seq 1 100); do
+            code=$(curl -sS -o /tmp/afz-health.json -w '%{http_code}' --connect-timeout 3 --max-time 6 http://100.70.25.8:8796/health || true)
+            echo "allowlist_wait_attempt=$i http=$code"
+            if [ "$code" = "200" ]; then
+              cat /tmp/afz-health.json
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'Runner IP was not allowlisted in time' >&2
+          exit 1
 
-      - name: Wait for direct agent deployment
+      - name: Wait for direct agent v2.0.1
         shell: bash
         run: |
           set -euo pipefail
@@ -79,9 +76,9 @@ jobs:
           set -euo pipefail
           body=$(curl -fsS --connect-timeout 3 --max-time 90 -X POST http://100.70.25.8:8796/api/desktop-commander/device-code)
           echo "$body"
-          python - <<'PY' <<<"$body"
-          import json,sys
-          d=json.load(sys.stdin)
+          BODY="$body" python - <<'PY'
+          import json, os
+          d=json.loads(os.environ['BODY'])
           assert d.get('ok') is True, d
           print('DIRECT_STATE='+str(d.get('state')))
           print('VERIFY_URL='+str(d.get('verifyUrl')))
@@ -89,29 +86,3 @@ jobs:
           print('TASK_STATE='+str(d.get('taskState')))
           print('PERSISTED_AUTOSTART='+str(d.get('persistedAutostart')))
           PY
-
-      - name: Remove temporary runner allowlist
-        if: always()
-        shell: bash
-        env:
-          RUNNER_IP: ${{ steps.allow.outputs.runner_ip }}
-        run: |
-          set -euo pipefail
-          if [ -z "${RUNNER_IP:-}" ]; then exit 0; fi
-          git fetch origin main
-          git reset --hard origin/main
-          python - "$RUNNER_IP" <<'PY'
-          from pathlib import Path
-          import sys
-          p=Path('afz-openai-agent/allowed-clients.txt')
-          ip=sys.argv[1]
-          lines=p.read_text().splitlines()
-          p.write_text('\n'.join(x for x in lines if x.strip()!=ip)+'\n')
-          PY
-          if ! git diff --quiet; then
-            git config user.name 'afz-recovery-bot'
-            git config user.email 'actions@users.noreply.github.com'
-            git add afz-openai-agent/allowed-clients.txt
-            git commit -m "Remove temporary direct recovery runner $RUNNER_IP"
-            git push origin HEAD:main
-          fi
