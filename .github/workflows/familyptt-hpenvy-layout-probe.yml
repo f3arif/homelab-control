@@ -1,0 +1,47 @@
+name: FamilyPTT HP Envy layout probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/familyptt-hpenvy-layout-probe.yml'
+      - '.github/afz-familyptt-hpenvy-layout-probe-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe FamilyPTT compose layout on HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_script=$(cat <<'REMOTE'
+          set -euo pipefail
+          test "$(hostname)" = 'hpenvy'
+          test "$(id -un)" = 'coolyo'
+          echo 'HPENVY_FAMILYPTT_LAYOUT_BEGIN'
+          mapfile -t names < <(docker ps --format '{{.Names}}' | grep -i '^familyptt-' || true)
+          printf 'CONTAINER_COUNT=%s\n' "${#names[@]}"
+          for name in "${names[@]}"; do
+            printf 'CONTAINER=%s\n' "$name"
+            workdir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$name" 2>/dev/null || true)
+            config=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$name" 2>/dev/null || true)
+            service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$name" 2>/dev/null || true)
+            printf 'SERVICE=%s\nWORKDIR=%s\nCONFIG_FILES=%s\n' "$service" "$workdir" "$config"
+          done
+          echo 'HPENVY_FAMILYPTT_LAYOUT_END'
+          REMOTE
+          )
+          printf '%s\n' "$remote_script" | tailscale ssh coolyo@100.71.26.69 'bash -s'
