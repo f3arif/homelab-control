@@ -22,25 +22,30 @@ LOCAL_DIRECT = {
 
 ROUTES = {
     "default": [
+        {"name":"sol-oauth","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"astra-oauth","provider":"openai-codex","model":"gpt-6-astra","timeout":240},
         {"name":"glm-flash","provider":"openrouter","model":"z-ai/glm-5.3-flash","timeout":65},
         {"name":"glm-full","provider":"openrouter","model":"z-ai/glm-5.3","timeout":90},
-        {"name":"sol","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
         LOCAL_DIRECT,
     ],
     "cheap": [
+        {"name":"sol-oauth","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"astra-oauth","provider":"openai-codex","model":"gpt-6-astra","timeout":240},
         {"name":"deepseek","provider":"openrouter","model":"deepseek/deepseek-v4-flash-0731","timeout":90},
         {"name":"glm-flash","provider":"openrouter","model":"z-ai/glm-5.3-flash","timeout":65},
         LOCAL_DIRECT,
     ],
     "coding": [
+        {"name":"sol-oauth","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"astra-oauth","provider":"openai-codex","model":"gpt-6-astra","timeout":240},
         {"name":"glm-flash","provider":"openrouter","model":"z-ai/glm-5.3-flash","timeout":65},
         {"name":"glm-full","provider":"openrouter","model":"z-ai/glm-5.3","timeout":90},
-        {"name":"sol","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
         LOCAL_DIRECT,
     ],
     "complex": [
+        {"name":"sol-oauth","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"astra-oauth","provider":"openai-codex","model":"gpt-6-astra","timeout":240},
         {"name":"glm-full","provider":"openrouter","model":"z-ai/glm-5.3","timeout":90},
-        {"name":"sol","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
         {"name":"glm-flash","provider":"openrouter","model":"z-ai/glm-5.3-flash","timeout":65},
         LOCAL_DIRECT,
     ],
@@ -51,7 +56,8 @@ ROUTES = {
         LOCAL_DIRECT,
     ],
     "sensitive": [
-        {"name":"sol","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"sol-oauth","provider":"openai-codex","model":"gpt-5.6-sol-900k","timeout":180},
+        {"name":"astra-oauth","provider":"openai-codex","model":"gpt-6-astra","timeout":240},
         LOCAL_DIRECT,
     ],
     "local": [LOCAL_DIRECT],
