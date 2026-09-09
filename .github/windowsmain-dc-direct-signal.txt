@@ -1,3 +1,3 @@
 target=windows-main
 action=refresh-desktop-commander-device-code
-nonce=20260909T1608-direct-r2
+nonce=20260909T1624-direct-r4
