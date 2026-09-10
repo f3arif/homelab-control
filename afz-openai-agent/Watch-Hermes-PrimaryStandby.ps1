@@ -66,12 +66,15 @@ if(-not $asusPing){
   }
 }
 $asus8796=Test-Tcp $asusTs 8796
+$asus8797=Test-Tcp $asusTs 8797
 $asus22=Test-Tcp $asusTs 22
 $asusWinRm=Test-Tcp $asusLan 5985
 
 $primaryReady=($gatewayOk -and $routerExists -and $ollamaOk)
-$standbyReady=($asusPing -and $asus8796)
-$classification=if($primaryReady -and $standbyReady){'PRIMARY_AND_STANDBY_READY'}elseif($primaryReady){'PRIMARY_READY_STANDBY_DEGRADED'}elseif($standbyReady){'PRIMARY_DEGRADED_STANDBY_READY'}else{'BOTH_DEGRADED'}
+$standbyNetworkReady=($asusPing -and $asus8796)
+$standbyControlReady=$asus8797
+$standbyReady=($standbyNetworkReady -and $standbyControlReady)
+$classification=if($primaryReady -and $standbyReady){'PRIMARY_AND_STANDBY_READY'}elseif($primaryReady -and $standbyNetworkReady){'PRIMARY_READY_STANDBY_CONTROL_DEGRADED'}elseif($primaryReady){'PRIMARY_READY_STANDBY_OFFLINE'}elseif($standbyReady){'PRIMARY_DEGRADED_STANDBY_READY'}else{'BOTH_DEGRADED'}
 
 $state=[ordered]@{
   schema=1
@@ -89,8 +92,11 @@ $state=[ordered]@{
   standby=[ordered]@{
     host='DESKTOP-10SKF0M'
     ready=$standbyReady
+    networkReady=$standbyNetworkReady
+    controlReady=$standbyControlReady
     tailscale=$asusPing
     agent8796=$asus8796
+    control8797=$asus8797
     ssh22=$asus22
     winrm5985=$asusWinRm
     wakeOnLanSent=$wolSent
