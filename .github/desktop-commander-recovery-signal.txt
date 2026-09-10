@@ -1,2 +1,2 @@
 Recover Desktop Commander on windows-main via typed AFZ control route.
-Retry with durable diagnostics v2.
+Retry with durable diagnostics v3 for R17 visual-review continuation.
