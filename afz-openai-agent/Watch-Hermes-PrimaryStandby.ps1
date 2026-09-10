@@ -71,8 +71,9 @@ $asus22=Test-Tcp $asusTs 22
 $asusWinRm=Test-Tcp $asusLan 5985
 
 $primaryReady=($gatewayOk -and $routerExists -and $ollamaOk)
-$standbyNetworkReady=($asusPing -and $asus8796)
-$standbyControlReady=$asus8797
+$standbyNetworkReady=$asusPing
+$standbyControlReady=$asus8796
+$standbyLegacy8797=$asus8797
 $standbyReady=($standbyNetworkReady -and $standbyControlReady)
 $classification=if($primaryReady -and $standbyReady){'PRIMARY_AND_STANDBY_READY'}elseif($primaryReady -and $standbyNetworkReady){'PRIMARY_READY_STANDBY_CONTROL_DEGRADED'}elseif($primaryReady){'PRIMARY_READY_STANDBY_OFFLINE'}elseif($standbyReady){'PRIMARY_DEGRADED_STANDBY_READY'}else{'BOTH_DEGRADED'}
 
@@ -94,9 +95,10 @@ $state=[ordered]@{
     ready=$standbyReady
     networkReady=$standbyNetworkReady
     controlReady=$standbyControlReady
+    controlMode='typed-agent-8796 + Desktop Commander'
     tailscale=$asusPing
     agent8796=$asus8796
-    control8797=$asus8797
+    legacyControl8797=$standbyLegacy8797
     ssh22=$asus22
     winrm5985=$asusWinRm
     wakeOnLanSent=$wolSent
