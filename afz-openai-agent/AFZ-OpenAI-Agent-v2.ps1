@@ -590,6 +590,31 @@ try {
         }
         continue
       }
+      # HERMES_GATEWAY_HA_STATUS_ROUTE_V1: read-only mirror of the local HA
+      # state file. No mutation, no command execution, no secrets.
+      if ($path -eq '/api/hermes-gateway-ha/status' -and $ctx.Request.HttpMethod -eq 'GET') {
+        $haFile = 'C:\ProgramData\AFZ\HermesRouting\gateway-ha.json'
+        $haLog = 'C:\ProgramData\AFZ\HermesRouting\gateway-ha.log'
+        $ha = $null
+        if (Test-Path -LiteralPath $haFile -PathType Leaf) {
+          try { $ha = Get-Content -LiteralPath $haFile -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
+        }
+        $logTail = @()
+        if (Test-Path -LiteralPath $haLog -PathType Leaf) {
+          try { $logTail = @(Get-Content -LiteralPath $haLog -Tail 10 -ErrorAction SilentlyContinue) } catch {}
+        }
+        $flagExists = Test-Path -LiteralPath 'C:\ProgramData\AFZ\HermesRouting\gateway-ha-simulate.flag' -PathType Leaf
+        Send-Json $ctx 200 [ordered]@{
+          ok=$true;service='AFZ-OpenAI-Agent';route='hermes-gateway-ha-status';readOnly=$true
+          haState=$ha
+          simulationFlag=$flagExists
+          logTail=$logTail
+          systemTaskState=$([string](Get-ScheduledTask -TaskName 'AFZ Hermes Gateway HA Watcher' -ErrorAction SilentlyContinue).State)
+          userTaskState=$([string](Get-ScheduledTask -TaskName 'AFZ Hermes Gateway HA User Action' -ErrorAction SilentlyContinue).State)
+          time=(Get-Date -Format o)
+        }
+        continue
+      }
       if ($path -eq '/api/desktop-commander/device-code' -and $ctx.Request.HttpMethod -eq 'POST') {
         try {
           $r=Invoke-DesktopCommanderDeviceCodeRefresh
