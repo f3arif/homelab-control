@@ -291,6 +291,40 @@ try{
     }
   }
 
+# HERMES_GATEWAY_HA_POSTSYNC_HOOK_V1
+# Fail-closed registration of the Hermes gateway HA watcher and user-context
+# lifecycle task on windows-main. The installer refuses to run on any other
+# host, requires both HA scripts to parse under PS 5.1, and never starts or
+# stops the Hermes gateway itself. Failure is isolated from source sync.
+$gatewayHaEnsure=Join-Path $InstallRoot 'afz-openai-agent\Ensure-Hermes-Gateway-HA.ps1'
+if(Test-Path -LiteralPath $gatewayHaEnsure -PathType Leaf){
+  $gatewayHaStateRoot='C:\ProgramData\AFZ\OpenAIAgent\jobs\hermes-gateway-ha'
+  $gatewayHaStatePath=Join-Path $gatewayHaStateRoot 'latest.json'
+  try{
+    New-Item -ItemType Directory -Force -Path $gatewayHaStateRoot | Out-Null
+    $haRaw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $gatewayHaEnsure -InstallRoot $InstallRoot 2>&1|Out-String).Trim()
+    $haCode=$LASTEXITCODE
+    $haParsed=$null
+    if(-not [string]::IsNullOrWhiteSpace($haRaw)){try{$haParsed=$haRaw|ConvertFrom-Json -ErrorAction Stop}catch{}}
+    $haEnvelope=[ordered]@{
+      schema=1
+      sourceSha=$remoteSha
+      hook='HERMES_GATEWAY_HA_POSTSYNC_HOOK_V1'
+      exitCode=$haCode
+      result=$(if($haParsed){$haParsed}else{[ordered]@{ok=$false;classification='GATEWAY_HA_OUTPUT_PARSE_FAILED';output=$haRaw}})
+      time=(Get-Date -Format o)
+    }
+    $haJson=$haEnvelope|ConvertTo-Json -Depth 12
+    $haJson|Set-Content -LiteralPath $gatewayHaStatePath -Encoding UTF8
+  }catch{
+    try{
+      New-Item -ItemType Directory -Force -Path $gatewayHaStateRoot | Out-Null
+      [ordered]@{schema=1;hook='HERMES_GATEWAY_HA_POSTSYNC_HOOK_V1';ok=$false;error=$_.Exception.Message;time=(Get-Date -Format o)}|
+        ConvertTo-Json -Depth 6|Set-Content -LiteralPath $gatewayHaStatePath -Encoding UTF8
+    }catch{}
+  }
+}
+
 # MOVIERECOMMENDER_STREMIO_POSTSYNC_HOOK_V1
   # Fixed typed request only. Runs before nonessential runtime hooks so updater
   # contention elsewhere cannot starve MovieRecommender acceptance.

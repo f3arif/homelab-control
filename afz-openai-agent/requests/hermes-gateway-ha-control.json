@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "hermes-gateway-ha-control-simulate-r1",
+  "action": "status",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "status": "ACTIVE",
+  "reason": "initial control wiring verification"
+}

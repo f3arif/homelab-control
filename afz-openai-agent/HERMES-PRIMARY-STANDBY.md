@@ -67,6 +67,24 @@ Log: `C:\ProgramData\AFZ\HermesRouting\health.log`
 
 Latest scheduled health task result: `0`.
 
+## Gateway host-level HA (Telegram failover)
+
+ASUS runs `Watch-Hermes-Gateway-HA.ps1` (SYSTEM, every 1 minute, task `AFZ Hermes Gateway HA Watcher`):
+
+- Probes the H3 Hermes gateway over the existing ASUS→H3 SSH trust (Tailscale first, LAN host-key-alias fallback). The probe checks gateway processes, an established Telegram API connection (149.154.x / 91.108.x), gateway log freshness, and Ollama.
+- Classifications: `h3GatewayHealthy`, `h3GatewayDown`, `h3TelegramNotEstablished`, `h3HostUnreachable`, `h3SshProbeUnavailable`. Only the first plus the explicit failure classes count toward promotion; ambiguous probe results never promote (anti split-brain).
+- Promotion: 3 consecutive failed checks → starts the ASUS native Hermes gateway through the user-context task `AFZ Hermes Gateway HA User Action` (S4U as Faiz — the gateway needs the user's Hermes home, config, and credentials; no stored password, no UAC), verifies the process and Telegram connection, writes `ACTIVE_HOST=ASUS`.
+- Demotion: 3 consecutive healthy H3 checks → stops the ASUS gateway first (deliberate handover gap; duplicate Telegram polling is never knowingly allowed), re-probes H3 over SSH, then marks `ACTIVE_HOST=H3`. If H3 cannot be verified after the stop, the ASUS gateway is restarted (fail-safe rollback).
+- While `ACTIVE_HOST=H3`, any ASUS gateway process found polling is stopped (invariant enforcement).
+- While `ACTIVE_HOST=ASUS` and H3 host is up but its gateway is down, the watcher assists H3 recovery by invoking `hermes gateway start` over the existing SSH trust (cooldown 5 min, max 3 per outage).
+- Simulation flag `C:\ProgramData\AFZ\HermesRouting\gateway-ha-simulate.flag` (via request-gated `Invoke-Hermes-Gateway-HAControl.ps1`) makes the watcher treat the H3 gateway as failed WITHOUT touching H3 — safe test path.
+
+State: `C:\ProgramData\AFZ\HermesRouting\gateway-ha.json` (activeHost, primaryHost, standbyHost, consecutivePrimaryFailures, consecutivePrimarySuccesses, lastPromotion, lastDemotion, reason, h3/asus gateway health, last check time).
+
+Log: `C:\ProgramData\AFZ\HermesRouting\gateway-ha.log`
+
+Deployment: the AFZ OpenAI Agent updater postsync hook `HERMES_GATEWAY_HA_POSTSYNC_HOOK_V1` calls `Ensure-Hermes-Gateway-HA.ps1` (fail-closed: host guard, PS 5.1 parse gate on both scripts, registration only, no gateway lifecycle actions). Control requests go through `Invoke-Hermes-Gateway-HAControl.ps1` + `requests\hermes-gateway-ha-control.json` (one-shot per id, host-guarded).
+
 ## Security boundary
 
 No ASUS agent allowlists were widened. No new SSH or WinRM trust was added. HP Envy diagnostic-only execution scope was left unchanged. H3 remains the primary execution authority.
