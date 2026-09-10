@@ -1,6 +1,6 @@
 # Hermes Primary / Standby Topology
 
-Status: ACTIVE
+Status: ACTIVE / HEALTHY
 
 ## Roles
 
@@ -16,47 +16,57 @@ Status: ACTIVE
 3. OpenRouter model lanes.
 4. H3 local 35B/64K model.
 
-Hermes automatically rotates pooled OpenAI OAuth credentials when one account is exhausted.
+## Verified H3 state
 
-## H3 verified state
+- two OpenAI OAuth credentials
+- OpenRouter credential
+- Hermes gateway running
+- Desktop Commander 0.2.48 online on the original device identity
+- five-minute Desktop Commander watchdog
+- H3 router present
+- H3 local 35B fallback verified
 
-H3 has two OpenAI OAuth credentials, OpenRouter, Hermes gateway persistence, Desktop Commander 0.2.48 on its original device identity, a five-minute Commander self-heal watchdog, the benchmark-informed router, and the 35B/64K Ollama fallback.
+## Verified ASUS standby state
+
+- standby role marker present
+- two OpenAI OAuth credentials
+- OpenRouter credential
+- Desktop Commander 0.2.48 online
+- AFZ typed agent 8796 healthy
+- AFZ control 8797 healthy
+- default Hermes router test: `ASUS_STANDBY_OK`
+- local-only fallback test: `ASUS_LOCAL_STANDBY_OK`
+- local fallback model: `qwen3.5:4b-hermes96k`
+
+## Control-core recovery
+
+The September 9 control-core revision introduced a malformed route insertion. The newest parse-valid control core from September 5 was restored to GitHub and ASUS. Canonical recovery commit: `507bef13c23b7c9fd3fb3bd73d07b341258b4e7c`.
+
+The repaired control core parses with zero PowerShell parser errors. The existing protected SYSTEM control task subsequently recovered automatically and restored port 8797.
 
 ## Primary / standby health monitor
 
 H3 runs `Watch-Hermes-PrimaryStandby.ps1` every five minutes.
 
-It checks H3 gateway/router/Ollama health and ASUS Tailscale, AFZ agent 8796, control 8797, SSH, and WinRM reachability. If ASUS disappears from Tailscale, H3 sends Wake-on-LAN and checks again.
+It checks:
+- H3 Hermes gateway
+- H3 router
+- H3 Ollama
+- ASUS Tailscale reachability
+- ASUS typed agent 8796
+- ASUS legacy control 8797
+- ASUS SSH and WinRM reachability
+
+If ASUS disappears from Tailscale, H3 sends Wake-on-LAN and checks again.
+
+Current healthy classification: `PRIMARY_AND_STANDBY_READY`
 
 State: `C:\ProgramData\AFZ\HermesRouting\health.json`
 
 Log: `C:\ProgramData\AFZ\HermesRouting\health.log`
 
-Classifications distinguish network reachability from actual control readiness. ASUS is not considered fully ready merely because the machine is powered on.
+Latest scheduled health task result: `0`.
 
 ## Security boundary
 
-Do not widen ASUS AFZ-agent allowlists merely to recover Commander. H3 does not receive ASUS passwords or privileged SSH credentials. HP Envy relay services retain their existing diagnostic-only scope.
-
-## Current state — September 9, 2026
-
-Current classification: `PRIMARY_READY_STANDBY_CONTROL_DEGRADED`
-
-H3:
-- ready: true
-- Hermes gateway: true
-- router: true
-- Ollama: true
-
-ASUS:
-- networkReady: true
-- Tailscale: true
-- AFZ agent 8796: true
-- SSH 22: true
-- WinRM 5985: true
-- controlReady: false
-- control 8797: false
-- Desktop Commander: offline
-- Windows-main worker heartbeat: stale
-
-A bounded repair job is queued for ASUS and the canonical repair script is `Repair-ASUS-Hermes-Standby.ps1`. When ASUS's worker or an authorized control channel returns, that job repairs Commander, writes the standby role marker, and smoke-tests the ASUS router.
+No ASUS agent allowlists were widened. No new SSH or WinRM trust was added. HP Envy diagnostic-only execution scope was left unchanged. H3 remains the primary execution authority.
