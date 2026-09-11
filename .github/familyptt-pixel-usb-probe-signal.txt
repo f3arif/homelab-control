@@ -1,0 +1,2 @@
+FAMILYPTT_PIXEL_USB_PROBE=2026-09-11T04:12:00Z
+PURPOSE=Verify Pixel 6 Pro USB ADB readiness and current FamilyPTT version on DESKTOP-10SKF0M. No install or mutation.
