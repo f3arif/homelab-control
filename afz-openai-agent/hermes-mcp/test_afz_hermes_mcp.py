@@ -20,7 +20,21 @@ class AfzHermesMcpTests(unittest.TestCase):
         self.assertEqual(result["baseUrl"], "http://100.70.25.8:8797")
         self.assertFalse(result["arbitraryShell"])
         self.assertFalse(result["arbitraryUrl"])
-        self.assertEqual(result["tools"], ["afz_control_health", "afz_windows_wsl_memory_audit"])
+        self.assertEqual(
+            result["tools"],
+            [
+                "afz_control_health",
+                "afz_windows_wsl_memory_audit",
+                "afz_h3_benchmark_status",
+                "afz_stremio_organize_audit",
+                "afz_stremio_organize_apply",
+                "afz_queue_orphan_audit",
+                "afz_queue_orphan_apply",
+                "afz_jellyfin_visibility_audit",
+                "afz_movierecommender_catalog_audit",
+                "afz_radiohilal_cron_audit",
+            ],
+        )
 
     def test_rejects_non_asus_endpoint(self):
         with mock.patch.dict(os.environ, {"AFZ_CONTROL_BASE_URL": "http://100.71.26.69:8797"}, clear=True):
@@ -51,6 +65,41 @@ class AfzHermesMcpTests(unittest.TestCase):
         self.assertEqual(payload["repository"], "f3arif/homelab-control")
         self.assertEqual(payload["ref"], "refs/heads/main")
         self.assertEqual(payload["sha"], "a" * 40)
+
+    def test_typed_stremio_audit_uses_health_commit(self):
+        calls = []
+
+        def fake_http(method, path, payload=None, timeout=20):
+            calls.append((method, path, payload, timeout))
+            if path == "/health":
+                return {"ok": True, "status": 200, "data": {"commit": "b" * 40}}
+            return {"ok": True, "status": 200, "data": {"changed": False}}
+
+        with mock.patch.object(mod, "_http_json", side_effect=fake_http):
+            result = json.loads(mod.afz_stremio_organize_audit())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls[1][0:2], ("POST", "/api/stremio-organize"))
+        self.assertEqual(calls[1][2]["action"], "audit")
+        self.assertEqual(calls[1][2]["sha"], "b" * 40)
+
+    def test_queue_task_id_is_strict(self):
+        result = json.loads(mod.afz_queue_orphan_audit("../bad task"))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "invalid_task_id")
+
+    def test_benchmark_status_uses_fixed_route(self):
+        calls = []
+
+        def fake_http(method, path, payload=None, timeout=20):
+            calls.append((method, path, payload, timeout))
+            return {"ok": True, "status": 200, "data": {"status": "completed"}}
+
+        with mock.patch.object(mod, "_http_json", side_effect=fake_http):
+            result = json.loads(mod.afz_h3_benchmark_status())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls, [("POST", "/api/h3-qwen27b-benchmark", {"action": "status"}, 30)])
 
 
 if __name__ == "__main__":
