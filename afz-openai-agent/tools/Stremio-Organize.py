@@ -95,8 +95,16 @@ def main():
             raise RuntimeError("Unexpected AFZ manifest id")
         if not str(live_manifest.get("version") or "").strip():
             raise RuntimeError("AFZ manifest version missing")
-        keep_catalogs = {"downloaded_movies","new_digital","action_thriller","scifi_fantasy","bluray_4k","hindi_bollywood"}
-        live_manifest["catalogs"] = [c for c in (live_manifest.get("catalogs") or []) if c.get("id") in keep_catalogs]
+        core_catalogs = {"stream_now_movies_live_v2","continue_watching","afz_local_movies","available_now","new_digital","afz_hindi","kids_series_expanded","kids_movies_specials","afz_search"}
+        live_catalogs = list(live_manifest.get("catalogs") or [])
+        live_ids = {str(c.get("id") or "") for c in live_catalogs}
+        missing_core = sorted(core_catalogs - live_ids)
+        if missing_core:
+            raise RuntimeError(f"AFZ core catalog guard failed; missing={missing_core!r}")
+        # Keep the complete live manifest while it is already compact. If a future
+        # manifest grows substantially, fall back to the proven core Home rows.
+        if len(live_catalogs) > 12:
+            live_manifest["catalogs"] = [c for c in live_catalogs if c.get("id") in core_catalogs]
 
     sock = socket.create_connection((MARIONETTE_HOST, MARIONETTE_PORT), 6)
     sock.settimeout(75)
@@ -160,6 +168,7 @@ const done = arguments[arguments.length - 1];
       count:addons.length,
       order:addons.map(a => a?.manifest?.name || a?.manifest?.id || ''),
       afzVersion:afz?.manifest?.version || null,
+      afzCatalogs:(afz?.manifest?.catalogs || []).map(c => c?.id || c?.name || ''),
       traktCatalogs:(trakt?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
       debridioTvCatalogs:(tv?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
       storeCatalogs:(store?.manifest?.catalogs || []).map(c => c?.name || c?.id || ''),
