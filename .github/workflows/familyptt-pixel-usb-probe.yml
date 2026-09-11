@@ -1,0 +1,55 @@
+name: FamilyPTT Pixel USB Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/familyptt-pixel-usb-probe-signal.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: familyptt-pixel-usb-probe
+  cancel-in-progress: false
+
+jobs:
+  probe-pixel:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Probe Pixel on Windows-main USB
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedHost = 'DESKTOP-10SKF0M'
+          $serial = '19161FDEE008XN'
+          $pkg = 'ca.afzeng.familyptt'
+          $adb = 'C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+
+          Write-Host "host=$env:COMPUTERNAME"
+          if ($env:COMPUTERNAME -ne $expectedHost) {
+            throw "HOST_GUARD_FAILED expected=$expectedHost actual=$env:COMPUTERNAME"
+          }
+          if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) { throw "ADB_NOT_FOUND:$adb" }
+
+          $env:USERPROFILE='C:\Users\Faiz'
+          $env:HOME='C:\Users\Faiz'
+          $env:ANDROID_USER_HOME='C:\Users\Faiz'
+          if (Test-Path -LiteralPath 'C:\Users\Faiz\.android\adbkey') { $env:ADB_VENDOR_KEYS='C:\Users\Faiz\.android\adbkey' }
+
+          $devices = @(& $adb devices 2>&1 | ForEach-Object { [string]$_ })
+          Write-Host ('adbDevices=' + ($devices -join ' | '))
+          if (-not ($devices | Where-Object { $_ -match ('^' + [regex]::Escape($serial) + '\s+device$') })) {
+            throw "PIXEL_USB_NOT_READY:$serial"
+          }
+
+          $model = ((& $adb -s $serial shell getprop ro.product.model 2>&1) -join '').Trim()
+          $pkgDump = @(& $adb -s $serial shell dumpsys package $pkg 2>&1 | ForEach-Object { [string]$_ })
+          $versionName = (($pkgDump | Select-String -Pattern 'versionName=' | Select-Object -First 1).Line -replace '^\s*versionName=','').Trim()
+          $versionCodeLine = (($pkgDump | Select-String -Pattern 'versionCode=' | Select-Object -First 1).Line).Trim()
+          Write-Host "model=$model"
+          Write-Host "versionName=$versionName"
+          Write-Host "versionCodeLine=$versionCodeLine"
+          Write-Host 'FINAL=PASS_PIXEL_USB_PROBE'
