@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$ExpectedSiteSha,
@@ -21,6 +21,8 @@ $RemoteRoot='/opt/edge/afz-site/git-deploy'
 # This is the same dedicated key used by the established AFZ edge/site sync path.
 # Do not derive it from the scheduled-task environment's USERPROFILE.
 $KeyPath='C:\Users\Faiz\.ssh\afz_pi_sync'
+$SshExe='C:\Program Files\Git\usr\bin\ssh.exe'
+$ScpExe='C:\Program Files\Git\usr\bin\scp.exe'
 # Keep result + temp paths fixed/short so the SYSTEM watcher can read the result and
 # archive creation does not depend on a long scheduled-task TEMP path.
 $ResultRoot='C:\Users\Faiz\AppData\Local\AFZ\WebsiteGitDeploy'
@@ -70,7 +72,7 @@ function Select-PiEndpoint {
   $errors=New-Object System.Collections.Generic.List[string]
   foreach($candidate in $PiCandidates){
     $route=$(if($candidate -match '@192\.168\.50\.68$'){'lan'}else{'tailscale'})
-    $r=Invoke-AFZBoundedNative -FilePath 'ssh.exe' -ArgumentList @((Get-SshOptions)+$candidate+"printf 'AFZ_SSH_READY\\n'") -TimeoutSeconds 20
+    $r=Invoke-AFZBoundedNative -FilePath $SshExe -ArgumentList @((Get-SshOptions)+$candidate+"printf 'AFZ_SSH_READY\\n'") -TimeoutSeconds 20
     if(-not $r.TimedOut -and $r.ExitCode -eq 0 -and ([string]$r.StdOut) -match 'AFZ_SSH_READY'){
       $script:Pi=$candidate
       $script:piRoute=$route
@@ -83,13 +85,13 @@ function Select-PiEndpoint {
 }
 function Invoke-Ssh([string]$Command,[string]$Failure,[int]$TimeoutSeconds=45){
   if(-not $Pi){throw 'Pi endpoint has not been selected.'}
-  $r=Invoke-AFZBoundedNative -FilePath 'ssh.exe' -ArgumentList @((Get-SshOptions)+$Pi+$Command) -TimeoutSeconds $TimeoutSeconds
+  $r=Invoke-AFZBoundedNative -FilePath $SshExe -ArgumentList @((Get-SshOptions)+$Pi+$Command) -TimeoutSeconds $TimeoutSeconds
   Assert-BoundedResult $r $Failure $TimeoutSeconds
   return $r
 }
 function Invoke-Scp([string]$LocalPath,[string]$RemotePath,[string]$Failure,[int]$TimeoutSeconds=60){
   if(-not $Pi){throw 'Pi endpoint has not been selected.'}
-  $r=Invoke-AFZBoundedNative -FilePath 'scp.exe' -ArgumentList @((Get-SshOptions)+$LocalPath+"${Pi}:$RemotePath") -TimeoutSeconds $TimeoutSeconds
+  $r=Invoke-AFZBoundedNative -FilePath $ScpExe -ArgumentList @((Get-SshOptions)+$LocalPath+"${Pi}:$RemotePath") -TimeoutSeconds $TimeoutSeconds
   Assert-BoundedResult $r $Failure $TimeoutSeconds
   return $r
 }
@@ -146,7 +148,7 @@ function Require-Marker([string]$Base,[string]$Rel,[string[]]$Markers){
 }
 
 try{
-  foreach($cmd in @('tar.exe','ssh.exe','scp.exe')){
+  foreach($cmd in @('tar.exe',$SshExe,$ScpExe)){
     if(-not(Get-Command $cmd -ErrorAction SilentlyContinue)){throw "Required Windows command missing: $cmd"}
   }
   if(-not(Test-Path -LiteralPath $KeyPath -PathType Leaf)){throw "Dedicated Pi SSH key missing: $KeyPath"}
