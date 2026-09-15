@@ -40,7 +40,7 @@ def _validated_base_url() -> str:
 
 
 def _http_json(method: str, path: str, payload: dict[str, Any] | None = None, timeout: int = 20) -> dict[str, Any]:
-    if path not in {"/health", "/api/windows-wsl-memory-audit", "/api/commander-alternate-account-pair"}:
+    if path not in {"/health", "/api/windows-wsl-memory-audit"}:
         raise ValueError(f"AFZ MCP path is not allowlisted: {path}")
     base = _validated_base_url()
     body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -86,21 +86,6 @@ def afz_windows_wsl_memory_audit() -> str:
     return json.dumps(_http_json("POST", "/api/windows-wsl-memory-audit", payload, timeout=90), separators=(",", ":"), default=str)
 
 
-def afz_commander_pair_active_request() -> str:
-    """Launch the already-active guarded Commander alternate-account pairing request."""
-    health = _http_json("GET", "/health", timeout=12)
-    commit = ((health.get("data") or {}).get("commit") if health.get("ok") else None)
-    if not isinstance(commit, str) or len(commit) != 40 or any(c not in "0123456789abcdefABCDEF" for c in commit):
-        return json.dumps({"ok": False, "error": "afz_control_commit_unavailable", "health": health}, separators=(",", ":"), default=str)
-    payload = {
-        "action": "launch-active-request",
-        "repository": "f3arif/homelab-control",
-        "ref": "refs/heads/main",
-        "sha": commit.lower(),
-    }
-    return json.dumps(_http_json("POST", "/api/commander-alternate-account-pair", payload, timeout=45), separators=(",", ":"), default=str)
-
-
 def _build_server():
     try:
         from mcp.server import MCPServer
@@ -124,23 +109,18 @@ def _build_server():
         name="afz_windows_wsl_memory_audit",
         description="Run the existing typed read-only Windows/WSL memory audit on windows-main.",
     )
-    server.add_tool(
-        afz_commander_pair_active_request,
-        name="afz_commander_pair_active_request",
-        description="Launch only the existing active Commander alternate-account pairing contract; returns no device code or credential material.",
-    )
     return server
 
 
 def self_test() -> dict[str, Any]:
     base = _validated_base_url()
     assert base == DEFAULT_BASE_URL
-    assert "/api/commander-alternate-account-pair" in {"/health", "/api/windows-wsl-memory-audit", "/api/commander-alternate-account-pair"}
+    assert "/api/windows-wsl-memory-audit" in {"/health", "/api/windows-wsl-memory-audit"}
     return {
         "ok": True,
         "classification": "AFZ_HERMES_MCP_SELFTEST_PASS",
         "baseUrl": base,
-        "tools": ["afz_control_health", "afz_windows_wsl_memory_audit", "afz_commander_pair_active_request"],
+        "tools": ["afz_control_health", "afz_windows_wsl_memory_audit"],
         "arbitraryShell": False,
         "arbitraryUrl": False,
     }
