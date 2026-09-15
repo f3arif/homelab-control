@@ -32,7 +32,7 @@ jobs:
           ip route get 192.168.50.94 || true
           for host in 100.70.25.8 192.168.50.94; do
             echo "=== HOST=$host ==="
-            for p in 22 445 5985 5986 8787 8790 8796 8797 18766; do
+            for p in 22 445 5300 5380 5678 5985 5986 8443 8787 8790 8796 8797 9000 18766; do
               if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
                 echo "WM_"$host"_TCP_"$p"=OPEN"
               else
