@@ -1,0 +1,33 @@
+name: AFZ Self-hosted Windows Runner Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-selfhosted-windows-runner-probe.yml'
+      - '.github/afz-selfhosted-windows-runner-probe.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        slot: [1, 2, 3, 4]
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 2
+    steps:
+      - name: Identify AFZ Windows runner
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Write-Output ('SLOT='+'${{ matrix.slot }}')
+          Write-Output ('COMPUTERNAME='+$env:COMPUTERNAME)
+          Write-Output ('USERNAME='+$env:USERNAME)
+          Write-Output ('USERDOMAIN='+$env:USERDOMAIN)
+          Write-Output ('PSVERSION='+$PSVersionTable.PSVersion.ToString())
+          $task=Get-ScheduledTask -TaskName 'AFZ Desktop Commander Remote Pairing' -ErrorAction SilentlyContinue
+          Write-Output ('COMMANDER_TASK='+(if($task){'PRESENT'}else{'MISSING'}))
