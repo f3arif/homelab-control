@@ -1,0 +1,40 @@
+name: AFZ Self-hosted Carrier Discovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-selfhosted-carrier-discovery.yml'
+      - '.github/afz-selfhosted-carrier-discovery.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-carrier:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 2
+    steps:
+      - name: Identify Linux carrier
+        shell: bash
+        run: |
+          set +e
+          echo "HOST=$(hostname)"
+          echo "USER=$(id -un 2>/dev/null || true)"
+          echo "TIME=$(date -Is 2>/dev/null || true)"
+          command -v tailscale || true
+          for host in 100.70.25.8 100.106.186.118 192.168.50.94; do
+            echo "HOST_PROBE=$host"
+            ping -c 1 -W 1 "$host" || true
+          done
+
+  windows-carrier:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 2
+    steps:
+      - name: Identify Windows carrier
+        shell: powershell
+        run: |
+          Write-Output ('HOST='+$env:COMPUTERNAME)
+          Write-Output ('USER='+$env:USERNAME)
+          Write-Output ('TIME='+(Get-Date -Format o))
