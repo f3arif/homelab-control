@@ -7,6 +7,7 @@ on:
       - 'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1'
       - 'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1'
       - 'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1'
+      - 'afz-openai-agent/Watch-AFZ-ProjectExecutionRouter.ps1'
       - 'afz-openai-agent/control/project-execution-router.json'
       - 'afz-openai-agent/requests/project-task.json'
       - 'afz-openai-agent/PROJECT-EXECUTION-ROUTER.md'
@@ -19,6 +20,7 @@ on:
       - 'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1'
       - 'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1'
       - 'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1'
+      - 'afz-openai-agent/Watch-AFZ-ProjectExecutionRouter.ps1'
       - 'afz-openai-agent/control/project-execution-router.json'
       - 'afz-openai-agent/requests/project-task.json'
       - 'afz-openai-agent/PROJECT-EXECUTION-ROUTER.md'
@@ -43,6 +45,7 @@ jobs:
             'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1',
             'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1',
             'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1',
+            'afz-openai-agent/Watch-AFZ-ProjectExecutionRouter.ps1',
             'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
           )){
             $tokens=$null;$errors=$null
@@ -62,6 +65,7 @@ jobs:
           watcher=(root/'AFZ-ProjectTask-Request-Watcher.ps1').read_text()
           executor=(root/'Invoke-AFZ-HermesProjectTask.ps1').read_text()
           installer=(root/'Ensure-AFZ-ProjectExecutionRouter.ps1').read_text()
+          selfheal=(root/'Watch-AFZ-ProjectExecutionRouter.ps1').read_text()
           start=(root/'Start-AFZ-OpenAI-Agent.ps1').read_text()
 
           assert cfg['schema']==1 and cfg['status']=='ACTIVE'
@@ -92,17 +96,33 @@ jobs:
               '--checkpoints',
               'HERMES_WRITE_SAFE_ROOT',
               'validation_profile',
-              "gradlew.bat",
-              "dotnet",
-              "pytest"]:
+              'gradlew.bat',
+              'dotnet',
+              'pytest']:
               assert marker in executor, marker
 
+          for marker in [
+              'AFZ Project Task Router Self Heal',
+              'RepetitionInterval (New-TimeSpan -Minutes 1)',
+              'StartWhenAvailable',
+              'Watch-AFZ-ProjectExecutionRouter.ps1']:
+              assert marker in installer, marker
+
+          for marker in [
+              'PROJECT_ROUTER_WATCHER_HEALTHY',
+              'hermesAutoRestarted=$false',
+              'commanderMutation=$false',
+              'Start-ScheduledTask -TaskName $watcherTaskName']:
+              assert marker in selfheal, marker
+
           forbidden=['Invoke-Expression','--yolo','git reset --hard','git clean -fd','push --force']
-          combined='\n'.join([watcher,executor,installer])
+          combined='\n'.join([watcher,executor,installer,selfheal])
           for marker in forbidden:
               assert marker not in combined, marker
 
           assert 'AFZ Project Task Router Watcher' in installer
           assert 'LogonType S4U' in installer
           assert 'Ensure-AFZ-ProjectExecutionRouter.ps1' in start
+          assert 'Start-ScheduledTask -TaskName $userTaskName' not in selfheal
+          assert 'Desktop Commander' not in selfheal
           print('AFZ PROJECT EXECUTION ROUTER CONTRACT PASS')
