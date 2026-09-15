@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "windowsmain-docker-lifecycle-20260915-stop-idle-r1",
+  "action": "docker-lifecycle",
+  "status": "ACTIVE",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "allow_remove": false,
+  "allow_volume_delete": false,
+  "allow_prune": false,
+  "operations": [
+    {
+      "container": "n8n",
+      "action": "stop",
+      "disable_restart": true
+    },
+    {
+      "container": "code-server",
+      "action": "stop",
+      "disable_restart": true
+    },
+    {
+      "container": "technitium",
+      "action": "stop",
+      "disable_restart": true
+    }
+  ]
+}
