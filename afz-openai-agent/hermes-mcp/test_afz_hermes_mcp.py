@@ -20,7 +20,7 @@ class AfzHermesMcpTests(unittest.TestCase):
         self.assertEqual(result["baseUrl"], "http://100.70.25.8:8797")
         self.assertFalse(result["arbitraryShell"])
         self.assertFalse(result["arbitraryUrl"])
-        self.assertEqual(result["tools"], ["afz_control_health", "afz_windows_wsl_memory_audit", "afz_commander_pair_active_request"])
+        self.assertEqual(result["tools"], ["afz_control_health", "afz_windows_wsl_memory_audit"])
 
     def test_rejects_non_asus_endpoint(self):
         with mock.patch.dict(os.environ, {"AFZ_CONTROL_BASE_URL": "http://100.71.26.69:8797"}, clear=True):
@@ -53,39 +53,6 @@ class AfzHermesMcpTests(unittest.TestCase):
         self.assertEqual(payload["sha"], "a" * 40)
 
 
-    def test_commander_pair_uses_health_commit_and_fixed_payload(self):
-        calls = []
-
-        def fake_http(method, path, payload=None, timeout=20):
-            calls.append((method, path, payload, timeout))
-            if path == "/health":
-                return {"ok": True, "status": 200, "data": {"commit": "b" * 40}}
-            return {"ok": True, "status": 202, "data": {"deviceCodeReturned": False}}
-
-        with mock.patch.object(mod, "_http_json", side_effect=fake_http):
-            result = json.loads(mod.afz_commander_pair_active_request())
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(calls[0][0:2], ("GET", "/health"))
-        self.assertEqual(calls[1][0:2], ("POST", "/api/commander-alternate-account-pair"))
-        payload = calls[1][2]
-        self.assertEqual(payload["action"], "launch-active-request")
-        self.assertEqual(payload["repository"], "f3arif/homelab-control")
-        self.assertEqual(payload["ref"], "refs/heads/main")
-        self.assertEqual(payload["sha"], "b" * 40)
-        self.assertEqual(calls[1][3], 45)
-
-    def test_commander_pair_path_is_allowlisted_but_control_path_is_not(self):
-        with mock.patch.object(mod, "_validated_base_url", return_value="http://100.70.25.8:8797"):
-            with mock.patch.object(mod, "urlopen") as mocked:
-                response = mock.MagicMock()
-                response.status = 202
-                response.read.return_value = b'{"ok":true}'
-                mocked.return_value.__enter__.return_value = response
-                result = mod._http_json("POST", "/api/commander-alternate-account-pair", {"action": "launch-active-request"})
-                self.assertTrue(result["ok"])
-        with self.assertRaises(ValueError):
-            mod._http_json("POST", "/api/control", {"action": "anything"})
 
 
 if __name__ == "__main__":
