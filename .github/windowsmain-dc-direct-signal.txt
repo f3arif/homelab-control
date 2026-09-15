@@ -1,4 +1,4 @@
-target=windows-main
-action=refresh-desktop-commander-device-code
-nonce=20260915T1556-alt-account-r1
-purpose=pair-to-other-commander-account
+target=windows-main+h3
+action=logout-and-pair-commander-other-account
+nonce=20260915T1601-alt-account-safe-r2
+result=private-onedrive-control-hub
