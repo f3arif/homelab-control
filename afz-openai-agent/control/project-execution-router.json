@@ -3,20 +3,20 @@
   "status": "ACTIVE",
   "default_route": "hermes",
   "routing_order": [
-    "hermes-primary-h3",
-    "hermes-standby-windows-main",
+    "hermes-windows-main-project-edit",
     "desktop-commander-fallback"
   ],
   "hermes": {
-    "primary_host": "DESKTOP-H3R6CQN",
-    "standby_host": "DESKTOP-10SKF0M",
+    "execution_host": "DESKTOP-10SKF0M",
+    "fleet_primary_host": "DESKTOP-H3R6CQN",
+    "project_data_locality_priority": true,
     "poll_interval_ms": 750,
     "default_max_turns": 80,
     "default_timeout_seconds": 2700,
     "checkpoints": true,
     "human_delay_mode": "off",
-    "toolsets_default": ["terminal", "skills"],
-    "toolsets_with_web": ["terminal", "skills", "web"]
+    "toolsets_default": ["file", "skills"],
+    "toolsets_with_web": ["file", "skills", "web"]
   },
   "fallback": {
     "transport": "desktop-commander",
