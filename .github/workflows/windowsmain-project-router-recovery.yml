@@ -155,7 +155,13 @@ jobs:
         run: |
           set -euo pipefail
           wf='.github/workflows/windowsmain-project-router-recovery.yml'
-          ! grep -Eq 'Desktop Commander Remote Pairing|Bootstrap-WindowsMain-DesktopCommanderRemote|Refresh-WindowsMain-DesktopCommander|Start-WindowsMain-DesktopCommander' "$wf"
+          for forbidden in \
+            "$(printf '%s%s' 'Desktop Commander Remote' ' Pairing')" \
+            "$(printf '%s%s' 'Bootstrap-WindowsMain-' 'DesktopCommanderRemote')" \
+            "$(printf '%s%s' 'Refresh-WindowsMain-' 'DesktopCommander')" \
+            "$(printf '%s%s' 'Start-WindowsMain-' 'DesktopCommander')"; do
+            ! grep -Fq "$forbidden" "$wf"
+          done
           ! grep -Eq 'Remove-Item.+homelab-control|git reset --hard|git clean -fd|push --force' "$wf"
           grep -Fq "DESKTOP_COMMANDER_MUTATION=NONE" "$wf"
           echo 'NO_COMMANDER_RECOVERY_CONTRACT=PASS'
