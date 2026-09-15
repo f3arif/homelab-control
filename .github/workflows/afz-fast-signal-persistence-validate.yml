@@ -9,6 +9,8 @@ on:
       - fix/afz-push-watcher-hot-reload
     paths:
       - 'afz-openai-agent/Push-Deploy-Watcher.ps1'
+      - 'afz-openai-agent/Invoke-WindowsMain-Docker-Lifecycle.ps1'
+      - 'afz-openai-agent/requests/windowsmain-docker-lifecycle.json'
       - 'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1'
       - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
@@ -42,6 +44,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $files=@(
             'afz-openai-agent/Push-Deploy-Watcher.ps1',
+            'afz-openai-agent/Invoke-WindowsMain-Docker-Lifecycle.ps1',
             'afz-openai-agent/Update-AFZ-OpenAI-Agent.ps1',
             'afz-openai-agent/Install-AFZ-OpenAI-Agent.ps1',
             'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1',
@@ -139,6 +142,30 @@ jobs:
           # request exists elsewhere in the repository.
           assert 'afz-site-deploy.json' not in push
           assert 'deploy-pi-static-site' not in push
+          docker_lane=Path('afz-openai-agent/Invoke-WindowsMain-Docker-Lifecycle.ps1').read_text()
+          docker_request=Path('afz-openai-agent/requests/windowsmain-docker-lifecycle.json').read_text()
+          for marker in [
+            "allow_remove",
+            "allow_volume_delete",
+            "allow_prune",
+            "destructiveOperationStarted=$false",
+            "@('status','stop','start','restart')"
+          ]:
+            assert marker in docker_lane, marker
+          for forbidden in [
+            'docker rm',
+            'docker container rm',
+            'docker system prune',
+            'docker volume rm',
+            'docker image rm',
+            'Invoke-Expression'
+          ]:
+            assert forbidden.lower() not in docker_lane.lower(), forbidden
+          assert '"allow_remove": false' in docker_request
+          assert '"allow_volume_delete": false' in docker_request
+          assert '"allow_prune": false' in docker_request
+          print('WINDOWS-MAIN DOCKER TYPED FALLBACK CONTRACT PASS')
+
           print('FAST SIGNAL PERSISTENCE CONTRACT PASS')
 
       - name: Validate exact-SHA signal publisher remains GitHub-only

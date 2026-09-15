@@ -43,6 +43,9 @@ $h3HermesRegistryLivenessLastAttempt=[DateTime]::MinValue
 $h3DockerPreflightRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-DockerDesktop-Preflight.ps1'
 $h3DockerPreflightRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-docker-desktop-preflight.json'
 $h3DockerPreflightStateRoot=Join-Path $stateRoot 'jobs\h3-docker-desktop-preflight'
+$windowsMainDockerLifecycleRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-WindowsMain-Docker-Lifecycle.ps1'
+$windowsMainDockerLifecycleRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\windowsmain-docker-lifecycle.json'
+$windowsMainDockerLifecycleStateRoot=Join-Path $stateRoot 'jobs\windowsmain-docker-lifecycle'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -232,6 +235,42 @@ function Handle-HPEnvySurfsharkRequest{
     Log "HPENVY_SURFSHARK_REQUEST mode=$mode classification=$classification exit=$code source=$(Current-Sha)"
   }catch{Log "HPENVY_SURFSHARK_REQUEST_ERROR $($_.Exception.Message)"}
 }
+function Handle-WindowsMainDockerLifecycleRequest{
+  if(-not(Test-Path -LiteralPath $windowsMainDockerLifecycleRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $windowsMainDockerLifecycleRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $windowsMainDockerLifecycleRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    if([string]$req.action -ne 'docker-lifecycle' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'windows-main' -or [string]$req.host -ne 'DESKTOP-10SKF0M'){return}
+    if([bool]$req.allow_remove -or [bool]$req.allow_volume_delete -or [bool]$req.allow_prune){
+      Log "WINDOWSMAIN_DOCKER_LIFECYCLE_REFUSED job=$id reason=destructive-flag"
+      return
+    }
+    $statePath=Join-Path $windowsMainDockerLifecycleStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $prior=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$prior.jobId -eq $id -and [string]$prior.status -eq 'completed'){return}
+      }catch{}
+    }
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $windowsMainDockerLifecycleRunner -InstallRoot $InstallRoot -RequestPath $windowsMainDockerLifecycleRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{
+        $lines=@($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if($lines.Count -gt 0){$classification=[string](($lines[$lines.Count-1]|ConvertFrom-Json).classification)}
+      }catch{}
+    }
+    Log "WINDOWSMAIN_DOCKER_LIFECYCLE job=$id classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{
+    Log "WINDOWSMAIN_DOCKER_LIFECYCLE_ERROR $($_.Exception.Message)"
+  }
+}
+
 function Handle-H3DockerDesktopPreflight{
   if(-not(Test-Path -LiteralPath $h3DockerPreflightRunner -PathType Leaf)){return}
   if(-not(Test-Path -LiteralPath $h3DockerPreflightRequest -PathType Leaf)){return}
@@ -404,7 +443,7 @@ try{
   $lastAttemptSha=''
   $lastAttempt=[DateTime]::MinValue
   $lastError=''
-  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only h3HermesRequest=typed-fixed-target-no-generation"
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot windowsMainDockerLifecycleRequest=typed-reversible-local hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only h3HermesRequest=typed-fixed-target-no-generation"
   Save-RuntimeProof
   Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
   while($true){
@@ -452,6 +491,7 @@ try{
       }
       Refresh-FamilyPttR17IfSafe
       Handle-JellyfinVisibilityRequest
+      Handle-WindowsMainDockerLifecycleRequest
       Handle-HPEnvySurfsharkRequest
       Handle-H3DockerDesktopPreflight
       Handle-H3HermesRegistryLivenessRequest
