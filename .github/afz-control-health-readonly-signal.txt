@@ -1,1 +1,4 @@
 homeassistant-step7-resource-gate=2026-09-05T00:24:00-04:00
+afz-music-alternate-execution-probe=2026-09-15
+scope=existing-read-only-health-workflow
+resume-key=AFZ-MUSIC-AURORA-P0P1-20260913
