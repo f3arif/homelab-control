@@ -1,3 +1,4 @@
 target=windows-main
 action=refresh-desktop-commander-device-code
-nonce=20260909T1612-direct-r3
+nonce=20260915T1556-alt-account-r1
+purpose=pair-to-other-commander-account
