@@ -1,2 +1,3 @@
 probe windows-main from hp-envy lan relay
-nonce=20260909-commander-r1
+nonce=20260915-hermes-router-r1
+resume-key=AFZ-HERMES-PROJECT-EXEC-ROUTER-R1-20260915
