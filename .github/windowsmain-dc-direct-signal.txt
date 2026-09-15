@@ -1,4 +1,4 @@
 target=windows-main+h3
 action=logout-and-pair-commander-other-account
-nonce=20260915T2206-alt-account-safe-r3
+nonce=20260915T2213-alt-account-safe-r4
 result=private-onedrive-control-hub
