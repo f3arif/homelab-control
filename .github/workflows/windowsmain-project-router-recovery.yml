@@ -1,0 +1,161 @@
+name: Windows-main Hermes Project Router Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-project-router-recovery-signal.txt'
+      - '.github/workflows/windowsmain-project-router-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-project-router-recovery
+  cancel-in-progress: true
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Recover exact-source AFZ control and Hermes router without Commander
+        shell: bash
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.70.25.8
+          remote_script=$(cat <<'PS'
+          $ErrorActionPreference='Stop'
+          $expected='__SHA__'
+          if($env:COMPUTERNAME -ne 'DESKTOP-10SKF0M'){throw ('WRONG_HOST '+$env:COMPUTERNAME)}
+          Write-Output ('WM_HOST='+$env:COMPUTERNAME)
+          Write-Output ('EXPECTED_GITHUB_SHA='+$expected)
+          Write-Output ('WM_TIME='+(Get-Date -Format o))
+
+          function Show-Task([string]$name){
+            $t=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+            if($t){Write-Output ('TASK '+$name+'='+[string]$t.State)}else{Write-Output ('TASK '+$name+'=MISSING')}
+          }
+
+          $updaterTask='AFZ OpenAI Agent Updater'
+          $agentTask='AFZ OpenAI Agent'
+          $controlTask='AFZ OpenAI Agent Control'
+          $pushTask='AFZ OpenAI Agent Push Deploy Watcher'
+          $routerTask='AFZ Project Task Router Watcher'
+          $hermesTask='AFZ Hermes Project Task User Action'
+
+          foreach($n in @($updaterTask,$agentTask,$controlTask,$pushTask,$routerTask,$hermesTask)){Show-Task $n}
+
+          $u=Get-ScheduledTask -TaskName $updaterTask -ErrorAction SilentlyContinue
+          if(-not $u){throw 'CANONICAL_UPDATER_TASK_MISSING'}
+          Start-ScheduledTask -TaskName $updaterTask
+          Write-Output 'UPDATER_KICK=STARTED'
+
+          $deadline=(Get-Date).AddSeconds(90)
+          $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
+          $deployed=''
+          do{
+            Start-Sleep -Seconds 2
+            if(Test-Path -LiteralPath $sourceState -PathType Leaf){
+              try{$deployed=[string]((Get-Content -LiteralPath $sourceState -Raw|ConvertFrom-Json).remoteSha)}catch{$deployed=''}
+            }
+            Write-Output ('DEPLOYED_SHA='+$deployed)
+            if($deployed -eq $expected){break}
+          }while((Get-Date) -lt $deadline)
+
+          if($deployed -ne $expected){
+            Write-Output ('EXACT_SHA_NOT_YET_REACHED expected='+$expected+' actual='+$deployed)
+            $updater=Join-Path 'C:\AFZ\homelab-control' 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
+            if(-not(Test-Path -LiteralPath $updater -PathType Leaf)){throw 'UPDATER_SCRIPT_MISSING'}
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $updater -InstallRoot 'C:\AFZ\homelab-control' -ExpectedSha $expected
+            if($LASTEXITCODE -ne 0){throw ('EXACT_SHA_UPDATER_EXIT='+$LASTEXITCODE)}
+          }
+
+          foreach($n in @($agentTask,$controlTask,$pushTask)){
+            $t=Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue
+            if(-not $t){throw ('SERVICE_TASK_MISSING '+$n)}
+            if([string]$t.State -ne 'Running'){Start-ScheduledTask -TaskName $n}
+            Write-Output ('SERVICE_TASK_START '+$n+'=REQUESTED')
+          }
+
+          Start-Sleep -Seconds 8
+
+          $installer='C:\AFZ\homelab-control\afz-openai-agent\Ensure-AFZ-ProjectExecutionRouter.ps1'
+          if(-not(Test-Path -LiteralPath $installer -PathType Leaf)){throw 'PROJECT_ROUTER_INSTALLER_MISSING_AFTER_SYNC'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installer -InstallRoot 'C:\AFZ\homelab-control'
+          if($LASTEXITCODE -ne 0){throw ('PROJECT_ROUTER_INSTALL_EXIT='+$LASTEXITCODE)}
+
+          Start-Sleep -Seconds 2
+          foreach($n in @($updaterTask,$agentTask,$controlTask,$pushTask,$routerTask,$hermesTask)){Show-Task $n}
+
+          $installState='C:\ProgramData\AFZ\ProjectExecution\install.json'
+          if(Test-Path -LiteralPath $installState -PathType Leaf){
+            Write-Output 'PROJECT_ROUTER_INSTALL_STATE_BEGIN'
+            Get-Content -LiteralPath $installState -Raw
+            Write-Output 'PROJECT_ROUTER_INSTALL_STATE_END'
+          }else{throw 'PROJECT_ROUTER_INSTALL_STATE_MISSING'}
+
+          $latest='C:\ProgramData\AFZ\ProjectExecution\latest.json'
+          if(Test-Path -LiteralPath $latest -PathType Leaf){
+            Write-Output 'PROJECT_ROUTER_LATEST_BEGIN'
+            Get-Content -LiteralPath $latest -Raw
+            Write-Output 'PROJECT_ROUTER_LATEST_END'
+          }else{Write-Output 'PROJECT_ROUTER_LATEST=NOT_YET_CREATED'}
+
+          # Explicitly prove this recovery never touches Commander.
+          Write-Output 'DESKTOP_COMMANDER_MUTATION=NONE'
+          PS
+          )
+          remote_script="${remote_script//__SHA__/$AFZ_SHA}"
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 240s tailscale ssh Faiz@100.70.25.8 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+      - name: Verify AFZ listeners and router state
+        shell: bash
+        run: |
+          set -euo pipefail
+          control=0
+          agent=0
+          for attempt in $(seq 1 12); do
+            echo "verify_attempt=$attempt"
+            if timeout 3 bash -c "</dev/tcp/100.70.25.8/8797" 2>/dev/null; then control=1; echo 'TCP_8797=OPEN'; else echo 'TCP_8797=CLOSED'; fi
+            if timeout 3 bash -c "</dev/tcp/100.70.25.8/8796" 2>/dev/null; then agent=1; echo 'TCP_8796=OPEN'; else echo 'TCP_8796=CLOSED'; fi
+            if [ "$control" -eq 1 ] || [ "$agent" -eq 1 ]; then break; fi
+            sleep 3
+          done
+          if [ "$control" -eq 1 ]; then
+            health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 12 http://100.70.25.8:8797/health)
+            echo 'CONTROL_HEALTH_BEGIN'
+            python -m json.tool <<<"$health" || printf '%s\n' "$health"
+            echo 'CONTROL_HEALTH_END'
+          fi
+          if [ "$agent" -eq 1 ]; then
+            agent_health=$(curl --silent --show-error --fail --connect-timeout 3 --max-time 12 http://100.70.25.8:8796/health)
+            echo 'AGENT_HEALTH_BEGIN'
+            python -m json.tool <<<"$agent_health" || printf '%s\n' "$agent_health"
+            echo 'AGENT_HEALTH_END'
+          fi
+          [ "$control" -eq 1 ] || [ "$agent" -eq 1 ]
+
+      - name: Enforce no-Commander recovery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/windowsmain-project-router-recovery.yml'
+          ! grep -Eq 'Desktop Commander Remote Pairing|Bootstrap-WindowsMain-DesktopCommanderRemote|Refresh-WindowsMain-DesktopCommander|Start-WindowsMain-DesktopCommander' "$wf"
+          ! grep -Eq 'Remove-Item.+homelab-control|git reset --hard|git clean -fd|push --force' "$wf"
+          grep -Fq "DESKTOP_COMMANDER_MUTATION=NONE" "$wf"
+          echo 'NO_COMMANDER_RECOVERY_CONTRACT=PASS'
