@@ -7,5 +7,7 @@
   "preserve_active_commander_request": true,
   "desktop_commander_mutation": "NONE",
   "scheduler_creation": "NONE",
+  "kick_seq": 2,
+  "kick_reason": "Resume the already-active alternate Commander account pairing through the existing GitHub fast-signal/queue workflow after live verification that the queue consumers are stale. Do not create a second Commander pairing request.",
   "notes": "One-shot recovery for the existing OneDrive/GitHub workflow. Start existing Windows-main queue consumers/watchdog only; do not replace or duplicate the active Commander re-auth request."
 }
