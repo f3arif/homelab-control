@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "commander-alt-account-pair-20260915-r1",
+  "status": "ACTIVE",
+  "action": "pair-alternate-commander-account",
+  "windows_main": true,
+  "h3": true,
+  "private_result_root": "AFZ Shared/AFZ Control Hub/Commander",
+  "notes": "One-shot GitHub post-sync handoff. Generates fresh Commander device codes in the Faiz interactive profiles. Authentication material is written only to private local/OneDrive results and never to GitHub."
+}
