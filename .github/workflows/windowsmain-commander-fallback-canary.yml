@@ -1,0 +1,37 @@
+name: Windows-main Commander Fallback Canary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windowsmain-commander-fallback-canary.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Commander fallback canary ports
+        shell: bash
+        run: |
+          set +e
+          host=100.70.25.8
+          tailscale ping --timeout=3s -c 1 "$host" || true
+          for p in 5300 5380 5678 8443 9000 18766; do
+            if timeout 1 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "WM_CANARY_TCP_${p}=OPEN"
+            else
+              echo "WM_CANARY_TCP_${p}=CLOSED_OR_FILTERED"
+            fi
+          done
