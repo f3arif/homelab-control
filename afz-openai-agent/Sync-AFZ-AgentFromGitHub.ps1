@@ -380,6 +380,18 @@ try{Unregister-ScheduledTask -TaskName $refresh -Confirm:$false -ErrorAction Sil
     $deferredPushWatcherRefresh=[ordered]@{ok=$false;status='schedule-failed';mutation='DEFERRED_WATCHER_RESTART_ATTEMPTED';error=$_.Exception.Message}
   }
 
+# COMMANDER_ALT_ACCOUNT_PAIR_SYNC_HOOK_V1
+# Typed one-shot. The SYSTEM updater only installs/starts an interactive-user
+# scheduled task; Commander logout/auth executes in the Faiz profile where the
+# Remote MCP credentials actually live. Pairing codes are never emitted to GitHub.
+$commanderPairRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Commander-AlternateAccountPair-PostSync.ps1'
+$commanderPairRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\commander-alternate-account-pair.json'
+if((Test-Path -LiteralPath $commanderPairRunner -PathType Leaf) -and (Test-Path -LiteralPath $commanderPairRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $commanderPairRunner -InstallRoot $InstallRoot -RequestPath $commanderPairRequest *> $null
+  }catch{}
+}
+
 # MOVIERECOMMENDER_RELEASE_RESULTS_FIX_SYNC_HOOK_V1
 # Fixed-target, one-shot, rollback-capable repair of Seerr releases.results
 # normalization. Runs before the read-only catalog audit.
