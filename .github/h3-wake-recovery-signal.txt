@@ -1,3 +1,3 @@
 target=h3
 action=wake-once
-reason=radiohilal-windowsmain-recovery
+reason=commander-altacct-pair-20260915
