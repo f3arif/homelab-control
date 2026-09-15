@@ -1,4 +1,5 @@
 probe windows-main management listeners
 retry 2026-09-09 commander recovery
-project-execution-router-probe=2026-09-15T15:02:00-04:00
+project-execution-router-probe=2026-09-15T15:58:00-04:00
 resume-key=AFZ-HERMES-PROJECT-EXEC-ROUTER-R1-20260915
+reason=continue-live-smoke-and-recovery
