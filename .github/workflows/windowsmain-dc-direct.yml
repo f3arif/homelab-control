@@ -1,4 +1,4 @@
-name: Windows-main Direct Commander Device Code
+name: Commander Alternate Account Pair
 
 on:
   push:
@@ -15,15 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  refresh:
+  pair:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
@@ -32,57 +27,162 @@ jobs:
           tags: tag:afz-deploy
           args: --accept-dns=false
 
-      - name: Publish runner IP and wait for direct access
-        id: allow
+      - name: Start fresh Commander pairing on Windows-main
         shell: bash
         run: |
           set -euo pipefail
-          ip=$(tailscale ip -4 | head -n1)
-          test -n "$ip"
-          echo "runner_ip=$ip" >> "$GITHUB_OUTPUT"
-          echo "DIRECT_RUNNER_TAILSCALE_IP=$ip"
-          for i in $(seq 1 100); do
-            code=$(curl -sS -o /tmp/afz-health.json -w '%{http_code}' --connect-timeout 3 --max-time 6 http://100.70.25.8:8796/health || true)
-            echo "allowlist_wait_attempt=$i http=$code"
-            if [ "$code" = "200" ]; then
-              cat /tmp/afz-health.json
-              exit 0
-            fi
-            sleep 4
-          done
-          echo 'Runner IP was not allowlisted in time' >&2
-          exit 1
+          remote_script=$(cat <<'PS'
+          $ErrorActionPreference='Stop'
+          $expected='DESKTOP-10SKF0M'
+          if($env:COMPUTERNAME -ne $expected){throw ('WRONG_HOST '+$env:COMPUTERNAME)}
+          $npx=(Get-Command npx.cmd -ErrorAction Stop | Select-Object -First 1).Source
+          $taskName='AFZ Desktop Commander Remote Pairing'
+          $logDir=Join-Path $env:LOCALAPPDATA 'AFZ\DesktopCommander'
+          $log=Join-Path $logDir 'remote-alt-account.log'
+          $config=Join-Path $env:USERPROFILE '.desktop-commander-device\device.json'
+          $resultRoot=Join-Path $env:USERPROFILE 'OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Control Hub\Commander'
+          $resultFile=Join-Path $resultRoot 'PAIRING-WINDOWSMAIN-LATEST.json'
+          New-Item -ItemType Directory -Force -Path $logDir,$resultRoot | Out-Null
 
-      - name: Wait for direct agent v2.0.1
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 90); do
-            if body=$(curl -fsS --connect-timeout 3 --max-time 8 http://100.70.25.8:8796/health 2>/dev/null); then
-              echo "$body"
-              if python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("version")=="2.0.1" else 1)' <<<"$body"; then
-                exit 0
-              fi
-            fi
-            sleep 4
-          done
-          echo 'Direct agent did not reach version 2.0.1' >&2
-          exit 1
+          $existingTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          if($existingTask -and [string]$existingTask.State -eq 'Running'){
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          }
+          $existing=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+          })
+          foreach($p in $existing){try{Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}}
+          Start-Sleep -Seconds 2
 
-      - name: Request fresh Commander device code directly
-        id: refresh
+          $null=(& $npx --yes @wonderwhy-er/desktop-commander@latest remote --logout 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw ('COMMANDER_LOGOUT_EXIT='+$LASTEXITCODE)}
+          if(Test-Path -LiteralPath $config -PathType Leaf){throw 'COMMANDER_LOCAL_CREDENTIALS_STILL_PRESENT'}
+          Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+
+          $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $cmdArgs='/d /s /c ""'+$npx+'" --yes @wonderwhy-er/desktop-commander@latest remote >> "'+$log+'" 2>&1"'
+          $action=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdArgs
+          $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
+          $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+          $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+          $deadline=(Get-Date).AddSeconds(90)
+          $code=$null
+          do{
+            Start-Sleep -Seconds 2
+            if(Test-Path -LiteralPath $log -PathType Leaf){
+              $txt=Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
+              if($txt){
+                $m=[regex]::Match($txt,'(?im)^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*$')
+                if($m.Success){$code=$m.Groups[1].Value;break}
+              }
+            }
+          }while((Get-Date) -lt $deadline)
+
+          $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $procs=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+          })
+          $result=[ordered]@{
+            schema=1
+            host=$env:COMPUTERNAME
+            status=$(if($code){'AUTHORIZATION_REQUIRED'}else{'NO_DEVICE_CODE'})
+            verifyUrl='https://mcp.desktopcommander.app/device/verify'
+            deviceCode=$code
+            codeExpiresMinutes=$(if($code){15}else{$null})
+            localOldCredentialsRemoved=(-not(Test-Path -LiteralPath $config -PathType Leaf))
+            taskName=$taskName
+            taskState=$(if($task){[string]$task.State}else{'MISSING'})
+            processCount=@($procs).Count
+            generatedAt=(Get-Date -Format o)
+          }
+          [IO.File]::WriteAllText($resultFile,($result|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
+          Write-Output ('PAIR_RESULT_WRITTEN='+$resultFile)
+          Write-Output ('PAIR_AUTH_REQUIRED='+[bool]$code)
+          if(-not $code){exit 2}
+          PS
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 180s tailscale ssh Faiz@100.70.25.8 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+
+      - name: Start fresh Commander pairing on H3
         shell: bash
         run: |
           set -euo pipefail
-          body=$(curl -fsS --connect-timeout 3 --max-time 90 -X POST http://100.70.25.8:8796/api/desktop-commander/device-code)
-          echo "$body"
-          BODY="$body" python - <<'PY'
-          import json, os
-          d=json.loads(os.environ['BODY'])
-          assert d.get('ok') is True, d
-          print('DIRECT_STATE='+str(d.get('state')))
-          print('VERIFY_URL='+str(d.get('verifyUrl')))
-          print('DEVICE_CODE='+str(d.get('deviceCode')))
-          print('TASK_STATE='+str(d.get('taskState')))
-          print('PERSISTED_AUTOSTART='+str(d.get('persistedAutostart')))
-          PY
+          remote_script=$(cat <<'PS'
+          $ErrorActionPreference='Stop'
+          $expected='DESKTOP-H3R6CQN'
+          if($env:COMPUTERNAME -ne $expected){throw ('WRONG_HOST '+$env:COMPUTERNAME)}
+          $npx=(Get-Command npx.cmd -ErrorAction Stop | Select-Object -First 1).Source
+          $taskName='AFZ Desktop Commander Remote Pairing'
+          $logDir=Join-Path $env:LOCALAPPDATA 'AFZ\DesktopCommander'
+          $log=Join-Path $logDir 'remote-alt-account.log'
+          $config=Join-Path $env:USERPROFILE '.desktop-commander-device\device.json'
+          $resultRoot=Join-Path $env:USERPROFILE 'OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Control Hub\Commander'
+          $resultFile=Join-Path $resultRoot 'PAIRING-H3-LATEST.json'
+          New-Item -ItemType Directory -Force -Path $logDir,$resultRoot | Out-Null
+
+          $existingTask=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          if($existingTask -and [string]$existingTask.State -eq 'Running'){
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          }
+          $existing=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+          })
+          foreach($p in $existing){try{Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue}catch{}}
+          Start-Sleep -Seconds 2
+
+          $null=(& $npx --yes @wonderwhy-er/desktop-commander@latest remote --logout 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw ('COMMANDER_LOGOUT_EXIT='+$LASTEXITCODE)}
+          if(Test-Path -LiteralPath $config -PathType Leaf){throw 'COMMANDER_LOCAL_CREDENTIALS_STILL_PRESENT'}
+          Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+
+          $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $cmdArgs='/d /s /c ""'+$npx+'" --yes @wonderwhy-er/desktop-commander@latest remote >> "'+$log+'" 2>&1"'
+          $action=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdArgs
+          $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
+          $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+          $settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+          $deadline=(Get-Date).AddSeconds(90)
+          $code=$null
+          do{
+            Start-Sleep -Seconds 2
+            if(Test-Path -LiteralPath $log -PathType Leaf){
+              $txt=Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
+              if($txt){
+                $m=[regex]::Match($txt,'(?im)^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*$')
+                if($m.Success){$code=$m.Groups[1].Value;break}
+              }
+            }
+          }while((Get-Date) -lt $deadline)
+
+          $task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+          $procs=@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            ([string]$_.CommandLine) -match '(?i)@wonderwhy-er/desktop-commander.*remote|desktop-commander.*remote'
+          })
+          $result=[ordered]@{
+            schema=1
+            host=$env:COMPUTERNAME
+            status=$(if($code){'AUTHORIZATION_REQUIRED'}else{'NO_DEVICE_CODE'})
+            verifyUrl='https://mcp.desktopcommander.app/device/verify'
+            deviceCode=$code
+            codeExpiresMinutes=$(if($code){15}else{$null})
+            localOldCredentialsRemoved=(-not(Test-Path -LiteralPath $config -PathType Leaf))
+            taskName=$taskName
+            taskState=$(if($task){[string]$task.State}else{'MISSING'})
+            processCount=@($procs).Count
+            generatedAt=(Get-Date -Format o)
+          }
+          [IO.File]::WriteAllText($resultFile,($result|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
+          Write-Output ('PAIR_RESULT_WRITTEN='+$resultFile)
+          Write-Output ('PAIR_AUTH_REQUIRED='+[bool]$code)
+          if(-not $code){exit 2}
+          PS
+          )
+          encoded=$(printf '%s' "$remote_script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+          timeout 180s tailscale ssh Faiz@100.106.186.118 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
