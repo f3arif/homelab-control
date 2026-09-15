@@ -1,0 +1,47 @@
+name: Control V2 Recovery API Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/controlv2-recovery-api-probe.txt'
+      - '.github/workflows/controlv2-recovery-api-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: controlv2-recovery-api-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+          args: --accept-dns=false
+
+      - name: Probe Control V2 API read only
+        shell: bash
+        run: |
+          set +e
+          host=100.91.50.9
+          base="http://$host:8795/api/v1"
+          echo "=== TAILSCALE ==="
+          tailscale ping --timeout=5s -c 2 "$host"
+          echo "=== TCP 8795 ==="
+          timeout 4 bash -c "</dev/tcp/$host/8795"
+          echo "tcp_8795_exit=$?"
+          for path in /health /workers /jobs /status; do
+            echo "=== GET $base$path ==="
+            curl --silent --show-error --connect-timeout 3 --max-time 8               --write-out "\nHTTP_CODE=%{http_code}\n" "$base$path" || true
+          done
+          echo "CONTROLV2_MUTATION=false"
+          exit 0
