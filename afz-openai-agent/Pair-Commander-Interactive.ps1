@@ -1,14 +1,13 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('windows-main','h3')][string]$Target,
+  [ValidateSet('windows-main','h3','auto')][string]$Target='auto',
   [string]$PrivateResultRoot='C:\Users\Faiz\OneDrive - AFZ Engineering Inc\AFZ Shared\AFZ Control Hub\Commander'
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $utf8=New-Object Text.UTF8Encoding($false)
-$expected=if($Target -eq 'windows-main'){'DESKTOP-10SKF0M'}else{'DESKTOP-H3R6CQN'}
-if($env:COMPUTERNAME -ne $expected){throw "Wrong host for target=$Target host=$env:COMPUTERNAME expected=$expected"}
+if($Target -eq 'auto'){\n  if($env:COMPUTERNAME -eq 'DESKTOP-10SKF0M'){$Target='windows-main'}\n  elseif($env:COMPUTERNAME -eq 'DESKTOP-H3R6CQN'){$Target='h3'}\n  else{throw \"Unsupported host for automatic Commander pairing: $env:COMPUTERNAME\"}\n}\n$expected=if($Target -eq 'windows-main'){'DESKTOP-10SKF0M'}else{'DESKTOP-H3R6CQN'}\nif($env:COMPUTERNAME -ne $expected){throw \"Wrong host for target=$Target host=$env:COMPUTERNAME expected=$expected\"}
 if($env:USERNAME -ne 'Faiz'){throw "Commander pairing must run in Faiz interactive profile; user=$env:USERNAME"}
 
 $root=Join-Path $env:LOCALAPPDATA 'AFZ\DesktopCommander'
