@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "windowsmain-queue-consumer-recovery-20260915-r1",
+  "status": "ACTIVE",
+  "action": "start-existing-queue-consumers",
+  "target": "DESKTOP-10SKF0M",
+  "preserve_active_commander_request": true,
+  "desktop_commander_mutation": "NONE",
+  "scheduler_creation": "NONE",
+  "notes": "One-shot recovery for the existing OneDrive/GitHub workflow. Start existing Windows-main queue consumers/watchdog only; do not replace or duplicate the active Commander re-auth request."
+}
