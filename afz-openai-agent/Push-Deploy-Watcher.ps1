@@ -43,6 +43,9 @@ $h3HermesRegistryLivenessLastAttempt=[DateTime]::MinValue
 $h3DockerPreflightRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-H3-DockerDesktop-Preflight.ps1'
 $h3DockerPreflightRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-docker-desktop-preflight.json'
 $h3DockerPreflightStateRoot=Join-Path $stateRoot 'jobs\h3-docker-desktop-preflight'
+$windowsMainDockerLifecycleRunner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-WindowsMain-Docker-Lifecycle.ps1'
+$windowsMainDockerLifecycleRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\windowsmain-docker-lifecycle.json'
+$windowsMainDockerLifecycleStateRoot=Join-Path $stateRoot 'jobs\windowsmain-docker-lifecycle'
 New-Item -ItemType Directory -Force -Path $stateRoot,$logRoot | Out-Null
 function Log([string]$m){Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format o) $m" -Encoding UTF8}
 function Current-Sha{
@@ -232,6 +235,278 @@ function Handle-HPEnvySurfsharkRequest{
     Log "HPENVY_SURFSHARK_REQUEST mode=$mode classification=$classification exit=$code source=$(Current-Sha)"
   }catch{Log "HPENVY_SURFSHARK_REQUEST_ERROR $($_.Exception.Message)"}
 }
+function Handle-WindowsMainDockerLifecycleRequest{
+  if(-not(Test-Path -LiteralPath $windowsMainDockerLifecycleRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $windowsMainDockerLifecycleRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $windowsMainDockerLifecycleRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}
+  if(-not(Test-Path -LiteralPath $h3DockerPreflightRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3DockerPreflightRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3DockerPreflightRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'preflight-docker-desktop' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if(-not [bool]$req.read_only -or [bool]$req.allow_install -or [bool]$req.allow_reboot -or [bool]$req.mutate_ollama){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $statePath=Join-Path $h3DockerPreflightStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$existing.classification -in @('H3_DOCKER_DESKTOP_INSTALL_READY','H3_DOCKER_DESKTOP_ALREADY_INSTALLED','H3_DOCKER_DESKTOP_INSTALL_BLOCKED')){return}
+      }catch{}
+    }
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3DockerPreflightRunner -InstallRoot $InstallRoot -RequestPath $h3DockerPreflightRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_DOCKER_PREFLIGHT classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_DOCKER_PREFLIGHT_ERROR $($_.Exception.Message)"}
+}
+
+function Handle-H3HermesRegistryLivenessRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesRegistryLivenessRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesRegistryLivenessRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or -not [bool]$req.enabled -or [string]$req.action -ne 'audit-registry-liveness'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if(-not [bool]$req.read_only -or [string]$req.mutation -ne 'none'){return}
+    if([bool]$req.restart_gateway -or [bool]$req.change_provider -or [bool]$req.run_model_generation -or [bool]$req.mutate_ollama -or [bool]$req.change_network){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $statePath=Join-Path $h3HermesRegistryLivenessStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
+    }
+    $now=Get-Date
+    if(($now-$script:h3HermesRegistryLivenessLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesRegistryLivenessLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesRegistryLivenessRunner -InstallRoot $InstallRoot -RequestPath $h3HermesRegistryLivenessRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_HERMES_REGISTRY_LIVENESS classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_REGISTRY_LIVENESS_ERROR $($_.Exception.Message)"}
+}
+function Test-H3HermesPdfAuxPending{
+  $request=Join-Path $InstallRoot 'afz-openai-agent\requests\h3-hermes-pdf-runtime-audit.json'
+  $stateRootPdf=Join-Path $stateRoot 'jobs\h3-hermes-pdf-runtime-audit'
+  if(-not(Test-Path -LiteralPath $request -PathType Leaf)){return $false}
+  try{
+    $r=Get-Content -LiteralPath $request -Raw -Encoding UTF8|ConvertFrom-Json
+    $rid=([string]$r.id).Trim()
+    if([int]$r.schema -ne 1 -or [string]$r.status -ne 'ACTIVE' -or [string]$r.target -ne 'h3' -or [string]$r.host -ne 'DESKTOP-H3R6CQN'){return $false}
+    if($rid -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return $false}
+    $action=([string]$r.action).Trim()
+    if($action -eq 'audit-pdf-runtime'){
+      if(-not [bool]$r.read_only -or [bool]$r.install_dependencies){return $false}
+    }elseif($action -eq 'audit-and-repair-pdf-runtime'){
+      if([bool]$r.read_only -or -not [bool]$r.install_dependencies){return $false}
+      $packages=@($r.packages|ForEach-Object{([string]$_).Trim().ToLowerInvariant()})
+      if(($packages -join ',') -ne 'pypdf,reportlab,pdfplumber'){return $false}
+    }else{return $false}
+    if([bool]$r.return_document_text -or [bool]$r.change_config -or [bool]$r.restart_gateway -or [bool]$r.change_provider -or [bool]$r.mutate_ollama -or [bool]$r.change_network -or [bool]$r.run_model_generation){return $false}
+    $statePathPdf=Join-Path $stateRootPdf ($rid+'.json')
+    if(-not(Test-Path -LiteralPath $statePathPdf -PathType Leaf)){return $true}
+    try{
+      $s=Get-Content -LiteralPath $statePathPdf -Raw -Encoding UTF8|ConvertFrom-Json
+      return (-not [bool]$s.ok)
+    }catch{return $true}
+  }catch{return $false}
+}
+
+function Handle-H3HermesTelegramFollowupRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesTelegramFollowupRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesTelegramFollowupRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'repair-telegram-document-followup' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'h3' -or [string]$req.host -ne 'DESKTOP-H3R6CQN'){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    if(-not [bool]$req.restart_gateway -or [bool]$req.change_config -or [bool]$req.change_provider -or [bool]$req.mutate_ollama -or [bool]$req.change_network -or [bool]$req.run_model_generation){return}
+    $statePath=Join-Path $h3HermesTelegramFollowupStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{$existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json;if([bool]$existing.ok){return}}catch{}
+    }
+    $now=Get-Date
+    if(($now-$script:h3HermesTelegramFollowupLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesTelegramFollowupLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesTelegramFollowupRunner -InstallRoot $InstallRoot -RequestPath $h3HermesTelegramFollowupRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}}
+    Log "H3_HERMES_TELEGRAM_FOLLOWUP classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_TELEGRAM_FOLLOWUP_ERROR $($_.Exception.Message)"}
+}
+
+function Handle-H3HermesRequest{
+  if(-not(Test-Path -LiteralPath $h3HermesRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $h3HermesRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $h3HermesRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    $id=([string]$req.id).Trim()
+    if([int]$req.schema -ne 1 -or [string]$req.action -ne 'install-and-configure' -or [string]$req.target -ne 'h3'){return}
+    if([string]$req.host -ne 'DESKTOP-H3R6CQN' -or [string]$req.base_url -ne 'http://127.0.0.1:11434/v1'){return}
+    if($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,120}$'){return}
+    $pdfAuxPending=Test-H3HermesPdfAuxPending
+    $statePath=Join-Path $h3HermesStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $existing=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([bool]$existing.ok){
+          $chatRecoveryRequired=(($req.PSObject.Properties.Name -contains 'run_chat_canary') -and [bool]$req.run_chat_canary) -or (($req.PSObject.Properties.Name -contains 'refresh_gateway_after_canary') -and [bool]$req.refresh_gateway_after_canary)
+          if($chatRecoveryRequired){
+            if([string]$existing.classification -eq 'HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY'){return}
+          }elseif(-not $pdfAuxPending -and [string]$existing.classification -in @('HERMES_READY_LOCAL_OLLAMA_64K','HERMES_OLLAMA_FRESH_LIVENESS_READY','HERMES_OLLAMA_CHAT_AND_TELEGRAM_GATEWAY_READY')){return}
+        }
+        if(-not [bool]$existing.retryable -and [string]$existing.classification -eq 'HERMES_SETUP_FAILED' -and -not $pdfAuxPending){return}
+      }catch{}
+    }
+    if($pdfAuxPending){Log "H3_HERMES_PDF_AUX_PENDING source=$(Current-Sha)"}
+    $now=Get-Date
+    if(($now-$script:h3HermesLastAttempt).TotalSeconds -lt 60){return}
+    $script:h3HermesLastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $h3HermesRunner -InstallRoot $InstallRoot -RequestPath $h3HermesRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification='NO_CLASSIFICATION'
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{$classification=[string](($raw|ConvertFrom-Json).classification)}catch{}
+    }
+    Log "H3_HERMES_REQUEST classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{Log "H3_HERMES_REQUEST_ERROR $($_.Exception.Message)"}
+}
+# BEGIN FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
+function Handle-FamilyPttPhase1ApkRequest{
+  if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRunner -PathType Leaf)){return}
+  if(-not(Test-Path -LiteralPath $familyPttPhase1ApkRequest -PathType Leaf)){return}
+  try{
+    $req=Get-Content -LiteralPath $familyPttPhase1ApkRequest -Raw -Encoding UTF8|ConvertFrom-Json
+    if([int]$req.schema -ne 1 -or [string]$req.project -ne 'familyptt' -or [string]$req.action -ne 'prepare-phase1-acceptance-apk'){return}
+    if([string]$req.status -ne 'active'){return}
+    $now=Get-Date
+    if(($now-$script:familyPttPhase1LastAttempt).TotalSeconds -lt 10){return}
+    $script:familyPttPhase1LastAttempt=$now
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $familyPttPhase1ApkRunner -InstallRoot $InstallRoot -RequestPath $familyPttPhase1ApkRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    if($code -ne 0){
+      Log "FAMILYPTT_PHASE1_APK_REQUEST_ERROR exit=$code source=$(Current-Sha) output=$raw"
+      return
+    }
+    if(-not [string]::IsNullOrWhiteSpace($raw)){
+      try{
+        $result=$raw|ConvertFrom-Json
+        Log "FAMILYPTT_PHASE1_APK_REQUEST status=$([string]$result.status) job=$([string]$result.jobId) source=$(Current-Sha)"
+      }catch{Log "FAMILYPTT_PHASE1_APK_REQUEST_OK source=$(Current-Sha)"}
+    }
+  }catch{Log "FAMILYPTT_PHASE1_APK_REQUEST_ERROR $($_.Exception.Message)"}
+}
+# END FAMILYPTT_PHASE1_APK_ACTIVE_BINDING
+$mutex=New-Object Threading.Mutex($false,'Global\AFZOpenAIAgentPushWatcher')
+$locked=$false
+try{
+  $locked=$mutex.WaitOne(0)
+  if(-not $locked){exit 0}
+  $lastAttemptSha=''
+  $lastAttempt=[DateTime]::MinValue
+  $lastError=''
+  Log "START interval=${IntervalSeconds}s transport=github-fast-signal updater_bootstrap=two-pass persistent_task=true monotonic=true jellyfinVisibilityRequest=typed-one-shot windowsMainDockerLifecycleRequest=typed-reversible-local hpEnvySurfsharkRequest=typed-fixed-target familyPttPhase1ApkRequest=typed-active-only h3HermesRequest=typed-fixed-target-no-generation"
+  Save-RuntimeProof
+  Save-DiagnosticAck '' 'watcher-started' 'Persistent GitHub fast-signal consumer is running.'
+  while($true){
+    try{
+      $nonce=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      $headers=@{'User-Agent'='AFZ-Push-Watcher';'Cache-Control'='no-cache';'Pragma'='no-cache'}
+      $r=Invoke-WebRequest -Uri ($signalBase+'?nocache='+$nonce) -Headers $headers -UseBasicParsing -TimeoutSec 10
+      $sha=([string]$r.Content).Trim().ToLowerInvariant()
+      if($sha -notmatch '^[0-9a-f]{40}$'){throw "Invalid deploy signal: $sha"}
+      $handled=Handled-Signal
+      if($sha -ne $handled){
+        $now=Get-Date
+        if($sha -ne $lastAttemptSha -or ($now-$lastAttempt).TotalSeconds -ge 30){
+          $lastAttemptSha=$sha;$lastAttempt=$now
+          $updater=Join-Path $InstallRoot 'afz-openai-agent\Update-AFZ-OpenAI-Agent.ps1'
+          if(-not(Test-Path $updater)){throw "Updater missing: $updater"}
+          $before=Current-Sha
+          if(Current-ContainsSignal $before $sha){
+            Save-State $sha 'deployed' "Signal already contained by current source=$before; downgrade skipped."
+            Save-DiagnosticAck $sha 'source-already-newer' "Signal already contained by current source=$before; downgrade skipped."
+            Log "DEPLOY_SKIP_ANCESTOR signal=$sha current=$before"
+            $lastAttemptSha=''
+          }else{
+            Save-State $sha 'deploying' 'Exact-SHA two-pass update started.'
+            Save-DiagnosticAck $sha 'signal-consumed' "Fast signal observed; source before update=$before"
+            Log "DEPLOY signal=$sha current=$before"
+            $code=Invoke-UpdaterPass $updater $sha 1
+            if($code -eq 0){$code=Invoke-UpdaterPass $updater $sha 2}
+            $after=Current-Sha
+            if($code -eq 0 -and $after -eq $sha){
+              Save-State $sha 'deployed' "Exact-SHA two-pass update completed. source=$after"
+              Save-DiagnosticAck $sha 'source-synced' "Exact-SHA two-pass update completed; source=$after"
+              Log "DEPLOY_OK signal=$sha source=$after passes=2"
+              $lastAttemptSha=''
+            }else{
+              Save-State $sha 'failed' "Updater exit=$code current=$after expected=$sha"
+              Save-DiagnosticAck $sha 'source-sync-failed' "Updater exit=$code current=$after expected=$sha"
+              Log "DEPLOY_FAIL signal=$sha exit=$code current=$after expected=$sha"
+            }
+          }
+        }
+      }else{
+        Save-State $sha 'idle' 'Deploy signal already handled.'
+        $lastAttemptSha=''
+      }
+      Refresh-FamilyPttR17IfSafe
+      Handle-JellyfinVisibilityRequest
+      Handle-WindowsMainDockerLifecycleRequest
+      Handle-HPEnvySurfsharkRequest
+      Handle-H3DockerDesktopPreflight
+      Handle-H3HermesRegistryLivenessRequest
+      Handle-H3HermesTelegramFollowupRequest
+      Handle-H3HermesRequest
+      Handle-FamilyPttPhase1ApkRequest
+      $lastError=''
+    }catch{
+      $msg=$_.Exception.Message
+      if($msg -ne $lastError){Log "WATCH_ERROR $msg";Save-DiagnosticAck '' 'watch-error' $msg;$lastError=$msg}
+      Save-State '' 'error' $msg
+    }
+    Start-Sleep -Seconds $IntervalSeconds
+  }
+}finally{
+  if($locked){try{$mutex.ReleaseMutex()}catch{}}
+  $mutex.Dispose()
+}
+){return}
+    if([string]$req.action -ne 'docker-lifecycle' -or [string]$req.status -ne 'ACTIVE'){return}
+    if([string]$req.target -ne 'windows-main' -or [string]$req.host -ne 'DESKTOP-10SKF0M'){return}
+    if([bool]$req.allow_remove -or [bool]$req.allow_volume_delete -or [bool]$req.allow_prune){
+      Log "WINDOWSMAIN_DOCKER_LIFECYCLE_REFUSED job=$id reason=destructive-flag"
+      return
+    }
+    $statePath=Join-Path $windowsMainDockerLifecycleStateRoot ($id+'.json')
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $prior=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$prior.jobId -eq $id -and [string]$prior.status -eq 'completed'){return}
+      }catch{}
+    }
+    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $windowsMainDockerLifecycleRunner -InstallRoot $InstallRoot -RequestPath $windowsMainDockerLifecycleRequest 2>&1|Out-String).Trim()
+    $code=$LASTEXITCODE
+    $classification=''
+    if($raw){
+      try{$classification=[string](($raw -split "`r?`n"|Select-Object -Last 1|ConvertFrom-Json).classification)}catch{}
+    }
+    Log "WINDOWSMAIN_DOCKER_LIFECYCLE job=$id classification=$classification exit=$code source=$(Current-Sha)"
+  }catch{
+    Log "WINDOWSMAIN_DOCKER_LIFECYCLE_ERROR $($_.Exception.Message)"
+  }
+}
+
 function Handle-H3DockerDesktopPreflight{
   if(-not(Test-Path -LiteralPath $h3DockerPreflightRunner -PathType Leaf)){return}
   if(-not(Test-Path -LiteralPath $h3DockerPreflightRequest -PathType Leaf)){return}
