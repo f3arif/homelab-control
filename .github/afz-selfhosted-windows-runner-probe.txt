@@ -1,1 +1,3 @@
-COMMANDER-ALTACCT-SELFHOSTED-PROBE-20260915T2315Z
+probe=afz-selfhosted-windows-runner
+purpose=commander-pairing-carrier-discovery
+nonce=20260915T1934-0400-r1
