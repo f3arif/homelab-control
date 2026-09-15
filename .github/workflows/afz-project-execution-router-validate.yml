@@ -1,0 +1,108 @@
+name: AFZ Project Execution Router Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1'
+      - 'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1'
+      - 'afz-openai-agent/control/project-execution-router.json'
+      - 'afz-openai-agent/requests/project-task.json'
+      - 'afz-openai-agent/PROJECT-EXECUTION-ROUTER.md'
+      - 'afz-openai-agent/control/AFZ-PROJECT-EXECUTION-HANDOFF-LATEST.md'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-project-execution-router-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1'
+      - 'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1'
+      - 'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1'
+      - 'afz-openai-agent/control/project-execution-router.json'
+      - 'afz-openai-agent/requests/project-task.json'
+      - 'afz-openai-agent/PROJECT-EXECUTION-ROUTER.md'
+      - 'afz-openai-agent/control/AFZ-PROJECT-EXECUTION-HANDOFF-LATEST.md'
+      - 'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+      - '.github/workflows/afz-project-execution-router-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell 5-compatible sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @(
+            'afz-openai-agent/AFZ-ProjectTask-Request-Watcher.ps1',
+            'afz-openai-agent/Invoke-AFZ-HermesProjectTask.ps1',
+            'afz-openai-agent/Ensure-AFZ-ProjectExecutionRouter.ps1',
+            'afz-openai-agent/Start-AFZ-OpenAI-Agent.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Error;throw "PowerShell parse failed: $file"}
+            Write-Host "PARSE PASS $file"
+          }
+      - name: Validate bounded router contract
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          root=Path('afz-openai-agent')
+          cfg=json.loads((root/'control/project-execution-router.json').read_text())
+          req=json.loads((root/'requests/project-task.json').read_text())
+          watcher=(root/'AFZ-ProjectTask-Request-Watcher.ps1').read_text()
+          executor=(root/'Invoke-AFZ-HermesProjectTask.ps1').read_text()
+          installer=(root/'Ensure-AFZ-ProjectExecutionRouter.ps1').read_text()
+          start=(root/'Start-AFZ-OpenAI-Agent.ps1').read_text()
+
+          assert cfg['schema']==1 and cfg['status']=='ACTIVE'
+          assert cfg['default_route'] in ('hermes','commander')
+          assert cfg['fallback']['transport']=='desktop-commander'
+          assert cfg['fallback']['auto_after_mutation_started'] is False
+          assert cfg['safety']['arbitrary_shell_request_field_allowed'] is False
+          assert cfg['safety']['hermes_yolo_allowed'] is False
+          assert cfg['safety']['require_checkpoints'] is True
+          assert cfg['hermes']['poll_interval_ms'] <= 1000
+
+          assert req['schema']==1
+          assert req['force_route'] in ('auto','hermes','commander')
+          assert 'command' not in req and 'shell' not in req
+
+          for marker in [
+              'AFZ Hermes Project Task User Action',
+              'commander_fallback_ready',
+              'mutationStarted',
+              'AFZ-PROJECT-EXECUTION-LATEST.json',
+              'AFZ-OTHER-ACCOUNT-PROJECT-EXECUTION-LATEST.txt',
+              'IntervalMilliseconds=750']:
+              assert marker in watcher, marker
+
+          for marker in [
+              "'file,skills'",
+              "'file,skills,web'",
+              '--checkpoints',
+              'HERMES_WRITE_SAFE_ROOT',
+              'validation_profile',
+              "gradlew.bat",
+              "dotnet",
+              "pytest"]:
+              assert marker in executor, marker
+
+          forbidden=['Invoke-Expression','--yolo','git reset --hard','git clean -fd','push --force']
+          combined='\n'.join([watcher,executor,installer])
+          for marker in forbidden:
+              assert marker not in combined, marker
+
+          assert 'AFZ Project Task Router Watcher' in installer
+          assert 'LogonType S4U' in installer
+          assert 'Ensure-AFZ-ProjectExecutionRouter.ps1' in start
+          print('AFZ PROJECT EXECUTION ROUTER CONTRACT PASS')

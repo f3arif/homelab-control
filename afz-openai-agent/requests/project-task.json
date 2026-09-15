@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "status": "DISABLED",
+  "request_id": "project-exec-bootstrap-20260915-r1",
+  "project": "homelab-control",
+  "project_root": "C:\\AFZ\\homelab-control",
+  "task": "Bootstrap placeholder only. Change status to ACTIVE and use a new request_id when submitting real work.",
+  "resume_key": "AFZ-HERMES-PROJECT-EXEC-ROUTER-R1-20260915",
+  "origin": "chatgpt-cross-chat",
+  "cross_chat_note": "Canonical task lane for Hermes-first project execution with Commander rollback.",
+  "force_route": "auto",
+  "worker_affinity": "auto",
+  "validation_profile": "git-status",
+  "max_turns": 80,
+  "timeout_seconds": 2700,
+  "allow_web": false,
+  "model": "",
+  "expected_source_sha": "",
+  "launch_commander_pairing": false
+}

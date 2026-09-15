@@ -13,6 +13,14 @@
     "durable_coordination": "GitHub",
     "emergency_handoff": "OneDrive / SharePoint"
   },
+  "project_execution": {
+    "router": "afz-openai-agent/control/project-execution-router.json",
+    "request": "afz-openai-agent/requests/project-task.json",
+    "default_route": "hermes",
+    "execution_host": "windows-main",
+    "fallback": "desktop-commander",
+    "cross_chat_handoff": "afz-openai-agent/control/AFZ-PROJECT-EXECUTION-HANDOFF-LATEST.md"
+  },
   "connector": {
     "repository_discovery": "installation-aware",
     "canonical_repo_full_name": "f3arif/homelab-control",
@@ -25,6 +33,8 @@
     "github_is_lease_database": false,
     "github_is_worker_liveness_authority": false,
     "onedrive_normal_polling_allowed": false,
+    "project_request_arbitrary_shell_allowed": false,
+    "commander_is_primary_project_executor": false,
     "delete_legacy_branches": false,
     "disable_onedrive_before_validation": false
   }

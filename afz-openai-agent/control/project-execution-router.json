@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "status": "ACTIVE",
+  "default_route": "hermes",
+  "routing_order": [
+    "hermes-windows-main-project-edit",
+    "desktop-commander-fallback"
+  ],
+  "hermes": {
+    "execution_host": "DESKTOP-10SKF0M",
+    "fleet_primary_host": "DESKTOP-H3R6CQN",
+    "project_data_locality_priority": true,
+    "poll_interval_ms": 750,
+    "default_max_turns": 80,
+    "default_timeout_seconds": 2700,
+    "checkpoints": true,
+    "human_delay_mode": "off",
+    "toolsets_default": ["file", "skills"],
+    "toolsets_with_web": ["file", "skills", "web"]
+  },
+  "fallback": {
+    "transport": "desktop-commander",
+    "auto_on_pre_execution_failure": true,
+    "auto_after_mutation_started": false,
+    "auto_launch_pairing": false,
+    "pairing_launcher": "Bootstrap-WindowsMain-DesktopCommanderRemote.ps1"
+  },
+  "safety": {
+    "arbitrary_shell_request_field_allowed": false,
+    "hermes_yolo_allowed": false,
+    "force_push_allowed": false,
+    "destructive_reset_allowed": false,
+    "preserve_existing_worktree_by_default": true,
+    "require_checkpoints": true
+  },
+  "cross_chat": {
+    "github_handoff": "afz-openai-agent/control/AFZ-PROJECT-EXECUTION-HANDOFF-LATEST.md",
+    "onedrive_runtime_mirror": "ChatGPT_Termius\\AFZ-PROJECT-EXECUTION-LATEST.json",
+    "onedrive_text_mirror": "ChatGPT_Termius\\AFZ-OTHER-ACCOUNT-PROJECT-EXECUTION-LATEST.txt",
+    "resume_key_prefix": "AFZ-EXEC"
+  },
+  "rollback": {
+    "per_request": "set force_route=commander",
+    "global": "set default_route=commander",
+    "restore": "set default_route=hermes"
+  }
+}
