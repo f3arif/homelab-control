@@ -1,0 +1,67 @@
+name: AFZ HP Envy Control Hub Read Only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/afz-hpenvy-controlhub-readonly-signal.txt'
+      - '.github/workflows/afz-hpenvy-controlhub-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-hpenvy-controlhub-readonly
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe HP Envy authoritative control surfaces read only
+        shell: bash
+        run: |
+          set +e
+          host=100.71.26.69
+          echo "TIMESTAMP=$(date -u +%FT%TZ)"
+          tailscale ping --timeout=5s --c=1 "$host"
+          echo "TAILSCALE_PING_EXIT=$?"
+          for port in 8789 8791 8795 8796 8797; do
+            if timeout 3 bash -c "</dev/tcp/$host/$port" 2>/dev/null; then
+              echo "HPENVY_TCP_${port}=OPEN"
+            else
+              echo "HPENVY_TCP_${port}=CLOSED_OR_FILTERED"
+            fi
+          done
+          for url in \
+            http://100.71.26.69:8789/health \
+            http://100.71.26.69:8791/ \
+            http://100.71.26.69:8795/health \
+            http://100.71.26.69:8796/health \
+            http://100.71.26.69:8797/health; do
+            echo "GET=$url"
+            curl --silent --show-error --connect-timeout 3 --max-time 8 \
+              --write-out '\nHTTP_CODE=%{http_code}\n' "$url" || true
+          done
+          exit 0
+
+      - name: Enforce read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/afz-hpenvy-controlhub-readonly.yml'
+          ! grep -Eq 'curl .*(-X|--request)[[:space:]]+(POST|PUT|PATCH|DELETE)' "$wf"
+          ! grep -Eq '\bssh\b|\bsudo\b|systemctl|service|docker|Start-ScheduledTask|Stop-ScheduledTask|Stop-Process|New-NetFirewallRule|Remove-NetFirewallRule' "$wf"
+          echo 'READ_ONLY_CONTRACT=PASS'
