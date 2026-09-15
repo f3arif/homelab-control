@@ -2,3 +2,6 @@ homeassistant-step7-resource-gate=2026-09-05T00:24:00-04:00
 afz-music-alternate-execution-probe=2026-09-15
 scope=existing-read-only-health-workflow
 resume-key=AFZ-MUSIC-AURORA-P0P1-20260913
+project-execution-router-probe=2026-09-15T15:00:00-04:00
+project-execution-resume-key=AFZ-HERMES-PROJECT-EXEC-ROUTER-R1-20260915
+expected-source-request-sha=c3891447d5d82c32b0e2276d93a374beb8354943
