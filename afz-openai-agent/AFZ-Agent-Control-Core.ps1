@@ -158,7 +158,6 @@ function Invoke-HPEnvySurfsharkExitNode([string]$Action){
   try{return ($raw|ConvertFrom-Json)}catch{throw "HP Envy Surfshark runner returned invalid JSON: $raw"}
 }
 
-
 function Invoke-CommanderAlternateAccountPair {
   $runner=Join-Path $InstallRoot 'afz-openai-agent\Invoke-Commander-AlternateAccountPair-PostSync.ps1'
   $request=Join-Path $InstallRoot 'afz-openai-agent\requests\commander-alternate-account-pair.json'
@@ -183,7 +182,7 @@ $listener=New-Object Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 if($BindHost -and $BindHost -ne '127.0.0.1'){$listener.Prefixes.Add("http://$BindHost`:$Port/")}
 $listener.Start()
-Log "START version=1.10.3 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly commanderAlternateAccountPair=typed-h3-pinned jellyfinVisibilityRepair=typed hpEnvySurfsharkExitNode=typed-fixed-target prospectEngineProbe=enabled"
+Log "START version=1.10.3 port=$Port bind=$BindHost deploy=github-fast-signal interval=3s h3QwenBenchmark=typed queueOrphanRemediation=typed windowsWslMemoryAudit=typed-readonly commanderAlternateAccountPair=typed-hermes-recovery jellyfinVisibilityRepair=typed hpEnvySurfsharkExitNode=typed-fixed-target prospectEngineProbe=enabled"
 try{
   while($listener.IsListening){$ctx=$listener.GetContext();try{
     $ip=Get-RemoteIp $ctx;$path=$ctx.Request.Url.AbsolutePath.TrimEnd('/')
@@ -509,7 +508,6 @@ try{
       Send-Json $ctx 202 $r
       continue
     }
-
     if($path -eq '/api/windows-wsl-memory-audit' -and $ctx.Request.HttpMethod -eq 'POST'){
       if(-not((Test-DeployPeer $ip) -or ((Get-AllowedClients) -contains $ip))){Send-Json $ctx 403 @{ok=$false;error='WSL memory audit peer not authorized';client=$ip};continue}
       $req=Read-Json $ctx;$action=([string]$req.action).Trim().ToLowerInvariant()
