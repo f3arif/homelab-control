@@ -70,7 +70,7 @@ function Find-Hermes {
 }
 function Test-SafeProjectRoot([string]$Root){
   if([string]::IsNullOrWhiteSpace($Root)){return $false}
-  if($Root -match "['\"`r`n]" -or $Root -match '(^|[\\/])[.][.]([\\/]|$)'){return $false}
+  if($Root.IndexOf([char]39) -ge 0 -or $Root.IndexOf([char]34) -ge 0 -or $Root.IndexOf([char]13) -ge 0 -or $Root.IndexOf([char]10) -ge 0 -or $Root -match '(^|[\\/])[.][.]([\\/]|$)'){return $false}
   if($Root -notmatch '^[A-Za-z]:\\'){return $false}
   $full=[IO.Path]::GetFullPath($Root).TrimEnd('\')
   foreach($blocked in @('C:\Windows','C:\Program Files','C:\Program Files (x86)','C:\ProgramData','C:\Users\Faiz\.ssh','C:\Users\Faiz\.hermes')){
