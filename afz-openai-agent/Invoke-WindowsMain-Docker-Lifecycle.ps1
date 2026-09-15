@@ -73,7 +73,7 @@ $docker=[string]$dockerCmd.Source
 
 function Get-ContainerState([string]$Name){
   $raw=(& $docker inspect $Name --format '{{.State.Status}}|{{.HostConfig.RestartPolicy.Name}}' 2>&1 | Out-String).Trim()
-  if($LASTEXITCODE -ne 0){throw "Container inspect failed for $Name: $raw"}
+  if($LASTEXITCODE -ne 0){throw "Container inspect failed for ${Name}: $raw"}
   $parts=$raw -split '\|',2
   return [ordered]@{state=[string]$parts[0];restartPolicy=$(if($parts.Count -gt 1){[string]$parts[1]}else{''})}
 }
@@ -97,24 +97,24 @@ try{
       }
       if($disableRestart -and [string]$before.restartPolicy -ne 'no'){
         $updateOut=(& $docker update --restart=no $name 2>&1 | Out-String).Trim()
-        if($LASTEXITCODE -ne 0){throw "docker update --restart=no failed for $name: $updateOut"}
+        if($LASTEXITCODE -ne 0){throw "docker update --restart=no failed for ${name}: $updateOut"}
         $mutationStarted=$true
         $disabledRestart=$true
       }
       if([string]$before.state -eq 'running'){
         $stopOut=(& $docker stop --timeout 30 $name 2>&1 | Out-String).Trim()
-        if($LASTEXITCODE -ne 0){throw "docker stop failed for $name: $stopOut"}
+        if($LASTEXITCODE -ne 0){throw "docker stop failed for ${name}: $stopOut"}
         $mutationStarted=$true
       }
     }elseif($verb -eq 'start'){
       if([string]$before.state -ne 'running'){
         $startOut=(& $docker start $name 2>&1 | Out-String).Trim()
-        if($LASTEXITCODE -ne 0){throw "docker start failed for $name: $startOut"}
+        if($LASTEXITCODE -ne 0){throw "docker start failed for ${name}: $startOut"}
         $mutationStarted=$true
       }
     }elseif($verb -eq 'restart'){
       $restartOut=(& $docker restart --timeout 30 $name 2>&1 | Out-String).Trim()
-      if($LASTEXITCODE -ne 0){throw "docker restart failed for $name: $restartOut"}
+      if($LASTEXITCODE -ne 0){throw "docker restart failed for ${name}: $restartOut"}
       $mutationStarted=$true
     }
 
