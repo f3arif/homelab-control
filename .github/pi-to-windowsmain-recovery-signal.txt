@@ -1,4 +1,4 @@
 target=windows-main
 action=probe-via-pi
-nonce=20260915-hermes-router-r1
-resume-key=AFZ-HERMES-PROJECT-EXEC-ROUTER-R1-20260915
+nonce=20260915-commander-altacct-pi-relay-r1
+resume-key=AFZ-COMMANDER-ALTACCT-PI-RELAY-0915
