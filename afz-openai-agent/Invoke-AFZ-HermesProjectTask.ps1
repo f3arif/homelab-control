@@ -79,8 +79,9 @@ function Test-SafeProjectRoot([string]$Root){
   return $true
 }
 function Quote-Arg([string]$Value){
-  if($Value -notmatch '[\s"]'){return $Value}
-  return '"'+$Value.Replace('"','\"')+'"'
+  if($Value -notmatch '\s'){return $Value}
+  $quote=[string][char]34
+  return $quote+$Value+$quote
 }
 function Invoke-BoundedProcess([string]$File,[string[]]$Arguments,[string]$WorkingDirectory,[int]$TimeoutSeconds,[string]$Tag){
   $out=Join-Path $stateRoot ($Tag+'.out.log');$err=Join-Path $stateRoot ($Tag+'.err.log')
