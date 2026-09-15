@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/Pair-Commander-Interactive.ps1'
+      - 'afz-openai-agent/Pair-Commander-Both-Interactive.ps1'
       - 'afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py'
       - 'afz-openai-agent/hermes-mcp/test_afz_commander_recovery_mcp.py'
       - 'afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh'
@@ -12,6 +14,8 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/Pair-Commander-Interactive.ps1'
+      - 'afz-openai-agent/Pair-Commander-Both-Interactive.ps1'
       - 'afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py'
       - 'afz-openai-agent/hermes-mcp/test_afz_commander_recovery_mcp.py'
       - 'afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh'
@@ -40,14 +44,22 @@ jobs:
         run: |
           $tokens = $null
           $errs = $null
-          $null = [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'),
-            [ref]$tokens,
-            [ref]$errs
-          )
-          if ($errs -and $errs.Count -gt 0) {
-            $errs | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          foreach ($path in @(
+            'afz-openai-agent/AFZ-Agent-Control-Core.ps1',
+            'afz-openai-agent/Pair-Commander-Interactive.ps1',
+            'afz-openai-agent/Pair-Commander-Both-Interactive.ps1'
+          )) {
+            $tokens = $null
+            $errs = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$tokens,
+              [ref]$errs
+            )
+            if ($errs -and $errs.Count -gt 0) {
+              $errs | ForEach-Object { Write-Error ($path + ': ' + $_.Message) }
+              exit 1
+            }
           }
 
       - name: Validate bounded recovery contract
