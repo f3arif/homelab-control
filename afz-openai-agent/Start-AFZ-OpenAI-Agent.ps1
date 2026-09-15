@@ -21,6 +21,7 @@ $remoteOpsOneShot=Join-Path $sourceRoot 'AFZ-RemoteOps-OneShot.ps1'
 $remoteOpsRequest=Join-Path $sourceRoot 'requests\afz-remoteops-start.json'
 $familyPttTwoHandsetPrepare=Join-Path $sourceRoot 'FamilyPTT-TwoHandset-Prepare.ps1'
 $familyPttTwoHandsetRequest=Join-Path $sourceRoot 'requests\familyptt-two-handset-prepare.json'
+$projectExecutionInstaller=Join-Path $sourceRoot 'Ensure-AFZ-ProjectExecutionRouter.ps1'
 
 # Typed, idempotent recovery for the pre-existing AFZ Remote Ops scheduled task.
 # This deliberately starts only that exact task; it does not add a generic command API.
@@ -37,6 +38,15 @@ if((Test-Path -LiteralPath $remoteOpsOneShot -PathType Leaf) -and (Test-Path -Li
 if((Test-Path -LiteralPath $familyPttTwoHandsetPrepare -PathType Leaf) -and (Test-Path -LiteralPath $familyPttTwoHandsetRequest -PathType Leaf)){
   try{
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $familyPttTwoHandsetPrepare -InstallRoot $InstallRoot -RequestPath $familyPttTwoHandsetRequest *> $null
+  }catch{}
+}
+
+# Reversible Hermes-first project execution router. Installation is fail-isolated
+# from the core agent: a router install problem must never take down AFZ chat/control.
+# The installer registers only the bounded local watcher and user-context Hermes task.
+if(Test-Path -LiteralPath $projectExecutionInstaller -PathType Leaf){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $projectExecutionInstaller -InstallRoot $InstallRoot *> $null
   }catch{}
 }
 
