@@ -9,10 +9,10 @@ This is the canonical cross-chat/cross-account pointer for machine-backed AFZ pr
 ## Routing contract
 
 1. Hermes/Direct Fabric is the normal project-task route.
-2. H3 (`DESKTOP-H3R6CQN`) is the Hermes primary execution authority when the requested project/data is available there.
+2. H3 (`DESKTOP-H3R6CQN`) is the Hermes primary execution authority when the requested project/data is available there and its execution-readiness contract authorizes it.
 3. windows-main (`DESKTOP-10SKF0M`) is the Hermes standby and local-data execution route for Windows-local worktrees.
 4. Desktop Commander remains the fallback/rollback transport.
-5. OneDrive is diagnostic/handoff mirroring only; it is never the execution queue or lease authority.
+5. OneDrive is diagnostic/handoff mirroring only; it is never the normal execution queue or lease authority.
 6. GitHub remains durable source/coordination; runtime task state remains local Direct Fabric state.
 
 ## Files to read in order
@@ -31,6 +31,16 @@ This is the canonical cross-chat/cross-account pointer for machine-backed AFZ pr
 - Commander fallback is automatic only when Hermes failed before execution began. If Hermes may have modified a worktree, the router stops for state review before any second executor is allowed to touch it.
 - Hermes runs with checkpoints and without `--yolo`.
 - Existing dirty worktrees are preserved by default; no reset/clean/force-push behavior is authorized by this router.
+
+## Persistence / self-heal R2
+
+- `AFZ Project Task Router Watcher` is SYSTEM-owned and is armed at startup and logon.
+- `AFZ Project Task Router Self Heal` is a separate one-shot watchdog scheduled every minute.
+- The watchdog may start only the bounded request watcher when that watcher is stopped.
+- The watchdog is forbidden from launching/relaunching the Hermes user task because an interrupted Hermes run may already have mutated the worktree.
+- The watchdog never invokes or re-pairs Desktop Commander.
+- Therefore persistence recovery cannot create a second executor against an ambiguous partially modified worktree.
+- R2 source is not considered live on windows-main until exact-source synchronization and the existing read-only smoke request prove the installed runtime.
 
 ## Result contract
 
