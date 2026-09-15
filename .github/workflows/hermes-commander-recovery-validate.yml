@@ -38,12 +38,14 @@ jobs:
       - name: Parse control API with PowerShell
         shell: pwsh
         run: |
+          $tokens = $null
+          $errs = $null
           $null = [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'),
-            [ref]$null,
+            [ref]$tokens,
             [ref]$errs
           )
-          if ($errs.Count -gt 0) {
+          if ($errs -and $errs.Count -gt 0) {
             $errs | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
