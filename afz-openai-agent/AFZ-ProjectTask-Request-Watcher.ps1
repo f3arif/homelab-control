@@ -134,8 +134,11 @@ function Maybe-LaunchCommanderPairing($Request,[string]$Sha){
   if(-not(Test-Path -LiteralPath $commanderPairing -PathType Leaf)){return [ordered]@{ok=$false;status='pairing-launcher-missing'}}
   $jobId=([string](Get-Prop $Request 'request_id' 'project-task'));if($jobId.Length -gt 80){$jobId=$jobId.Substring(0,80)}
   try{
-    $raw=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $commanderPairing -ExpectedSha $Sha -JobId $jobId 2>&1|Out-String).Trim();$code=$LASTEXITCODE
-    return [ordered]@{ok=($code -eq 0);status=$(if($code -eq 0){'pairing-launch-started'}else{'pairing-launch-failed'});exit=$code;output=$raw}
+    $invokeArgs=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$commanderPairing,'-ExpectedSha',$Sha,'-JobId',$jobId)
+    $forceReauth=[bool](Get-Prop $Request 'commander_force_reauth' $false)
+    if($forceReauth){$invokeArgs+='-ForceReauth'}
+    $raw=(& powershell.exe @invokeArgs 2>&1|Out-String).Trim();$code=$LASTEXITCODE
+    return [ordered]@{ok=($code -eq 0);status=$(if($code -eq 0){'pairing-launch-started'}else{'pairing-launch-failed'});exit=$code;forceReauth=$forceReauth;output=$raw}
   }catch{return [ordered]@{ok=$false;status='pairing-launch-exception';error=$_.Exception.Message}}
 }
 
