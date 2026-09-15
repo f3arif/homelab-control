@@ -1,0 +1,96 @@
+name: Hermes Commander Recovery Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py'
+      - 'afz-openai-agent/hermes-mcp/test_afz_commander_recovery_mcp.py'
+      - 'afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh'
+      - '.github/workflows/hermes-commander-recovery-validate.yml'
+  pull_request:
+    paths:
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py'
+      - 'afz-openai-agent/hermes-mcp/test_afz_commander_recovery_mcp.py'
+      - 'afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh'
+      - '.github/workflows/hermes-commander-recovery-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python and shell syntax
+        run: |
+          python3 -m py_compile afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py
+          bash -n afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh
+
+      - name: Recovery MCP unit tests
+        run: python3 -m unittest afz-openai-agent/hermes-mcp/test_afz_commander_recovery_mcp.py -v
+
+      - name: Parse control API with PowerShell
+        shell: pwsh
+        run: |
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'),
+            [ref]$null,
+            [ref]$errs
+          )
+          if ($errs.Count -gt 0) {
+            $errs | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Validate bounded recovery contract
+        shell: python
+        run: |
+          from pathlib import Path
+          bridge = Path('afz-openai-agent/hermes-mcp/afz_commander_recovery_mcp.py').read_text()
+          installer = Path('afz-openai-agent/hermes-mcp/install_hpenvy_commander_recovery_mcp.sh').read_text()
+          core = Path('afz-openai-agent/AFZ-Agent-Control-Core.ps1').read_text()
+
+          for token in [
+              'BASE_URL = "http://100.70.25.8:8797"',
+              '"/api/commander-alternate-account-pair"',
+              '"action": "launch-active-request"',
+              'afz_commander_pair_active_request',
+              '"deviceCodeReturned": False',
+              '"arbitraryShell": False',
+          ]:
+              if token not in bridge:
+                  raise SystemExit(f'Missing recovery bridge invariant: {token}')
+
+          for token in ['subprocess', 'os.system', 'Popen(', 'shell=True', 'ssh ', 'scp ']:
+              if token.lower() in bridge.lower():
+                  raise SystemExit(f'Forbidden recovery bridge capability: {token}')
+
+          for token in [
+              'EXPECTED_USER="coolyo"',
+              'EXPECTED_TS_IP="100.71.26.69"',
+              'afz-commander-recovery',
+              "['afz_commander_pair_active_request']",
+              "'pairingInvoked':False",
+              "'arbitraryShell':False",
+          ]:
+              if token not in installer:
+                  raise SystemExit(f'Missing recovery installer invariant: {token}')
+
+          for token in [
+              "if($ip -notin @('100.71.26.69','100.106.186.118')",
+              "/api/commander-alternate-account-pair",
+              "launch-active-request",
+              "Invoke-CommanderAlternateAccountPair",
+              "deviceCodeReturned=$false",
+          ]:
+              if token not in core:
+                  raise SystemExit(f'Missing control API invariant: {token}')
+
+          if 'Start-Process' in bridge or 'powershell' in bridge.lower():
+              raise SystemExit('Recovery MCP must not execute local processes')
