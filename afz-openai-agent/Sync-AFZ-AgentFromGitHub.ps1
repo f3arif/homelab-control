@@ -380,6 +380,18 @@ try{Unregister-ScheduledTask -TaskName $refresh -Confirm:$false -ErrorAction Sil
     $deferredPushWatcherRefresh=[ordered]@{ok=$false;status='schedule-failed';mutation='DEFERRED_WATCHER_RESTART_ATTEMPTED';error=$_.Exception.Message}
   }
 
+# WINDOWSMAIN_QUEUE_CONSUMER_RECOVERY_SYNC_HOOK_V1
+# Typed one-shot from the cross-account recovery workflow. It starts only
+# pre-existing queue/watchdog tasks; it never creates a scheduler or mutates
+# Desktop Commander credentials.
+$queueRecoveryRunner=Join-Path $InstallRoot 'afz-openai-agent\Recover-WindowsMain-QueueConsumers.ps1'
+$queueRecoveryRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\windowsmain-queue-consumer-recovery.json'
+if((Test-Path -LiteralPath $queueRecoveryRunner -PathType Leaf) -and (Test-Path -LiteralPath $queueRecoveryRequest -PathType Leaf)){
+  try{
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $queueRecoveryRunner -InstallRoot $InstallRoot -RequestPath $queueRecoveryRequest *> $null
+  }catch{}
+}
+
 # COMMANDER_ALT_ACCOUNT_PAIR_SYNC_HOOK_V1
 # Typed one-shot. The SYSTEM updater only installs/starts an interactive-user
 # scheduled task; Commander logout/auth executes in the Faiz profile where the
