@@ -1,2 +1,2 @@
-probe=f74d0501
-nonce=20260904T1029EDT
+trigger=2026-09-16T18:20:00Z
+purpose=commander-recovery-gateway-probe
