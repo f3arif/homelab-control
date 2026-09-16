@@ -1,0 +1,53 @@
+name: Windows-main LAN Subnet Recovery Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-lan-subnet-recovery-signal.txt'
+      - '.github/workflows/windowsmain-lan-subnet-recovery-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-lan-subnet-recovery-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+          args: --accept-dns=false
+
+      - name: Enable existing subnet routes and probe Windows-main LAN
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --accept-routes=true
+          echo '=== ROUTE ==='
+          ip route get 192.168.50.94 || true
+          echo '=== PING ==='
+          ping -c 2 -W 2 192.168.50.94 || true
+          echo '=== TCP ==='
+          for p in 22 135 139 445 3389 5985 5986 8787 8790 8795 8796 8797; do
+            if timeout 3 bash -c "</dev/tcp/192.168.50.94/$p" 2>/dev/null; then
+              echo "WM_LAN_TCP_$p=OPEN"
+            else
+              echo "WM_LAN_TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          for url in             http://192.168.50.94:8790/health             http://192.168.50.94:8790/api/status             http://192.168.50.94:8796/health             http://192.168.50.94:8797/health; do
+            echo "GET=$url"
+            curl -sS --connect-timeout 3 --max-time 6 -w '\nHTTP=%{http_code}\n' "$url" || true
+          done
+          echo 'MUTATION=false'
+          exit 0
