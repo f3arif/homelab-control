@@ -1,0 +1,49 @@
+name: Windows-main 8788 Read Only Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/windowsmain-8788-readonly-signal.txt'
+      - '.github/workflows/windowsmain-8788-readonly-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: windowsmain-8788-readonly-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe existing Windows-main HTTPS upstream read only
+        shell: bash
+        run: |
+          set +e
+          ip=100.70.25.8
+          host=desktop-10skf0m.tailc9bb62.ts.net
+          tailscale ping --timeout=5s -c 1 "$ip" || true
+          if timeout 4 bash -c "</dev/tcp/$ip/8788" 2>/dev/null; then
+            echo 'WINDOWSMAIN_TCP8788=OPEN'
+          else
+            echo 'WINDOWSMAIN_TCP8788=CLOSED_OR_FILTERED'
+          fi
+          for base in "https://$host:8788" "https://$ip:8788"; do
+            for subpath in / /health /api/health /api/status /api/live-control; do
+              echo "GET=${base}${subpath}"
+              curl -k -sS --connect-timeout 3 --max-time 8                 -w '\nHTTP_CODE=%{http_code}\n' "${base}${subpath}" || true
+            done
+          done
+          echo 'MUTATION=false'
+          exit 0
