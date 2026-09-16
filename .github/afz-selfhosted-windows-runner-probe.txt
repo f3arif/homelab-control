@@ -1,3 +1,2 @@
-probe=afz-selfhosted-windows-runner
-purpose=commander-pairing-carrier-discovery
-nonce=20260915T1934-0400-r1
+trigger=2026-09-16T14:06:00-04:00
+purpose=commander-recovery-carrier-discovery
