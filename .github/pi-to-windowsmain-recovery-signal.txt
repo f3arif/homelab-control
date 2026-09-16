@@ -1,4 +1,3 @@
 target=windows-main
-action=probe-via-pi
-nonce=20260915-commander-altacct-pi-relay-r1
-resume-key=AFZ-COMMANDER-ALTACCT-PI-RELAY-0915
+action=probe-lan-recovery
+nonce=20260916T1816Z
