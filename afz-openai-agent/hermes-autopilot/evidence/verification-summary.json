@@ -9,6 +9,37 @@
     "evidence\\live-canary-20260915T021010Z\\precheck\\precheck-result.json": "77e1c79fcb3688ead33e1b0827d3a424aa235c59af4106dadc2b6083ef40f0f2"
   },
   "config_changes": 0,
+  "correction_attempt2": {
+    "artifact_sha256": {
+      "evidence\\correction-attempt2\\OPERATOR-CORRECTION-RESULT.json": "2cd4933cbd7406d057ddf2026f94e8473e06e7f723534c9c3176be10c94683cc",
+      "evidence\\correction-attempt2\\compileall.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\compileall.stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\full-suite.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\full-suite.stdout.txt": "6635de7547743934629a3d9eac93022330b386b6f25d608c6bb088fc85d18cc3",
+      "evidence\\correction-attempt2\\ruff-check.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\ruff-check.stdout.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "evidence\\correction-attempt2\\ruff-format.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\ruff-format.stdout.txt": "0321fffcb91606a42c0a19d8c1121d5c544379d663821fce616c71a7bb62f6b5",
+      "evidence\\correction-attempt2\\ruff-repo-root.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidence\\correction-attempt2\\ruff-repo-root.stdout.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "authenticated_review_gate": "NOT_VERIFIED",
+    "compileall_exit": 0,
+    "generated_utc": "2026-09-16T02:28:04Z",
+    "live_control_hub_calls": 0,
+    "production_completion": false,
+    "ruff_check_exit": 0,
+    "ruff_format_check_exit": 0,
+    "ruff_repo_root_check_exit": 0,
+    "test_adapter_sha256": "da2a5df2cf60f3cf573d6106d58730d312a9be1990cda928269d6533c21e7976",
+    "tests": {
+      "errors": 0,
+      "exit": 0,
+      "failures": 0,
+      "passed": 78,
+      "skipped": 0
+    }
+  },
   "entrypoints": {
     "canary_console_help_exit": 0,
     "canary_module_help_exit": 0,

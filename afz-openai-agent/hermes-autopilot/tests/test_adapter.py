@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+# isort: split
 from afz_autopilot.core import MissionEngine, Policy
 from afz_hermes_autopilot.adapter import (
     BASE_URL,

@@ -54,3 +54,11 @@ Rollback: close this draft PR and delete the feature branch. No runtime rollback
 - Honest separation of transport-canary PASS from authenticated review HOLD.
 - Admission key binding as idempotency only, not operator identity.
 - Preservation of the vendored R3 hashes and 54-case behavior suite.
+
+## Independent lint correction
+
+An independent reviewer reproduced Ruff `I001` on the first draft-PR head, so the earlier Ruff-PASS claim was withdrawn. The second/final authorized correction adds an explicit isort section split between `pytest` and the local package imports in `tests/test_adapter.py`; it changes no runtime behavior and does not suppress `I001`.
+
+On the final correction tree, the README-documented Ruff command exits 0, a repository-root verifier invocation also exits 0, `ruff format --check` exits 0, `compileall` exits 0, and the full suite reports 78 passed with zero failures/errors/skips. Exact stdout, stderr, exit files, hashes, and the correction receipt are under `evidence/correction-attempt2/`.
+
+No live Control Hub request was repeated. The earlier total remains exactly three read-only `GET /health` calls, including the disclosed one-read precheck variance. The authenticated-review/OS-identity gate remains `NOT_VERIFIED`; production remains held.
