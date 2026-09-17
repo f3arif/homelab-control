@@ -70,6 +70,15 @@ function Get-ListenerOwners([int]$Port){
 }
 
 if($env:COMPUTERNAME -ne $expectedComputer){throw "WRONG_HOST expected=$expectedComputer actual=$($env:COMPUTERNAME)"}
+# MOVIERECOMMENDER_EPISODE_ART_LOCAL_FIX_CHAIN_V1
+$episodeArtLocalFix=Join-Path $InstallRoot 'afz-openai-agent\Invoke-MovieRecommender-EpisodeArtLocalFix.ps1'
+$episodeArtLocalFixRequest=Join-Path $InstallRoot 'afz-openai-agent\requests\movierecommender-episode-art-local-fix.json'
+if((Test-Path -LiteralPath $episodeArtLocalFix -PathType Leaf) -and (Test-Path -LiteralPath $episodeArtLocalFixRequest -PathType Leaf)){
+  try{
+    $argLine="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$episodeArtLocalFix`" -InstallRoot `"$InstallRoot`" -RequestPath `"$episodeArtLocalFixRequest`""
+    Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -WindowStyle Hidden | Out-Null
+  }catch{}
+}
 if(-not(Test-Path -LiteralPath $requestPath -PathType Leaf)){exit 0}
 $req=Read-Json $requestPath
 if(-not $req){throw 'INVALID_REQUEST_JSON'}

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "project": "movierecommender",
+  "action": "episode-art-local-fix",
+  "job_id": "movierecommender-episode-art-local-06164-20260917-r1",
+  "status": "active",
+  "target": "windows-main",
+  "host": "DESKTOP-10SKF0M",
+  "source_sha256": "533a8e87b7e23212253a6ca07f5e39d046b68244c052742f74c9fe6a293d6e43",
+  "target_version": "0.6.164",
+  "rollback_on_failure": true
+}
