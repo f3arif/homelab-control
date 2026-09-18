@@ -13,12 +13,24 @@
     "allowed owner host",
     "unique request nonce",
     "no unexpired lease held by another owner",
-    "fresh resource-safety admission",
-    "Windows-main/H3 split-brain fence"
+    "fresh resource-safety admission equal to literal boolean true",
+    "Windows-main/H3 split-brain fence equal to literal boolean true"
   ],
   "releaseRequires": [
     "matching lease id",
-    "matching owner host"
+    "matching owner host",
+    "archive the released request nonce into terminal history atomically"
+  ],
+  "replayProtection": [
+    "retain terminal request nonces authoritatively after release and expiry",
+    "active identical request is idempotent and returns the same lease",
+    "terminal or expired identical request nonce cannot mint a new lease",
+    "replacement acquire archives the expired current nonce before creating a new lease"
+  ],
+  "persistedStateRequires": [
+    "current lease record plus terminal nonce ledger persisted atomically",
+    "terminal nonce ledger entries must match the nonce contract",
+    "current request nonce must not already be terminal"
   ],
   "persistedRecordRequires": [
     "canonical UUID lease id",
@@ -26,16 +38,17 @@
     "allowlisted owner host",
     "exact lowercase SHA40 binding",
     "valid request nonce",
-    "timezone-aware acquired/expires timestamps",
-    "bounded 30-300 second persisted TTL"
+    "timezone-aware acquired/expires timestamps normalized to UTC for comparison",
+    "bounded 30-300 second persisted TTL",
+    "acquired_at must be less than or equal to deployment-check time before the lease can be active"
   ],
   "deployValidationRequires": [
     "valid persisted lease record",
     "active unexpired lease",
     "matching owner host",
     "matching exact RadioHilal main SHA",
-    "fresh resource-safety admission",
-    "fresh Windows-main/H3 split-brain fence"
+    "fresh resource-safety admission equal to literal boolean true",
+    "fresh Windows-main/H3 split-brain fence equal to literal boolean true"
   ],
   "failClosedOn": [
     "authority unavailable",

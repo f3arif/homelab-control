@@ -47,9 +47,13 @@ jobs:
           hits=[x for x in forbidden if x in s]
           if hits:
               raise SystemExit(f'forbidden I/O primitives: {hits}')
-          required=['CANDIDATE_NON_AUTHORITATIVE','AFZ Control Hub / PostgreSQL','radiohilal-production-writer']
+          required=['CANDIDATE_NON_AUTHORITATIVE','AFZ Control Hub / PostgreSQL','radiohilal-production-writer','replayProtection','persistedStateRequires','deployValidationRequires']
           spec=Path('afz-openai-agent/control/radiohilal-writer-lease-v1.json').read_text(encoding='utf-8')
           for token in required:
               if token not in spec:
                   raise SystemExit(f'missing contract token: {token}')
+          code_required=['class LeaseState:','terminal_nonces','resource_safe is not True','split_brain_fence_clear is not True','acquired <= instant < expires']
+          for token in code_required:
+              if token not in s:
+                  raise SystemExit(f'missing state-machine guard: {token}')
           print('RADIOHILAL_WRITER_LEASE_CANDIDATE=PASS')
