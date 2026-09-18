@@ -13,6 +13,7 @@
     "allowed owner host",
     "unique request nonce",
     "no unexpired lease held by another owner",
+    "future-dated current lease blocks all acquisition until its acquired_at is reached or authoritative state is reconciled",
     "fresh resource-safety admission equal to literal boolean true",
     "Windows-main/H3 split-brain fence equal to literal boolean true"
   ],
@@ -57,7 +58,8 @@
     "resource unsafe",
     "lease conflict",
     "ambiguous owner state",
-    "clock/expiry parse failure"
+    "clock/expiry parse failure",
+    "current lease acquired_at is in the future relative to the acquisition clock"
   ],
   "forbiddenAuthorities": [
     "GitHub",

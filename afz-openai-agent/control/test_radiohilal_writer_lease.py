@@ -192,6 +192,38 @@ class WriterLeaseTests(unittest.TestCase):
         )
         self.assertFalse(future.active_at(NOW))
 
+    def test_future_dated_current_blocks_same_request_acquire(self):
+        base = acquire_new(req(ttl=30)).lease
+        future = replace(
+            base,
+            acquired_at=NOW + timedelta(seconds=20),
+            expires_at=NOW + timedelta(seconds=50),
+        )
+        state = LeaseState(current=future)
+        result = acquire(state, req(ttl=30), NOW)
+        self.assertFalse(result.acquired)
+        self.assertEqual(result.reason, "current lease acquisition is in the future")
+        self.assertEqual(result.state, state)
+        self.assertEqual(result.state.terminal_nonces, frozenset())
+
+    def test_future_dated_current_blocks_competing_owner_acquire(self):
+        base = acquire_new(req(ttl=30)).lease
+        future = replace(
+            base,
+            acquired_at=NOW + timedelta(seconds=20),
+            expires_at=NOW + timedelta(seconds=50),
+        )
+        state = LeaseState(current=future)
+        result = acquire(
+            state,
+            req(owner="DESKTOP-10SKF0M", nonce="rh-test-future-0002", ttl=30),
+            NOW,
+        )
+        self.assertFalse(result.acquired)
+        self.assertEqual(result.reason, "current lease acquisition is in the future")
+        self.assertEqual(result.state, state)
+        self.assertEqual(result.state.terminal_nonces, frozenset())
+
     def test_timezone_offsets_are_normalized_to_utc(self):
         plus_five = timezone(timedelta(hours=5))
         local_now = NOW.astimezone(plus_five)

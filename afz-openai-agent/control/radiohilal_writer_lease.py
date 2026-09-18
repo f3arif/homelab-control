@@ -163,16 +163,20 @@ def acquire(state: LeaseState, request: LeaseRequest, now: datetime) -> AcquireR
         return AcquireResult(False, state, "request nonce already terminal")
 
     current = state.current
-    if current is not None and current.active_at(instant):
-        if (
-            current.owner_host == request.owner_host
-            and current.expected_main == request.expected_main
-            and current.request_nonce == request.request_nonce
-        ):
-            return AcquireResult(True, state, "same request already owns active lease", True)
-        return AcquireResult(False, state, "active lease held")
-
     if current is not None:
+        acquired = _utc(current.acquired_at, "acquired_at")
+        expires = _utc(current.expires_at, "expires_at")
+        if instant < acquired:
+            return AcquireResult(False, state, "current lease acquisition is in the future")
+        if instant < expires:
+            if (
+                current.owner_host == request.owner_host
+                and current.expected_main == request.expected_main
+                and current.request_nonce == request.request_nonce
+            ):
+                return AcquireResult(True, state, "same request already owns active lease", True)
+            return AcquireResult(False, state, "active lease held")
+
         state = state.archive_current()
         if request.request_nonce in state.terminal_nonces:
             return AcquireResult(False, state, "expired request replay rejected")
