@@ -100,7 +100,19 @@ def release(current: LeaseRecord | None, *, lease_id: str, owner_host: str, now:
         raise LeaseError("lease owner mismatch")
     return None
 
-def validate_for_deploy(current: LeaseRecord | None, *, owner_host: str, expected_main: str, now: datetime) -> bool:
+def validate_for_deploy(
+    current: LeaseRecord | None,
+    *,
+    owner_host: str,
+    expected_main: str,
+    now: datetime,
+    resource_safe: bool,
+    split_brain_fence_clear: bool,
+) -> bool:
+    if now.tzinfo is None:
+        return False
+    if not resource_safe or not split_brain_fence_clear:
+        return False
     if current is None or not current.active_at(now):
         return False
     return (current.resource == RESOURCE

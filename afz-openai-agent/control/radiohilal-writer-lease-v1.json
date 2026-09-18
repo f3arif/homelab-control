@@ -20,6 +20,13 @@
     "matching lease id",
     "matching owner host"
   ],
+  "deployValidationRequires": [
+    "active unexpired lease",
+    "matching owner host",
+    "matching exact RadioHilal main SHA",
+    "fresh resource-safety admission",
+    "fresh Windows-main/H3 split-brain fence"
+  ],
   "failClosedOn": [
     "authority unavailable",
     "credential unavailable",

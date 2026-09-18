@@ -74,10 +74,12 @@ class WriterLeaseTests(unittest.TestCase):
 
     def test_deploy_validation_requires_active_exact_binding(self):
         current = acquire(None, req(ttl=30), NOW).lease
-        self.assertTrue(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW))
-        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-10SKF0M", expected_main=SHA, now=NOW))
-        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main="0" * 40, now=NOW))
-        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW + timedelta(seconds=31)))
+        self.assertTrue(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=True, split_brain_fence_clear=True))
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-10SKF0M", expected_main=SHA, now=NOW, resource_safe=True, split_brain_fence_clear=True))
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main="0" * 40, now=NOW, resource_safe=True, split_brain_fence_clear=True))
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW + timedelta(seconds=31), resource_safe=True, split_brain_fence_clear=True))
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=False, split_brain_fence_clear=True))
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=True, split_brain_fence_clear=False))
 
     def test_no_renewal_endpoint(self):
         with self.assertRaisesRegex(LeaseError, "renewal endpoint intentionally unavailable"):
