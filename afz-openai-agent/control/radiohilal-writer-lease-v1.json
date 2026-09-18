@@ -20,7 +20,17 @@
     "matching lease id",
     "matching owner host"
   ],
+  "persistedRecordRequires": [
+    "canonical UUID lease id",
+    "exact resource name",
+    "allowlisted owner host",
+    "exact lowercase SHA40 binding",
+    "valid request nonce",
+    "timezone-aware acquired/expires timestamps",
+    "bounded 30-300 second persisted TTL"
+  ],
   "deployValidationRequires": [
+    "valid persisted lease record",
     "active unexpired lease",
     "matching owner host",
     "matching exact RadioHilal main SHA",

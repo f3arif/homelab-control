@@ -1,6 +1,7 @@
 import pathlib
 import sys
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -80,6 +81,26 @@ class WriterLeaseTests(unittest.TestCase):
         self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW + timedelta(seconds=31), resource_safe=True, split_brain_fence_clear=True))
         self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=False, split_brain_fence_clear=True))
         self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=True, split_brain_fence_clear=False))
+
+    def test_corrupted_persisted_record_fails_closed(self):
+        current = acquire(None, req(), NOW).lease
+        corruptions = (
+            replace(current, resource="wrong-resource"),
+            replace(current, owner_host="UNTRUSTED-HOST"),
+            replace(current, expected_main="0" * 39),
+            replace(current, lease_id="not-a-uuid"),
+            replace(current, expires_at=current.acquired_at + timedelta(seconds=301)),
+            replace(current, acquired_at=current.acquired_at.replace(tzinfo=None)),
+        )
+        for corrupted in corruptions:
+            with self.subTest(corrupted=corrupted):
+                self.assertFalse(validate_for_deploy(corrupted, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW, resource_safe=True, split_brain_fence_clear=True))
+                with self.assertRaises(LeaseError):
+                    acquire(corrupted, req(nonce="rh-test-0042"), NOW)
+
+    def test_naive_deploy_time_fails_closed(self):
+        current = acquire(None, req(), NOW).lease
+        self.assertFalse(validate_for_deploy(current, owner_host="DESKTOP-H3R6CQN", expected_main=SHA, now=NOW.replace(tzinfo=None), resource_safe=True, split_brain_fence_clear=True))
 
     def test_no_renewal_endpoint(self):
         with self.assertRaisesRegex(LeaseError, "renewal endpoint intentionally unavailable"):

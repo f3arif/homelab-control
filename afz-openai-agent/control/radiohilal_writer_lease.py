@@ -54,7 +54,31 @@ class LeaseRecord:
     acquired_at: datetime
     expires_at: datetime
 
+    def validate(self) -> None:
+        if self.resource != RESOURCE:
+            raise LeaseError("lease resource mismatch")
+        if self.owner_host not in ALLOWED_OWNERS:
+            raise LeaseError("persisted owner host not allowlisted")
+        if not _SHA40.fullmatch(self.expected_main):
+            raise LeaseError("persisted expected_main invalid")
+        if not _NONCE.fullmatch(self.request_nonce):
+            raise LeaseError("persisted request nonce invalid")
+        try:
+            parsed = uuid.UUID(self.lease_id)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise LeaseError("lease id invalid") from exc
+        if str(parsed) != self.lease_id:
+            raise LeaseError("lease id must be canonical UUID")
+        if self.acquired_at.tzinfo is None or self.expires_at.tzinfo is None:
+            raise LeaseError("persisted lease timestamps must be timezone-aware")
+        ttl = (self.expires_at - self.acquired_at).total_seconds()
+        if ttl < TTL_MIN or ttl > TTL_MAX:
+            raise LeaseError("persisted lease ttl outside bounded range")
+
     def active_at(self, now: datetime) -> bool:
+        self.validate()
+        if now.tzinfo is None:
+            raise LeaseError("now must be timezone-aware")
         return now < self.expires_at
 
 @dataclass(frozen=True)
@@ -71,6 +95,8 @@ def acquire(current: LeaseRecord | None, request: LeaseRequest, now: datetime) -
     request.validate()
     if now.tzinfo is None:
         raise LeaseError("now must be timezone-aware")
+    if current:
+        current.validate()
     if current and current.active_at(now):
         if (current.owner_host == request.owner_host
                 and current.expected_main == request.expected_main
@@ -111,9 +137,16 @@ def validate_for_deploy(
 ) -> bool:
     if now.tzinfo is None:
         return False
+    if owner_host not in ALLOWED_OWNERS or not _SHA40.fullmatch(expected_main):
+        return False
     if not resource_safe or not split_brain_fence_clear:
         return False
-    if current is None or not current.active_at(now):
+    if current is None:
+        return False
+    try:
+        if not current.active_at(now):
+            return False
+    except LeaseError:
         return False
     return (current.resource == RESOURCE
             and current.owner_host == owner_host
