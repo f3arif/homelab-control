@@ -1,0 +1,78 @@
+{
+  "schema": "afz-radiohilal-writer-lease-v1",
+  "status": "CANDIDATE_NON_AUTHORITATIVE",
+  "resource": "radiohilal-production-writer",
+  "authority": "AFZ Control Hub / PostgreSQL",
+  "allowedOwners": ["DESKTOP-H3R6CQN", "DESKTOP-10SKF0M"],
+  "defaultTtlSeconds": 120,
+  "minimumTtlSeconds": 30,
+  "maximumTtlSeconds": 300,
+  "renewalEndpoint": false,
+  "acquireRequires": [
+    "exact 40-character RadioHilal main SHA",
+    "allowed owner host",
+    "unique request nonce",
+    "no unexpired lease held by another owner",
+    "future-dated current lease blocks all acquisition until its acquired_at is reached or authoritative state is reconciled",
+    "fresh resource-safety admission equal to literal boolean true",
+    "Windows-main/H3 split-brain fence equal to literal boolean true"
+  ],
+  "releaseRequires": [
+    "matching lease id",
+    "matching owner host",
+    "archive the released request nonce into terminal history atomically"
+  ],
+  "replayProtection": [
+    "retain terminal request nonces authoritatively after release and expiry",
+    "active identical request is idempotent and returns the same lease",
+    "terminal or expired identical request nonce cannot mint a new lease",
+    "replacement acquire archives the expired current nonce before creating a new lease"
+  ],
+  "persistedStateRequires": [
+    "current lease record plus terminal nonce ledger persisted atomically",
+    "terminal nonce ledger entries must match the nonce contract",
+    "current request nonce must not already be terminal"
+  ],
+  "persistedRecordRequires": [
+    "canonical UUID lease id",
+    "exact resource name",
+    "allowlisted owner host",
+    "exact lowercase SHA40 binding",
+    "valid request nonce",
+    "timezone-aware acquired/expires timestamps normalized to UTC for comparison",
+    "bounded 30-300 second persisted TTL",
+    "acquired_at must be less than or equal to deployment-check time before the lease can be active"
+  ],
+  "deployValidationRequires": [
+    "valid persisted lease record",
+    "active unexpired lease",
+    "matching owner host",
+    "matching exact RadioHilal main SHA",
+    "fresh resource-safety admission equal to literal boolean true",
+    "fresh Windows-main/H3 split-brain fence equal to literal boolean true"
+  ],
+  "failClosedOn": [
+    "authority unavailable",
+    "credential unavailable",
+    "source SHA mismatch",
+    "resource unsafe",
+    "lease conflict",
+    "ambiguous owner state",
+    "clock/expiry parse failure",
+    "current lease acquired_at is in the future relative to the acquisition clock"
+  ],
+  "forbiddenAuthorities": [
+    "GitHub",
+    "OneDrive",
+    "SharePoint",
+    "local receipt file",
+    "H3 Direct health-only gateway"
+  ],
+  "sideEffects": {
+    "deploy": false,
+    "serviceStart": false,
+    "publication": false,
+    "candidateMutation": false
+  },
+  "integrationRequirement": "Persist and arbitrate atomically inside the authoritative Control Hub/PostgreSQL transaction boundary before production use."
+}
