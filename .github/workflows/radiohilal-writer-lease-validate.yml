@@ -1,0 +1,55 @@
+name: Validate RadioHilal writer lease candidate
+
+on:
+  push:
+    branches: [feature/radiohilal-writer-lease-r1-20260918]
+    paths:
+      - 'afz-openai-agent/control/radiohilal-writer-lease-v1.json'
+      - 'afz-openai-agent/control/radiohilal_writer_lease.py'
+      - 'afz-openai-agent/control/test_radiohilal_writer_lease.py'
+      - '.github/workflows/radiohilal-writer-lease-validate.yml'
+  pull_request:
+    paths:
+      - 'afz-openai-agent/control/radiohilal-writer-lease-v1.json'
+      - 'afz-openai-agent/control/radiohilal_writer_lease.py'
+      - 'afz-openai-agent/control/test_radiohilal_writer_lease.py'
+      - '.github/workflows/radiohilal-writer-lease-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate contract and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool afz-openai-agent/control/radiohilal-writer-lease-v1.json >/dev/null
+          python -m py_compile \
+            afz-openai-agent/control/radiohilal_writer_lease.py \
+            afz-openai-agent/control/test_radiohilal_writer_lease.py
+          python afz-openai-agent/control/test_radiohilal_writer_lease.py -v
+
+      - name: Enforce non-authoritative no-I/O boundary
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('afz-openai-agent/control/radiohilal_writer_lease.py')
+          s=p.read_text(encoding='utf-8')
+          forbidden=['requests','urllib','subprocess','socket','open(','sqlite','psycopg','asyncpg','sqlalchemy','os.system']
+          hits=[x for x in forbidden if x in s]
+          if hits:
+              raise SystemExit(f'forbidden I/O primitives: {hits}')
+          required=['CANDIDATE_NON_AUTHORITATIVE','AFZ Control Hub / PostgreSQL','radiohilal-production-writer']
+          spec=Path('afz-openai-agent/control/radiohilal-writer-lease-v1.json').read_text(encoding='utf-8')
+          for token in required:
+              if token not in spec:
+                  raise SystemExit(f'missing contract token: {token}')
+          print('RADIOHILAL_WRITER_LEASE_CANDIDATE=PASS')

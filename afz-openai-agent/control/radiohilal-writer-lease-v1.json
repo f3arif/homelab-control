@@ -1,0 +1,46 @@
+{
+  "schema": "afz-radiohilal-writer-lease-v1",
+  "status": "CANDIDATE_NON_AUTHORITATIVE",
+  "resource": "radiohilal-production-writer",
+  "authority": "AFZ Control Hub / PostgreSQL",
+  "allowedOwners": ["DESKTOP-H3R6CQN", "DESKTOP-10SKF0M"],
+  "defaultTtlSeconds": 120,
+  "minimumTtlSeconds": 30,
+  "maximumTtlSeconds": 300,
+  "renewalEndpoint": false,
+  "acquireRequires": [
+    "exact 40-character RadioHilal main SHA",
+    "allowed owner host",
+    "unique request nonce",
+    "no unexpired lease held by another owner",
+    "fresh resource-safety admission",
+    "Windows-main/H3 split-brain fence"
+  ],
+  "releaseRequires": [
+    "matching lease id",
+    "matching owner host"
+  ],
+  "failClosedOn": [
+    "authority unavailable",
+    "credential unavailable",
+    "source SHA mismatch",
+    "resource unsafe",
+    "lease conflict",
+    "ambiguous owner state",
+    "clock/expiry parse failure"
+  ],
+  "forbiddenAuthorities": [
+    "GitHub",
+    "OneDrive",
+    "SharePoint",
+    "local receipt file",
+    "H3 Direct health-only gateway"
+  ],
+  "sideEffects": {
+    "deploy": false,
+    "serviceStart": false,
+    "publication": false,
+    "candidateMutation": false
+  },
+  "integrationRequirement": "Persist and arbitrate atomically inside the authoritative Control Hub/PostgreSQL transaction boundary before production use."
+}
