@@ -1,0 +1,15 @@
+usage: canary_cli.py [-h] --state-db STATE_DB --admission-db ADMISSION_DB
+                     --evidence-dir EVIDENCE_DIR --authorization-key
+                     AUTHORIZATION_KEY [--source-task-id SOURCE_TASK_ID]
+                     [--source-task-status {triage,blocked}]
+
+Execute the single authorized H3-to-Windows-main read-only health canary.
+
+options:
+  -h, --help            show this help message and exit
+  --state-db STATE_DB
+  --admission-db ADMISSION_DB
+  --evidence-dir EVIDENCE_DIR
+  --authorization-key AUTHORIZATION_KEY
+  --source-task-id SOURCE_TASK_ID
+  --source-task-status {triage,blocked}
