@@ -371,10 +371,6 @@ def _static_value(node: ast.AST | None, constants: dict[str, object]) -> object:
     if isinstance(node, ast.IfExp):
         body = _static_value(node.body, constants)
         alternate = _static_value(node.orelse, constants)
-        if _static_is_nonempty(body):
-            return body
-        if _static_is_nonempty(alternate):
-            return alternate
         if body is not None and alternate is not None and body == alternate:
             return body
         return None
@@ -384,6 +380,8 @@ def _static_value(node: ast.AST | None, constants: dict[str, object]) -> object:
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
                 parts.append(part.value)
             elif isinstance(part, ast.FormattedValue):
+                if part.conversion != -1 or part.format_spec is not None:
+                    return None
                 value = _static_value(part.value, constants)
                 if isinstance(value, (str, int, float, bool)):
                     parts.append(str(value))
