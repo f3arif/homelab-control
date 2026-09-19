@@ -393,6 +393,47 @@ def _static_value(node: ast.AST | None, constants: dict[str, object]) -> object:
     return None
 
 
+def _static_string_options(
+    node: ast.AST | None,
+    constants: dict[str, object],
+    *,
+    limit: int = 16,
+) -> set[str] | None:
+    if node is None:
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, ast.Name):
+        value = constants.get(node.id)
+        return {value} if isinstance(value, str) else None
+    if isinstance(node, ast.IfExp):
+        left = _static_string_options(node.body, constants, limit=limit)
+        right = _static_string_options(node.orelse, constants, limit=limit)
+        if left is None or right is None:
+            return None
+        merged = left | right
+        return merged if len(merged) <= limit else None
+    if isinstance(node, ast.BoolOp):
+        merged: set[str] = set()
+        for item in node.values:
+            options = _static_string_options(item, constants, limit=limit)
+            if options is None:
+                return None
+            merged |= options
+            if len(merged) > limit:
+                return None
+        return merged
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _static_string_options(node.left, constants, limit=limit)
+        right = _static_string_options(node.right, constants, limit=limit)
+        if left is None or right is None:
+            return None
+        merged = {a + b for a in left for b in right}
+        return merged if len(merged) <= limit else None
+    value = _static_value(node, constants)
+    return {value} if isinstance(value, str) else None
+
+
 def _static_is_nonempty(value: object) -> bool:
     if value is None:
         return False
@@ -401,19 +442,14 @@ def _static_is_nonempty(value: object) -> bool:
     return True
 
 
-def _subscript_key(node: ast.Subscript, constants: dict[str, object]) -> str | None:
-    value = _static_value(node.slice, constants)
-    return value if isinstance(value, str) else None
-
-
 def _target_keys(node: ast.AST, constants: dict[str, object]) -> list[str]:
     if isinstance(node, ast.Name):
         return [node.id]
     if isinstance(node, ast.Attribute):
         return [node.attr]
     if isinstance(node, ast.Subscript):
-        key = _subscript_key(node, constants)
-        return [key] if key is not None else []
+        options = _static_string_options(node.slice, constants)
+        return sorted(options) if options is not None else []
     if isinstance(node, (ast.Tuple, ast.List)):
         out: list[str] = []
         for item in node.elts:
@@ -540,8 +576,8 @@ def _parse_env_lookup(
     else:
         default_node = keyword_map.get("default")
 
-    env_key = _static_value(key_node, constants)
-    return True, env_key, default_node, True
+    env_keys = _static_string_options(key_node, constants)
+    return True, env_keys, default_node, True
 
 
 def _is_safe_dynamic_secret_source(
@@ -551,15 +587,16 @@ def _is_safe_dynamic_secret_source(
     if node is None:
         return False
     if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
-        key = _static_value(node.slice, constants)
-        return is_sensitive_key(key)
-    is_env_call, env_key, default_node, shape_ok = _parse_env_lookup(
+        keys = _static_string_options(node.slice, constants)
+        return bool(keys) and all(is_sensitive_key(key) for key in keys)
+    is_env_call, env_keys, default_node, shape_ok = _parse_env_lookup(
         node, constants
     )
     if is_env_call:
         return (
             shape_ok
-            and is_sensitive_key(env_key)
+            and bool(env_keys)
+            and all(is_sensitive_key(key) for key in env_keys)
             and _is_empty_value(default_node, constants)
         )
     if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
@@ -677,16 +714,20 @@ class PythonSecretVisitor(ast.NodeVisitor):
         for key in _target_keys(node.target, self.constants):
             self._record_sensitive_value(key, node.iter, node.lineno)
         saved = dict(self.constants)
-        self.constants = dict(saved)
+        bound_names = _bound_names([node.target, *node.body, *node.orelse])
+        conservative = dict(saved)
+        for name in bound_names:
+            conservative.pop(name, None)
+        self.constants = dict(conservative)
         self._invalidate_target(node.target)
         for statement in node.body:
             self.visit(statement)
-        self.constants = dict(saved)
+        self.constants = dict(conservative)
         for statement in node.orelse:
             self.visit(statement)
-        self._restore_and_invalidate(
-            saved, [node.target, *node.body, *node.orelse]
-        )
+        self.constants = dict(saved)
+        for name in bound_names:
+            self.constants.pop(name, None)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
         self.visit_For(node)
@@ -694,13 +735,19 @@ class PythonSecretVisitor(ast.NodeVisitor):
     def visit_While(self, node: ast.While) -> None:
         self.visit(node.test)
         saved = dict(self.constants)
-        self.constants = dict(saved)
+        bound_names = _bound_names([*node.body, *node.orelse])
+        conservative = dict(saved)
+        for name in bound_names:
+            conservative.pop(name, None)
+        self.constants = dict(conservative)
         for statement in node.body:
             self.visit(statement)
-        self.constants = dict(saved)
+        self.constants = dict(conservative)
         for statement in node.orelse:
             self.visit(statement)
-        self._restore_and_invalidate(saved, [*node.body, *node.orelse])
+        self.constants = dict(saved)
+        for name in bound_names:
+            self.constants.pop(name, None)
 
     def visit_With(self, node: ast.With) -> None:
         for item in node.items:
@@ -725,25 +772,31 @@ class PythonSecretVisitor(ast.NodeVisitor):
 
     def visit_Try(self, node: ast.Try) -> None:
         saved = dict(self.constants)
-        for block in (node.body, node.orelse, node.finalbody):
-            self.constants = dict(saved)
-            for statement in block:
-                self.visit(statement)
-        for handler in node.handlers:
-            self.constants = dict(saved)
-            if isinstance(handler.name, str):
-                self.constants.pop(handler.name, None)
-            if handler.type is not None:
-                self.visit(handler.type)
-            for statement in handler.body:
-                self.visit(statement)
         bound: list[ast.AST] = [
             *node.body,
             *node.orelse,
             *node.finalbody,
             *node.handlers,
         ]
-        self._restore_and_invalidate(saved, bound)
+        bound_names = _bound_names(bound)
+        conservative = dict(saved)
+        for name in bound_names:
+            conservative.pop(name, None)
+        for block in (node.body, node.orelse, node.finalbody):
+            self.constants = dict(conservative)
+            for statement in block:
+                self.visit(statement)
+        for handler in node.handlers:
+            self.constants = dict(conservative)
+            if isinstance(handler.name, str):
+                self.constants.pop(handler.name, None)
+            if handler.type is not None:
+                self.visit(handler.type)
+            for statement in handler.body:
+                self.visit(statement)
+        self.constants = dict(saved)
+        for name in bound_names:
+            self.constants.pop(name, None)
 
     def visit_Delete(self, node: ast.Delete) -> None:
         for target in node.targets:
@@ -751,13 +804,78 @@ class PythonSecretVisitor(ast.NodeVisitor):
 
     def visit_Dict(self, node: ast.Dict) -> None:
         for key_node, value_node in zip(node.keys, node.values):
-            key = _static_value(key_node, self.constants)
+            keys = _static_string_options(key_node, self.constants)
+            if keys is None:
+                key = _static_value(key_node, self.constants)
+                keys = {key} if isinstance(key, str) else set()
+            for key in keys:
+                self._record_sensitive_value(
+                    key,
+                    value_node,
+                    getattr(value_node, "lineno", node.lineno),
+                )
+        self.generic_visit(node)
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        *value_nodes: ast.AST,
+    ) -> None:
+        saved = self.constants
+        # Comprehensions execute their own runtime binding scope. Do not trust
+        # outer constant values for any bound generator name.
+        self.constants = {}
+        for generator in generators:
+            self.visit(generator.iter)
+            for key in _target_keys(generator.target, self.constants):
+                self._record_sensitive_value(
+                    key,
+                    generator.iter,
+                    getattr(generator.iter, "lineno", generator.target.lineno),
+                )
+            self._invalidate_target(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for value_node in value_nodes:
+            self.visit(value_node)
+        self.constants = saved
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        saved = self.constants
+        self.constants = {}
+        for generator in node.generators:
+            self.visit(generator.iter)
+            for key in _target_keys(generator.target, self.constants):
+                self._record_sensitive_value(
+                    key,
+                    generator.iter,
+                    getattr(generator.iter, "lineno", generator.target.lineno),
+                )
+            self._invalidate_target(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        keys = _static_string_options(node.key, self.constants)
+        if keys is None:
+            key = _static_value(node.key, self.constants)
+            keys = {key} if isinstance(key, str) else set()
+        for key in keys:
             self._record_sensitive_value(
                 key,
-                value_node,
-                getattr(value_node, "lineno", node.lineno),
+                node.value,
+                getattr(node.value, "lineno", node.lineno),
             )
-        self.generic_visit(node)
+        self.visit(node.key)
+        self.visit(node.value)
+        self.constants = saved
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, node.elt)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, node.elt)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, node.elt)
 
     def _check_function_defaults(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         positional = [*node.args.posonlyargs, *node.args.args]
@@ -780,17 +898,10 @@ class PythonSecretVisitor(ast.NodeVisitor):
         if node.returns is not None:
             self.visit(node.returns)
         saved = self.constants
-        self.constants = dict(saved)
-        for arg in [
-            *node.args.posonlyargs,
-            *node.args.args,
-            *node.args.kwonlyargs,
-        ]:
-            self.constants.pop(arg.arg, None)
-        if node.args.vararg is not None:
-            self.constants.pop(node.args.vararg.arg, None)
-        if node.args.kwarg is not None:
-            self.constants.pop(node.args.kwarg.arg, None)
+        # Function bodies execute later. Definition-time outer constants are
+        # not proof of runtime values, so scan the body with no inherited
+        # constant assumptions.
+        self.constants = {}
         for statement in node.body:
             self.visit(statement)
         self.constants = saved
@@ -841,7 +952,13 @@ class PythonSecretVisitor(ast.NodeVisitor):
             if default is not None:
                 self._record_sensitive_value(arg.arg, default, default.lineno)
                 self.visit(default)
+        saved = self.constants
+        # Lambda parameters and outer names are runtime values. Do not inherit
+        # definition-time constants when deciding whether a sensitive value is
+        # proven empty.
+        self.constants = {}
         self.visit(node.body)
+        self.constants = saved
 
     def visit_Call(self, node: ast.Call) -> None:
         for kw in node.keywords:
@@ -854,14 +971,15 @@ class PythonSecretVisitor(ast.NodeVisitor):
         elif isinstance(node.func, ast.Attribute):
             func_name = node.func.attr
 
-        is_env_call, env_name, default_node, shape_ok = _parse_env_lookup(
+        is_env_call, env_keys, default_node, shape_ok = _parse_env_lookup(
             node, self.constants
         )
         if is_env_call:
             if not shape_ok:
                 self.findings.append((node.lineno, "sensitive-env-call-shape"))
-            elif is_sensitive_key(env_name) and not _is_empty_value(
-                default_node, self.constants
+            elif not _is_empty_value(default_node, self.constants) and (
+                env_keys is None
+                or any(is_sensitive_key(key) for key in env_keys)
             ):
                 self.findings.append(
                     (
@@ -878,18 +996,26 @@ class PythonSecretVisitor(ast.NodeVisitor):
                             isinstance(item, (ast.List, ast.Tuple))
                             and len(item.elts) == 2
                         ):
-                            key = _static_value(
+                            keys = _static_string_options(
                                 item.elts[0], self.constants
                             )
-                            self._record_sensitive_value(
-                                key,
-                                item.elts[1],
-                                getattr(item.elts[1], "lineno", node.lineno),
-                            )
+                            if keys is None:
+                                key = _static_value(item.elts[0], self.constants)
+                                keys = {key} if isinstance(key, str) else set()
+                            for key in keys:
+                                self._record_sensitive_value(
+                                    key,
+                                    item.elts[1],
+                                    getattr(item.elts[1], "lineno", node.lineno),
+                                )
 
         if func_name == "setattr" and len(node.args) >= 3:
-            key = _static_value(node.args[1], self.constants)
-            self._record_sensitive_value(key, node.args[2], node.lineno)
+            keys = _static_string_options(node.args[1], self.constants)
+            if keys is None:
+                key = _static_value(node.args[1], self.constants)
+                keys = {key} if isinstance(key, str) else set()
+            for key in keys:
+                self._record_sensitive_value(key, node.args[2], node.lineno)
 
         self.generic_visit(node)
 

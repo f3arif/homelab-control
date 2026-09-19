@@ -102,11 +102,15 @@ def validate_workflow_text(text: str) -> None:
         raise ValueError(f"root permissions invalid: {root_permissions}")
 
     jobs_index = lines.index("jobs:")
-    job_names = [
-        re.fullmatch(r"  ([A-Za-z0-9_-]+):", line).group(1)
-        for line in lines[jobs_index + 1 :]
-        if re.fullmatch(r"  ([A-Za-z0-9_-]+):", line)
-    ]
+    job_names = []
+    job_key_re = re.compile(
+        r"""^  (?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+)):$"""
+    )
+    for line in lines[jobs_index + 1 :]:
+        match = job_key_re.fullmatch(line)
+        if not match:
+            continue
+        job_names.append(next(group for group in match.groups() if group is not None))
     if job_names != ["validate-readonly-boundary", "capture"]:
         raise ValueError(f"job set invalid: {job_names}")
 
@@ -591,6 +595,78 @@ class SecretScanTests(unittest.TestCase):
     def test_unsupported_sensitive_runtime_expression_rejected(self):
         self.scan_reject("password = load_runtime_value()\n")
 
+    def test_try_finally_stale_empty_alias_rejected(self):
+        self.scan_reject(
+            "value = ''\n"
+            "try:\n"
+            "    value = 'ordinary-value'\n"
+            "finally:\n"
+            "    password = value\n"
+        )
+
+    def test_for_loop_repeated_binding_stale_empty_alias_rejected(self):
+        self.scan_reject(
+            "value = ''\n"
+            "for _ in [0, 1]:\n"
+            "    password = value\n"
+            "    value = 'ordinary-value'\n"
+        )
+
+    def test_while_loop_runtime_mutation_stale_empty_alias_rejected(self):
+        self.scan_reject(
+            "value = ''\n"
+            "while condition:\n"
+            "    password = value\n"
+            "    value = 'ordinary-value'\n"
+        )
+
+    def test_lambda_parameter_does_not_inherit_outer_empty_constant(self):
+        self.scan_reject(
+            "value = ''\n"
+            "f = lambda value: configure(password=value)\n"
+            "f('ordinary-value')\n"
+        )
+
+    def test_function_body_does_not_trust_definition_time_outer_constant(self):
+        self.scan_reject(
+            "value = ''\n"
+            "def f():\n"
+            "    password = value\n"
+            "value = 'ordinary-value'\n"
+            "f()\n"
+        )
+
+    def test_dict_comprehension_sensitive_literal_rejected(self):
+        self.scan_reject(
+            "cfg = {'password': 'ordinary-value' for _ in [0]}\n"
+        )
+
+    def test_list_comprehension_sensitive_target_rejected(self):
+        self.scan_reject(
+            "[send(password) for password in ['ordinary-value']]\n"
+        )
+
+    def test_conditional_sensitive_dict_key_rejected(self):
+        self.scan_reject(
+            "cfg = {('mode' if False else 'password'): 'ordinary-value'}\n"
+        )
+
+    def test_conditional_sensitive_env_name_with_default_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "value = os.getenv('MODE' if False else 'PASSWORD', 'ordinary-value')\n"
+        )
+
+    def test_fstring_format_padding_sensitive_assignment_rejected(self):
+        self.scan_reject(
+            "password = f\"{'':x>8}\"\n"
+        )
+
+    def test_fstring_conversion_sensitive_assignment_rejected(self):
+        self.scan_reject(
+            "password = f\"{''!r}\"\n"
+        )
+
     def test_sensitive_os_environ_subscript_passes(self):
         self.scan_ok(
             "import os\n"
@@ -911,6 +987,19 @@ class WorkflowContractTests(unittest.TestCase):
             "permissions:\n  contents: read\n  id-token: write",
             1,
         )
+        self.assert_rejected(weakened)
+
+    def test_quoted_extra_job_before_validation_rejected(self):
+        weakened = self.text.replace(
+            "jobs:\n",
+            'jobs:\n  "extra-job":\n    runs-on: ubuntu-latest\n'
+            "    permissions:\n"
+            "      id-token: write\n"
+            "    steps:\n"
+            "      - run: echo unexpected\n",
+            1,
+        )
+        self.assertNotEqual(weakened, self.text)
         self.assert_rejected(weakened)
 
     def test_add_extra_job_rejected(self):
