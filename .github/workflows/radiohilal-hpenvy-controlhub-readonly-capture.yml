@@ -29,6 +29,8 @@ jobs:
           grep -q "if: github.event_name == 'workflow_dispatch'" "$wf"
           grep -q 'tailscale ssh coolyo@100.71.26.69' "$wf"
           grep -q 'app/main.py' "$wf"
+          grep -q 'test ! -L app/main.py' "$wf"
+          grep -q 'SECRET_SCAN=PASS' "$wf"
           grep -q 'actions/upload-artifact@v4' "$wf"
           ! grep -Eq 'docker compose (up|down|restart)|systemctl|service[[:space:]]|curl .*(-X|--request)[[:space:]]+(POST|PUT|PATCH|DELETE)|rm[[:space:]]+-|chmod|chown' "$wf"
           echo 'CAPTURE_STATIC_READONLY_VALIDATION=PASS'
@@ -63,13 +65,14 @@ jobs:
           test -d "$root"
           cd "$root"
           test -f app/main.py
+          test ! -L app/main.py
           echo 'AFZ_CONTROLHUB_CAPTURE_V1'
           printf 'HOST=%s\nUSER=%s\nPWD=%s\n' "$(hostname)" "$(id -un)" "$PWD"
           printf 'CAPTURED_UTC=%s\n' "$(date -u +%FT%TZ)"
           printf 'MAIN_SHA256='
           sha256sum app/main.py | awk '{print $1}'
           for f in docker-compose.yml compose.yml requirements.txt pyproject.toml Dockerfile; do
-            if [ -f "$f" ]; then
+            if [ -f "$f" ] && [ ! -L "$f" ]; then
               printf 'FILE_SHA256 %s ' "$f"
               sha256sum "$f" | awk '{print $1}'
             fi
@@ -85,7 +88,7 @@ jobs:
           printf '%s\n' "$remote_manifest" | tailscale ssh coolyo@100.71.26.69 'bash -s' > capture/controlhub-manifest.txt
 
           # Stream only an explicit non-secret allowlist. Never include .env or runtime data.
-          tailscale ssh coolyo@100.71.26.69 "bash -lc 'cd \"\$HOME/afz-control-hub\" && files=(app/main.py); for f in docker-compose.yml compose.yml requirements.txt pyproject.toml Dockerfile; do [ -f \"\$f\" ] && files+=(\"\$f\"); done; tar -czf - \"\${files[@]}\"'" > capture/controlhub-source.tgz
+          tailscale ssh coolyo@100.71.26.69 "bash -lc 'cd \"\$HOME/afz-control-hub\" && files=(app/main.py); test ! -L app/main.py; for f in docker-compose.yml compose.yml requirements.txt pyproject.toml Dockerfile; do [ -f \"\$f\" ] && [ ! -L \"\$f\" ] && files+=(\"\$f\"); done; tar -czf - \"\${files[@]}\"'" > capture/controlhub-source.tgz
 
           tar -tzf capture/controlhub-source.tgz > capture/archive-files.txt
           if grep -Eiq '(^|/)(\.env|secrets?|credentials?)(/|$)' capture/archive-files.txt; then
@@ -93,6 +96,36 @@ jobs:
             exit 20
           fi
           grep -Fxq 'app/main.py' capture/archive-files.txt
+
+          scan_root=$(mktemp -d)
+          tar -xzf capture/controlhub-source.tgz -C "$scan_root"
+          python3 - "$scan_root" <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(sys.argv[1])
+          literal_assignment = re.compile(r"(?i)\b(api[_-]?key|token|password|passwd|secret|client[_-]?secret)\b\s*[:=]\s*['\"]([^'\"]{8,})['\"]")
+          token_prefix = re.compile(r"(?i)(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|tskey-[A-Za-z0-9_-]{16,})")
+          private_key = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
+          findings = []
+          for p in root.rglob('*'):
+              if not p.is_file():
+                  continue
+              try:
+                  text = p.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for n, line in enumerate(text.splitlines(), 1):
+                  if private_key.search(line): findings.append((p, n, 'private-key'))
+                  if token_prefix.search(line): findings.append((p, n, 'token-prefix'))
+                  m = literal_assignment.search(line)
+                  if m and not any(x in m.group(2).lower() for x in ('example','placeholder','changeme','dummy','test-only')):
+                      findings.append((p, n, 'literal-secret-assignment'))
+          if findings:
+              for p, n, kind in findings:
+                  print(f'SECRET_SCAN_FINDING file={p.relative_to(root)} line={n} kind={kind}')
+              raise SystemExit(22)
+          print('SECRET_SCAN=PASS')
+          PY
+
           sha256sum capture/controlhub-source.tgz capture/controlhub-manifest.txt > capture/local-sha256.txt
 
       - name: Validate capture boundary
