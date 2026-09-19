@@ -1,8 +1,8 @@
-import base64
 import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -20,266 +20,480 @@ sys.path.insert(0, str(ROOT))
 import radiohilal_hpenvy_controlhub_capture as cap
 
 
-def envelope(files: dict[str, bytes] | None = None) -> dict:
-    files = files or {
-        "app/main.py": b"import os\nAFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN')\n"
-    }
-    rows = []
-    for name, data in files.items():
-        rows.append(
-            {
-                "name": name,
-                "size": len(data),
-                "sha256": hashlib.sha256(data).hexdigest(),
-                "data_b64": base64.b64encode(data).decode("ascii"),
-            }
-        )
-    return {
-        "schema": "afz-controlhub-source-capture-v1",
-        "host": "hpenvy",
-        "user": "coolyo",
-        "files": rows,
-    }
+EXPECTED_TRIGGER_PATHS = {
+    ".github/workflows/radiohilal-hpenvy-controlhub-readonly-capture.yml",
+    ".github/afz-radiohilal-controlhub-capture-signal.txt",
+    "afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py",
+    "afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py",
+}
+EXPECTED_UPLOAD_PATHS = {
+    "${{ runner.temp }}/radiohilal-controlhub-capture/" + name
+    for name in cap.OUTPUT_NAMES
+}
 
 
 def validate_workflow_text(text: str) -> None:
-    if "\njobs:\n" not in text:
-        raise ValueError("jobs structure missing")
-    header, jobs = text.split("\njobs:\n", 1)
+    lines = text.splitlines()
+    top_keys = []
+    for line in lines:
+        if line and not line.startswith(" ") and ":" in line:
+            top_keys.append(line.split(":", 1)[0])
+    if top_keys != ["name", "on", "permissions", "concurrency", "jobs"]:
+        raise ValueError(f"top-level workflow structure invalid: {top_keys}")
 
-    if "workflow_dispatch:" not in header or "pull_request:" not in header:
-        raise ValueError("required trigger missing")
-    permissions = header.split("\npermissions:\n", 1)
-    if len(permissions) != 2:
-        raise ValueError("root permissions missing")
-    root_perm = permissions[1].split("\n\n", 1)[0].strip()
-    if root_perm != "contents: read":
-        raise ValueError("root permissions widened")
+    on_index = lines.index("on:")
+    permission_index = lines.index("permissions:")
+    on_lines = lines[on_index + 1 : permission_index]
+    triggers = [
+        line.strip()[:-1]
+        for line in on_lines
+        if line.startswith("  ")
+        and not line.startswith("    ")
+        and line.strip().endswith(":")
+    ]
+    if triggers != ["workflow_dispatch", "pull_request"]:
+        raise ValueError(f"workflow triggers invalid: {triggers}")
+    if any(line.strip().startswith("push:") for line in on_lines):
+        raise ValueError("push trigger forbidden")
 
-    marker = "\n  capture:\n"
-    if marker not in jobs:
-        raise ValueError("capture job missing")
-    validate_job, capture = jobs.split(marker, 1)
+    paths: set[str] = set()
+    in_paths = False
+    for line in on_lines:
+        stripped = line.strip()
+        if stripped == "paths:":
+            in_paths = True
+            continue
+        if in_paths and stripped.startswith("- "):
+            paths.add(stripped[2:].strip("'\""))
+        elif in_paths and stripped and not line.startswith("      "):
+            in_paths = False
+    if paths != EXPECTED_TRIGGER_PATHS:
+        raise ValueError(f"pull_request paths invalid: {paths}")
 
-    validate_required = (
-        "validate-readonly-boundary:",
-        "runs-on: ubuntu-latest",
-        "python3 -m py_compile "
+    concurrency_index = lines.index("concurrency:")
+    root_permissions = [
+        line.strip()
+        for line in lines[permission_index + 1 : concurrency_index]
+        if line.strip()
+    ]
+    if root_permissions != ["contents: read"]:
+        raise ValueError(f"root permissions invalid: {root_permissions}")
+
+    jobs_index = lines.index("jobs:")
+    job_names = [
+        re.fullmatch(r"  ([A-Za-z0-9_-]+):", line).group(1)
+        for line in lines[jobs_index + 1 :]
+        if re.fullmatch(r"  ([A-Za-z0-9_-]+):", line)
+    ]
+    if job_names != ["validate-readonly-boundary", "capture"]:
+        raise ValueError(f"job set invalid: {job_names}")
+
+
+    validate_start = lines.index("  validate-readonly-boundary:")
+    capture_start = lines.index("  capture:")
+    validate_lines = lines[validate_start:capture_start]
+    capture_lines = lines[capture_start:]
+
+    validate_text = "\n".join(validate_lines)
+    if "permissions:" in validate_text:
+        raise ValueError("validation job permission override forbidden")
+    required_validation = (
+        "    runs-on: ubuntu-latest",
+        "    timeout-minutes: 2",
+        "          persist-credentials: false",
+        "          python3 -m py_compile "
         "afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py "
         "afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py",
-        "python3 afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py -v",
+        "          python3 afz-openai-agent/control/"
+        "test_radiohilal_hpenvy_controlhub_capture.py -v",
     )
-    for token in validate_required:
-        if token not in validate_job:
-            raise ValueError(f"validation contract missing: {token}")
+    for token in required_validation:
+        if validate_text.count(token) != 1:
+            raise ValueError(f"validation contract invalid: {token}")
+    validate_uses = [
+        line.strip()[len("- uses: ") :]
+        for line in validate_lines
+        if line.strip().startswith("- uses: ")
+    ]
+    if validate_uses != ["actions/checkout@v4"]:
+        raise ValueError(f"validation action set invalid: {validate_uses}")
 
-    capture_header, capture_steps = capture.split("\n    steps:\n", 1)
-    for token in (
-        "needs: validate-readonly-boundary",
-        "if: github.event_name == 'workflow_dispatch'",
-        "contents: read",
-        "id-token: write",
-    ):
-        if token not in capture_header:
-            raise ValueError(f"capture gate missing: {token}")
-    if capture_header.count("id-token: write") != 1:
-        raise ValueError("capture id-token permission malformed")
+    capture_text = "\n".join(capture_lines)
+    capture_header_end = capture_lines.index("    steps:")
+    capture_header = capture_lines[:capture_header_end]
+    if "    needs: validate-readonly-boundary" not in capture_header:
+        raise ValueError("capture dependency missing")
+    condition_lines = [
+        line.strip()
+        for line in capture_header
+        if line.strip().startswith("if:")
+    ]
+    if condition_lines != ["if: github.event_name == 'workflow_dispatch'"]:
+        raise ValueError(f"capture condition invalid: {condition_lines}")
 
-    if "tailscale/github-action@v4" not in capture_steps:
-        raise ValueError("tailnet action missing")
-    if "tailscale ssh" in capture_steps:
-        raise ValueError("workflow must not embed remote shell")
-    if "radiohilal_hpenvy_controlhub_capture.py" not in capture_steps:
-        raise ValueError("capture client invocation missing")
-    exact_output = '--output "${RUNNER_TEMP}/radiohilal-controlhub-capture"'
-    if exact_output not in capture_steps:
+    perm_start = capture_header.index("    permissions:")
+    run_index = capture_header.index("    runs-on: ubuntu-latest")
+    capture_permissions = [
+        line.strip()
+        for line in capture_header[perm_start + 1 : run_index]
+        if line.strip()
+    ]
+    if capture_permissions != ["contents: read", "id-token: write"]:
+        raise ValueError(f"capture permissions invalid: {capture_permissions}")
+    if capture_header.count("    timeout-minutes: 5") != 1:
+        raise ValueError("capture timeout invalid")
+
+    capture_uses: list[str] = []
+    for line in capture_lines:
+        stripped = line.strip()
+        if stripped.startswith("- uses: "):
+            capture_uses.append(stripped[len("- uses: ") :])
+        elif stripped.startswith("uses: "):
+            capture_uses.append(stripped[len("uses: ") :])
+    if capture_uses != [
+        "actions/checkout@v4",
+        "tailscale/github-action@v4",
+        "actions/upload-artifact@v4",
+    ]:
+        raise ValueError(f"capture action set invalid: {capture_uses}")
+
+    capture_names = [
+        line.strip()[len("- name: ") :]
+        for line in capture_lines
+        if line.strip().startswith("- name: ")
+    ]
+    if capture_names != [
+        "Join AFZ tailnet",
+        "Capture exact validated Control Hub source",
+        "Upload validated read-only capture",
+    ]:
+        raise ValueError(f"capture step names invalid: {capture_names}")
+
+    if capture_text.count("persist-credentials: false") != 1:
+        raise ValueError("capture checkout credential setting invalid")
+    if capture_text.count("tailscale/github-action@v4") != 1:
+        raise ValueError("Tailscale action count invalid")
+    if capture_text.count("radiohilal_hpenvy_controlhub_capture.py") != 1:
+        raise ValueError("capture client invocation count invalid")
+    if "tailscale ssh" in capture_text:
+        raise ValueError("workflow must not embed remote SSH command")
+    if "curl " in capture_text:
+        raise ValueError("workflow must not add HTTP transport")
+
+    output_line = '--output "${RUNNER_TEMP}/radiohilal-controlhub-capture"'
+    if capture_text.count(output_line) != 1:
         raise ValueError("capture output path invalid")
 
-    if "actions/upload-artifact@v4" not in capture_steps:
-        raise ValueError("artifact upload step missing")
-    upload_required = tuple(
-        "${{ runner.temp }}/radiohilal-controlhub-capture/" + name
-        for name in cap.OUTPUT_NAMES
-    )
-    for item in upload_required:
-        if item not in capture_steps:
-            raise ValueError(f"explicit artifact output missing: {item}")
-
-    directory_only = "${{ runner.temp }}/radiohilal-controlhub-capture/"
-    lines = [line.strip() for line in capture_steps.splitlines()]
-    if directory_only in lines:
-        raise ValueError("directory-wide artifact upload forbidden")
-
-    forbidden = (
-        "systemctl ",
-        "service ",
-        "docker compose",
-        "sudo ",
-        "curl -X POST",
-        "curl --request POST",
-        "curl -X PUT",
-        "curl -X PATCH",
-        "curl -X DELETE",
-    )
-    if any(token in capture_steps for token in forbidden):
-        raise ValueError("workflow contains forbidden mutation surface")
+    upload_index = capture_lines.index("      - name: Upload validated read-only capture")
+    upload_lines = capture_lines[upload_index:]
+    path_index = upload_lines.index("          path: |")
+    upload_paths: list[str] = []
+    for line in upload_lines[path_index + 1 :]:
+        if line.startswith("            "):
+            upload_paths.append(line.strip())
+            continue
+        break
+    if set(upload_paths) != EXPECTED_UPLOAD_PATHS or len(upload_paths) != len(EXPECTED_UPLOAD_PATHS):
+        raise ValueError(f"upload path set invalid: {upload_paths}")
+    if capture_text.count("actions/upload-artifact@v4") != 1:
+        raise ValueError("upload action count invalid")
+    if "          retention-days: 7" not in upload_lines:
+        raise ValueError("artifact retention invalid")
+    if "          if-no-files-found: error" not in upload_lines:
+        raise ValueError("artifact missing-file policy invalid")
 
 
 class SecretScanTests(unittest.TestCase):
-    def test_safe_python_env_lookup_passes(self):
-        cap.scan_sources(
-            {
-                "app/main.py": (
-                    b"import os\n"
-                    b"AFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN')\n"
-                    b"PASSWORD = os.environ.get('PASSWORD')\n"
-                )
-            }
-        )
+    def scan_ok(self, source: str) -> None:
+        cap.scan_python_source(source.encode("utf-8"))
 
-    def assert_python_rejected(self, source: str):
+    def scan_reject(self, source: str) -> None:
         with self.assertRaises(cap.CaptureError):
-            cap.scan_sources({"app/main.py": source.encode("utf-8")})
+            cap.scan_python_source(source.encode("utf-8"))
 
-    def test_python_env_default_secret_rejected(self):
-        self.assert_python_rejected(
+    def test_safe_environment_lookup_passes(self):
+        self.scan_ok(
             "import os\n"
-            "AFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN', 'hardcoded-value')\n"
+            "TOKEN = os.getenv('AFZ_HUB_TOKEN')\n"
+            "PASSWORD = os.environ.get('PASSWORD', '')\n"
         )
 
-    def test_python_annotated_secret_rejected(self):
-        self.assert_python_rejected("AFZ_HUB_TOKEN: str = 'hardcoded'\n")
+    def test_direct_literal_secret_rejected(self):
+        self.scan_reject("AFZ_HUB_TOKEN = 'ordinary-value'\n")
 
     def test_short_password_rejected(self):
-        self.assert_python_rejected("password = 'x'\n")
+        self.scan_reject("password = 'x'\n")
 
-    def test_dict_secret_literal_rejected(self):
-        self.assert_python_rejected("cfg = {'client_secret': 'abc'}\n")
+    def test_bytes_secret_rejected(self):
+        self.scan_reject("AFZ_HUB_TOKEN = b'ordinary-value'\n")
 
-    def test_sensitive_function_default_rejected(self):
-        self.assert_python_rejected("def f(password='x'):\n    return password\n")
+    def test_annotated_secret_rejected(self):
+        self.scan_reject("AFZ_HUB_TOKEN: str = 'ordinary-value'\n")
+
+    def test_concatenated_secret_rejected(self):
+        self.scan_reject("AFZ_HUB_TOKEN = 'ordinary-' + 'value'\n")
+
+    def test_adjacent_literal_secret_rejected(self):
+        self.scan_reject("AFZ_HUB_TOKEN = 'ordinary-' 'value'\n")
+
+    def test_alias_secret_rejected(self):
+        self.scan_reject(
+            "ALIAS = 'ordinary-value'\n"
+            "AFZ_HUB_TOKEN = ALIAS\n"
+        )
+
+    def test_tuple_destructuring_secret_rejected(self):
+        self.scan_reject(
+            "AFZ_HUB_TOKEN, mode = ('ordinary-value', 'production')\n"
+        )
+
+    def test_list_destructuring_secret_rejected(self):
+        self.scan_reject(
+            "[AFZ_HUB_TOKEN, mode] = ['ordinary-value', 'production']\n"
+        )
+
+    def test_subscript_secret_rejected(self):
+        self.scan_reject(
+            "cfg = {}\n"
+            "cfg['AFZ_HUB_TOKEN'] = 'ordinary-value'\n"
+        )
+
+    def test_dict_secret_rejected(self):
+        self.scan_reject("cfg = {'client_secret': 'ordinary-value'}\n")
+
+    def test_env_default_secret_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "AFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN', 'ordinary-value')\n"
+        )
+
+    def test_env_default_concatenation_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "AFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN', 'ordinary-' + 'value')\n"
+        )
+
+    def test_function_default_secret_rejected(self):
+        self.scan_reject("def f(password='ordinary-value'):\n    return password\n")
+
+    def test_keyword_secret_rejected(self):
+        self.scan_reject("configure(password='ordinary-value')\n")
+
+    def test_setattr_secret_rejected(self):
+        self.scan_reject("setattr(config, 'AFZ_HUB_TOKEN', 'ordinary-value')\n")
 
     def test_generic_token_prefix_rejected(self):
-        self.assert_python_rejected(
-            "value = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ12'\n"
-        )
+        self.scan_reject("x = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ12'\n")
 
     def test_private_key_rejected(self):
-        self.assert_python_rejected(
-            "value = '''-----BEGIN PRIVATE KEY-----\nabc\n'''\n"
-        )
+        self.scan_reject("x = '''-----BEGIN PRIVATE KEY-----\nabc\n'''\n")
 
     def test_credential_url_rejected(self):
-        self.assert_python_rejected(
-            "value = 'postgres://user:password@db.example/db'\n"
+        self.scan_reject("x = 'postgres://user:password@db.example/db'\n")
+
+    def test_jwt_rejected(self):
+        self.scan_reject(
+            "x = 'eyJabcdefghijk.abcdefghijk.abcdefghijk'\n"
         )
 
-    def test_pyproject_sensitive_value_rejected(self):
-        with self.assertRaises(cap.CaptureError):
-            cap.scan_sources(
-                {
-                    "app/main.py": b"x = 1\n",
-                    "pyproject.toml": b"[tool.afz]\napi_key='hardcoded'\n",
-                }
-            )
+    def test_invalid_python_rejected(self):
+        self.scan_reject("def broken(:\n")
 
-    def test_dockerfile_multi_env_secret_rejected(self):
-        with self.assertRaises(cap.CaptureError):
-            cap.scan_sources(
-                {
-                    "app/main.py": b"x = 1\n",
-                    "Dockerfile": (
-                        b"FROM python:3.12\n"
-                        b"ENV MODE=production AFZ_HUB_TOKEN=hardcoded\n"
-                    ),
-                }
-            )
 
-    def test_dockerfile_env_reference_allowed(self):
-        cap.scan_sources(
-            {
-                "app/main.py": b"x = 1\n",
-                "Dockerfile": (
-                    b"FROM python:3.12\n"
-                    b"ENV AFZ_HUB_TOKEN=${AFZ_HUB_TOKEN}\n"
-                ),
-            }
+def listing(size: int, mode: str = "-rw-r--r--") -> str:
+    return (
+        f"{mode}    1 1000 1000 {size} "
+        f"Sep 19 02:00 {cap.REMOTE_PATH}"
+    )
+
+
+class SftpPureTests(unittest.TestCase):
+    def test_batch_is_fixed_read_only_and_double_reads(self):
+        batch = cap.build_sftp_batch()
+        commands = [
+            line.lstrip("@").split(None, 1)[0]
+            for line in batch.splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(commands, ["ls", "get", "ls", "get", "ls", "quit"])
+        for forbidden in ("put", "rm", "rename", "mkdir", "chmod", "chown", "ln"):
+            self.assertNotRegex(batch, rf"(?m)^@?{forbidden}\b")
+        self.assertEqual(batch.count(cap.REMOTE_PATH), 5)
+
+    def test_transport_wrapper_is_fixed_to_sftp_subsystem(self):
+        wrapper = cap.build_transport_wrapper(
+            python_path="/usr/bin/python3",
+            tailscale_path="/usr/bin/tailscale",
         )
+        compile(wrapper, "<transport-wrapper>", "exec")
+        self.assertIn('args[-4:] != ["-s", "--", HOST, "sftp"]', wrapper)
+        self.assertIn('"ssh"', wrapper)
+        self.assertIn('"-s"', wrapper)
+        self.assertIn('"sftp"', wrapper)
+        self.assertNotIn(cap.REMOTE_PATH, wrapper)
+        self.assertNotIn("bash", wrapper)
+        self.assertNotIn("tar", wrapper)
 
+    def test_transport_wrapper_rejects_wrong_subsystem_without_exec(self):
+        wrapper = cap.build_transport_wrapper(
+            python_path=sys.executable,
+            tailscale_path=sys.executable,
+        )
+        with tempfile.TemporaryDirectory() as td:
+            script = pathlib.Path(td) / "transport.py"
+            script.write_text(wrapper, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "-l",
+                    "coolyo",
+                    "-s",
+                    "--",
+                    cap.TARGET_HOST,
+                    "shell",
+                ],
+                capture_output=True,
+                timeout=5,
+            )
+        self.assertEqual(proc.returncode, 72)
 
-class EnvelopeTests(unittest.TestCase):
-    def test_valid_envelope_decodes(self):
-        files = cap.validate_envelope(envelope())
-        self.assertIn("app/main.py", files)
+    def test_metadata_regular_stable_passes(self):
+        text = "\n".join([listing(321), listing(321), listing(321)]) + "\n"
+        self.assertEqual(cap.parse_sftp_metadata(text), [321, 321, 321])
 
-    def test_unknown_file_rejected(self):
+    def test_metadata_symlink_rejected(self):
+        text = "\n".join(
+            [listing(321), listing(321, "lrwxrwxrwx"), listing(321)]
+        )
+        with self.assertRaisesRegex(cap.CaptureError, "not a regular file"):
+            cap.parse_sftp_metadata(text)
+
+    def test_metadata_size_change_rejected(self):
+        text = "\n".join([listing(321), listing(322), listing(321)])
+        with self.assertRaisesRegex(cap.CaptureError, "changed size"):
+            cap.parse_sftp_metadata(text)
+
+    def test_metadata_extra_listing_rejected(self):
+        text = "\n".join(
+            [listing(321), listing(321), listing(321), listing(321)]
+        )
+        with self.assertRaisesRegex(cap.CaptureError, "exactly three"):
+            cap.parse_sftp_metadata(text)
+
+    def test_metadata_wrong_target_rejected(self):
+        text = "\n".join([listing(321), listing(321), listing(321)])
+        text = text.replace(cap.REMOTE_PATH, "/etc/passwd", 1)
+        with self.assertRaisesRegex(cap.CaptureError, "unexpected remote"):
+            cap.parse_sftp_metadata(text)
+
+    def test_metadata_bound_rejected(self):
         with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(envelope({"app/main.py": b"x=1\n", "x.txt": b"x"}))
+            cap.parse_sftp_metadata("x" * (cap.MAX_METADATA_BYTES + 1))
 
-    def test_duplicate_file_rejected(self):
-        obj = envelope()
-        obj["files"].append(dict(obj["files"][0]))
-        with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(obj)
 
-    def test_bad_hash_rejected(self):
-        obj = envelope()
-        obj["files"][0]["sha256"] = "0" * 64
-        with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(obj)
+@unittest.skipUnless(os.name == "posix", "POSIX subprocess/resource test")
+class SftpPosixTests(unittest.TestCase):
+    @mock.patch.object(cap.subprocess, "run")
+    @mock.patch.object(cap.shutil, "which")
+    def test_fetch_uses_sftp_wrapper_size_limit_and_double_read(self, which, run):
+        which.side_effect = lambda name: {
+            "sftp": "/usr/bin/sftp",
+            "tailscale": "/usr/bin/tailscale",
+        }[name]
+        payload = b"print('safe')\n"
 
-    def test_extra_record_field_rejected(self):
-        obj = envelope()
-        obj["files"][0]["extra"] = True
-        with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(obj)
+        def fake_run(args, **kwargs):
+            stage = pathlib.Path(kwargs["cwd"])
+            (stage / "main.first").write_bytes(payload)
+            (stage / "main.second").write_bytes(payload)
+            meta = "\n".join(
+                [listing(len(payload)), listing(len(payload)), listing(len(payload))]
+            ) + "\n"
+            kwargs["stdout"].write(meta.encode("utf-8"))
+            kwargs["stdout"].flush()
+            self.assertNotIn("shell", kwargs)
+            self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
+            self.assertTrue(callable(kwargs["preexec_fn"]))
+            self.assertEqual(args[0], "/usr/bin/sftp")
+            self.assertIn("-S", args)
+            self.assertEqual(args[-1], cap.TARGET)
+            batch = pathlib.Path(args[args.index("-b") + 1]).read_text()
+            self.assertEqual(batch, cap.build_sftp_batch())
+            wrapper = pathlib.Path(args[args.index("-S") + 1]).read_text()
+            self.assertIn('"-s"', wrapper)
+            self.assertIn('"sftp"', wrapper)
+            return SimpleNamespace(returncode=0)
 
-    def test_extra_top_level_field_rejected(self):
-        obj = envelope()
-        obj["extra"] = True
-        with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(obj)
+        run.side_effect = fake_run
+        with tempfile.TemporaryDirectory() as td:
+            result = cap.fetch_source_via_sftp(pathlib.Path(td))
+        self.assertEqual(result, payload)
 
-    def test_required_main_missing_rejected(self):
-        with self.assertRaises(cap.CaptureError):
-            cap.validate_envelope(envelope({"requirements.txt": b"fastapi\n"}))
+    @mock.patch.object(cap.subprocess, "run")
+    @mock.patch.object(cap.shutil, "which")
+    def test_double_read_content_change_rejected(self, which, run):
+        which.side_effect = lambda name: {
+            "sftp": "/usr/bin/sftp",
+            "tailscale": "/usr/bin/tailscale",
+        }[name]
+
+        def fake_run(args, **kwargs):
+            stage = pathlib.Path(kwargs["cwd"])
+            (stage / "main.first").write_bytes(b"AAAA")
+            (stage / "main.second").write_bytes(b"BBBB")
+            kwargs["stdout"].write(
+                ("\n".join([listing(4), listing(4), listing(4)]) + "\n").encode()
+            )
+            kwargs["stdout"].flush()
+            return SimpleNamespace(returncode=0)
+
+        run.side_effect = fake_run
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(cap.CaptureError, "changed during capture"):
+                cap.fetch_source_via_sftp(pathlib.Path(td))
 
 
 class OutputTests(unittest.TestCase):
-    def test_fresh_output_required(self):
+    def test_output_requires_direct_runner_temp_child(self):
         with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            existing = root / "out"
-            existing.mkdir()
-            with self.assertRaises(cap.CaptureError):
-                cap.prepare_output_dir(existing)
-
-    def test_deterministic_zip_and_exact_outputs(self):
-        files = {
-            "app/main.py": b"x = 1\n",
-            "requirements.txt": b"fastapi==1\n",
-        }
-        health = {
-            "service": "afz-control-hub",
-            "mode": "safe-readonly",
-            "version": "0.3.3-safe-typed-canary",
-        }
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            out1 = root / "a"
-            out2 = root / "b"
-            cap.emit_outputs(out1, files, health)
-            cap.emit_outputs(out2, files, health)
-            self.assertEqual(
-                {p.name for p in out1.iterdir()}, set(cap.OUTPUT_NAMES)
-            )
-            with zipfile.ZipFile(out1 / "controlhub-source.zip") as zf:
-                self.assertEqual(
-                    zf.namelist(), ["app/main.py", "requirements.txt"]
+            runner = pathlib.Path(td)
+            nested = runner / "nested"
+            nested.mkdir()
+            with self.assertRaisesRegex(cap.CaptureError, "direct child"):
+                cap.emit_outputs(
+                    nested / "radiohilal-controlhub-capture",
+                    runner,
+                    b"x = 1\n",
                 )
-                for info in zf.infolist():
-                    self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
-                    self.assertFalse(info.is_dir())
+
+    def test_existing_output_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            runner = pathlib.Path(td)
+            out = runner / "radiohilal-controlhub-capture"
+            out.mkdir()
+            with self.assertRaisesRegex(cap.CaptureError, "already exists"):
+                cap.emit_outputs(out, runner, b"x = 1\n")
+
+    def test_deterministic_zip_has_only_main_py(self):
+        source = b"x = 1\n"
+        with tempfile.TemporaryDirectory() as td1, tempfile.TemporaryDirectory() as td2:
+            runner1 = pathlib.Path(td1)
+            runner2 = pathlib.Path(td2)
+            out1 = runner1 / "radiohilal-controlhub-capture"
+            out2 = runner2 / "radiohilal-controlhub-capture"
+            cap.emit_outputs(out1, runner1, source)
+            cap.emit_outputs(out2, runner2, source)
+
+            self.assertEqual({p.name for p in out1.iterdir()}, set(cap.OUTPUT_NAMES))
+            with zipfile.ZipFile(out1 / "controlhub-source.zip") as zf:
+                self.assertEqual(zf.namelist(), [cap.REMOTE_PATH.lstrip("/")])
+                info = zf.infolist()[0]
+                self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
+                self.assertFalse(info.is_dir())
+                self.assertEqual(zf.read(info.filename), source)
+
             self.assertEqual(
                 hashlib.sha256(
                     (out1 / "controlhub-source.zip").read_bytes()
@@ -291,60 +505,24 @@ class OutputTests(unittest.TestCase):
             manifest = json.loads(
                 (out1 / "controlhub-manifest.json").read_text(encoding="utf-8")
             )
+            self.assertEqual(manifest["transport"], "tailscale-ssh-sftp-subsystem")
+            self.assertEqual(manifest["remote_path"], cap.REMOTE_PATH)
             self.assertFalse(manifest["secret_values_emitted"])
             self.assertFalse(manifest["remote_mutation_performed"])
 
-
-class RemoteCommandTests(unittest.TestCase):
-    def test_embedded_remote_reader_compiles_and_uses_nofollow(self):
-        compile(cap.REMOTE_READER, '<remote-reader>', 'exec')
-        self.assertIn('O_NOFOLLOW', cap.REMOTE_READER)
-        self.assertIn('os.fstat', cap.REMOTE_READER)
-        self.assertNotIn('read_bytes()', cap.REMOTE_READER)
-
-    def test_remote_command_is_sanitized_and_has_no_tar(self):
-        command = cap.build_remote_command()
-        for token in (
-            "unset BASH_ENV ENV TAR_OPTIONS",
-            "/usr/bin/env -i",
-            "LANG=C LC_ALL=C",
-            "/usr/bin/python3 -I -S -c",
-        ):
-            self.assertIn(token, command)
-        for token in (" tar ", "systemctl", "docker", "sudo", "curl "):
-            self.assertNotIn(token, command)
-
-    @mock.patch.object(cap.subprocess, "run")
-    def test_fetch_uses_list_args_no_shell_and_sanitized_env(self, run):
-        payload = json.dumps(envelope(), separators=(",", ":")).encode()
-        run.return_value = SimpleNamespace(returncode=0, stdout=payload)
-        old = os.environ.get("BASH_ENV")
-        try:
-            os.environ["BASH_ENV"] = "danger"
-            obj = cap.fetch_remote_envelope()
-        finally:
-            if old is None:
-                os.environ.pop("BASH_ENV", None)
-            else:
-                os.environ["BASH_ENV"] = old
-        self.assertEqual(obj["host"], "hpenvy")
-        args, kwargs = run.call_args
-        self.assertIsInstance(args[0], list)
-        self.assertEqual(args[0][:3], ["tailscale", "ssh", cap.TARGET])
-        self.assertNotIn("shell", kwargs)
-        self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
-        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
-        self.assertNotIn("BASH_ENV", kwargs["env"])
-        self.assertNotIn("TAR_OPTIONS", kwargs["env"])
-
-    @mock.patch.object(cap.subprocess, "run")
-    def test_remote_stderr_is_never_exposed_on_failure(self, run):
-        run.return_value = SimpleNamespace(
-            returncode=7, stdout=b"possible-secret-output"
-        )
-        with self.assertRaisesRegex(cap.CaptureError, "exit 7") as ctx:
-            cap.fetch_remote_envelope()
-        self.assertNotIn("possible-secret-output", str(ctx.exception))
+    def test_capture_binds_to_runner_temp_and_scans_before_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            runner = pathlib.Path(td)
+            out = runner / "radiohilal-controlhub-capture"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(runner)}, clear=False):
+                with mock.patch.object(
+                    cap,
+                    "fetch_source_via_sftp",
+                    return_value=b"AFZ_HUB_TOKEN = 'hardcoded'\n",
+                ):
+                    with self.assertRaises(cap.CaptureError):
+                        cap.capture(out)
+            self.assertFalse(out.exists())
 
 
 class WorkflowContractTests(unittest.TestCase):
@@ -352,115 +530,117 @@ class WorkflowContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_current_workflow_contract(self):
-        validate_workflow_text(self.text)
-
-    def assert_weakened_rejected(self, text: str):
+    def assert_rejected(self, text: str):
         with self.assertRaises(ValueError):
             validate_workflow_text(text)
 
-    def test_missing_needs_rejected(self):
-        self.assert_weakened_rejected(
-            self.text.replace(
-                "    needs: validate-readonly-boundary\n", "", 1
-            )
-        )
+    def test_current_workflow_contract(self):
+        validate_workflow_text(self.text)
 
-    def test_capture_enabled_on_pr_rejected(self):
-        self.assert_weakened_rejected(
-            self.text.replace(
-                "    if: github.event_name == 'workflow_dispatch'",
-                "    if: true",
-                1,
-            )
+    def test_add_push_trigger_rejected(self):
+        weakened = self.text.replace(
+            "on:\n  workflow_dispatch:",
+            "on:\n  push:\n  workflow_dispatch:",
+            1,
         )
+        self.assert_rejected(weakened)
 
-    def test_root_oidc_permission_rejected(self):
-        self.assert_weakened_rejected(
-            self.text.replace(
-                "permissions:\n  contents: read",
-                "permissions:\n  contents: read\n  id-token: write",
-                1,
-            )
+    def test_add_root_oidc_permission_rejected(self):
+        weakened = self.text.replace(
+            "permissions:\n  contents: read",
+            "permissions:\n  contents: read\n  id-token: write",
+            1,
         )
+        self.assert_rejected(weakened)
+
+    def test_add_extra_job_rejected(self):
+        weakened = self.text + "\n  extra-job:\n    runs-on: ubuntu-latest\n"
+        self.assert_rejected(weakened)
+
+    def test_remove_dependency_rejected(self):
+        weakened = self.text.replace(
+            "    needs: validate-readonly-boundary\n",
+            "",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_additive_capture_condition_rejected(self):
+        weakened = self.text.replace(
+            "if: github.event_name == 'workflow_dispatch'",
+            "if: github.event_name == 'workflow_dispatch' || "
+            "github.event_name == 'pull_request'",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_capture_if_true_rejected(self):
+        weakened = self.text.replace(
+            "if: github.event_name == 'workflow_dispatch'",
+            "if: true",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_validation_permission_override_rejected(self):
+        weakened = self.text.replace(
+            "    timeout-minutes: 2\n    steps:",
+            "    timeout-minutes: 2\n    permissions:\n      id-token: write\n"
+            "    steps:",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_second_capture_invocation_rejected(self):
+        needle = (
+            "          python3 afz-openai-agent/control/"
+            "radiohilal_hpenvy_controlhub_capture.py \\\n"
+            '            --output "${RUNNER_TEMP}/radiohilal-controlhub-capture"'
+        )
+        weakened = self.text.replace(needle, needle + "\n" + needle, 1)
+        self.assertNotEqual(weakened, self.text)
+        self.assert_rejected(weakened)
+
+    def test_embedded_remote_ssh_rejected(self):
+        weakened = self.text.replace(
+            "          set -euo pipefail\n"
+            "          python3 afz-openai-agent/control/",
+            "          set -euo pipefail\n"
+            "          tailscale ssh coolyo@100.71.26.69 'bash -s'\n"
+            "          python3 afz-openai-agent/control/",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_second_upload_action_rejected(self):
+        weakened = self.text + (
+            "\n      - name: Extra upload\n"
+            "        uses: actions/upload-artifact@v4\n"
+            "        with:\n"
+            "          path: extra.txt\n"
+        )
+        self.assert_rejected(weakened)
+
+    def test_extra_upload_path_rejected(self):
+        weakened = self.text.replace(
+            "            ${{ runner.temp }}/radiohilal-controlhub-capture/sha256.txt",
+            "            ${{ runner.temp }}/radiohilal-controlhub-capture/sha256.txt\n"
+            "            ${{ runner.temp }}/radiohilal-controlhub-capture/extra.txt",
+            1,
+        )
+        self.assert_rejected(weakened)
 
     def test_directory_wide_upload_rejected(self):
-        explicit = "\n".join(
-            "            ${{ runner.temp }}/radiohilal-controlhub-capture/" + name
-            for name in cap.OUTPUT_NAMES
+        start = (
+            "            ${{ runner.temp }}/radiohilal-controlhub-capture/"
+            "controlhub-source.zip"
         )
         weakened = self.text.replace(
-            explicit,
+            start,
             "            ${{ runner.temp }}/radiohilal-controlhub-capture/",
             1,
         )
-        self.assertNotEqual(weakened, self.text)
-        self.assert_weakened_rejected(weakened)
-
-    def test_remote_shell_in_workflow_rejected(self):
-        weakened = self.text.replace(
-            "          python3 afz-openai-agent/control/"
-            "radiohilal_hpenvy_controlhub_capture.py \\\n"
-            '            --output "${RUNNER_TEMP}/radiohilal-controlhub-capture"',
-            "          tailscale ssh coolyo@100.71.26.69 'bash -s'",
-            1,
-        )
-        self.assertNotEqual(weakened, self.text)
-        self.assert_weakened_rejected(weakened)
-
-    def test_capture_client_invocation_removal_rejected(self):
-        before, sep, after = self.text.rpartition(
-            "radiohilal_hpenvy_controlhub_capture.py"
-        )
-        self.assertTrue(sep)
-        weakened = before + "other_capture.py" + after
-        self.assert_weakened_rejected(weakened)
-
-
-class HealthTests(unittest.TestCase):
-    @mock.patch.object(cap.urllib.request, "urlopen")
-    def test_health_returns_only_bounded_allowlist(self, urlopen):
-        body = json.dumps(
-            {
-                "ok": True,
-                "service": "afz-control-hub",
-                "mode": "safe-readonly",
-                "version": "0.3.3-safe-typed-canary",
-                "extra": "not returned",
-            }
-        ).encode()
-        response = mock.MagicMock()
-        response.status = 200
-        response.read.return_value = body
-        response.__enter__.return_value = response
-        urlopen.return_value = response
-        result = cap.check_health()
-        self.assertEqual(
-            result,
-            {
-                "service": "afz-control-hub",
-                "mode": "safe-readonly",
-                "version": "0.3.3-safe-typed-canary",
-            },
-        )
-
-    @mock.patch.object(cap.urllib.request, "urlopen")
-    def test_health_multiline_or_unbounded_version_rejected(self, urlopen):
-        body = json.dumps(
-            {
-                "ok": True,
-                "service": "afz-control-hub",
-                "mode": "safe-readonly",
-                "version": "good\nsecret",
-            }
-        ).encode()
-        response = mock.MagicMock()
-        response.status = 200
-        response.read.return_value = body
-        response.__enter__.return_value = response
-        urlopen.return_value = response
-        with self.assertRaises(cap.CaptureError):
-            cap.check_health()
+        self.assert_rejected(weakened)
 
 
 if __name__ == "__main__":
