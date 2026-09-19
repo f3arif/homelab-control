@@ -160,6 +160,21 @@ def validate_workflow_text(text: str) -> None:
         raise ValueError(
             f"validation checkout block invalid: {validate_checkout_block}"
         )
+    validate_test_block = [
+        line for line in validate_lines[validate_test_start:]
+        if line.strip()
+    ]
+    if validate_test_block != [
+        "      - name: Validate capture implementation",
+        "        shell: bash",
+        "        run: |",
+        "          set -euo pipefail",
+        "          python3 -m py_compile afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py",
+        "          python3 afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py -v",
+    ]:
+        raise ValueError(
+            f"validation test block invalid: {validate_test_block}"
+        )
     if any(
         line.strip().startswith("if:")
         for line in validate_lines
@@ -196,7 +211,9 @@ def validate_workflow_text(text: str) -> None:
         for line in capture_header
         if line.strip().startswith("if:")
     ]
-    if condition_lines != ["if: github.event_name == 'workflow_dispatch'"]:
+    if condition_lines != [
+        "if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+    ]:
         raise ValueError(f"capture condition invalid: {condition_lines}")
 
     perm_start = capture_header.index("    permissions:")
@@ -438,6 +455,25 @@ class SecretScanTests(unittest.TestCase):
         self.scan_reject(
             "import os\n"
             "AFZ_HUB_TOKEN = os.getenv('AFZ_HUB_TOKEN', 'ordinary-' + 'value')\n"
+        )
+
+    def test_env_default_wrapped_expression_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "value = os.getenv('PASSWORD', str('ordinary-value'))\n"
+        )
+
+    def test_env_default_keyword_unpacking_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "TOKEN = os.getenv('TOKEN', **{'default': 'ordinary-value'})\n"
+        )
+
+    def test_augassign_invalidates_empty_alias(self):
+        self.scan_reject(
+            "value = ''\n"
+            "value += 'ordinary-value'\n"
+            "password = value\n"
         )
 
     def test_or_fallback_secret_rejected(self):
@@ -831,10 +867,22 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_capture_if_true_rejected(self):
         weakened = self.text.replace(
-            "if: github.event_name == 'workflow_dispatch'",
+            "if: github.event_name == 'workflow_dispatch' && "
+            "github.ref == 'refs/heads/main'",
             "if: true",
             1,
         )
+        self.assertNotEqual(weakened, self.text)
+        self.assert_rejected(weakened)
+
+    def test_capture_main_ref_required(self):
+        weakened = self.text.replace(
+            "if: github.event_name == 'workflow_dispatch' && "
+            "github.ref == 'refs/heads/main'",
+            "if: github.event_name == 'workflow_dispatch'",
+            1,
+        )
+        self.assertNotEqual(weakened, self.text)
         self.assert_rejected(weakened)
 
     def test_validation_permission_override_rejected(self):
@@ -855,6 +903,18 @@ class WorkflowContractTests(unittest.TestCase):
             "        shell: bash",
             1,
         )
+        self.assert_rejected(weakened)
+
+    def test_quoted_continue_on_error_rejected(self):
+        weakened = self.text.replace(
+            "      - name: Validate capture implementation\n"
+            "        shell: bash",
+            "      - name: Validate capture implementation\n"
+            '        "continue-on-error": true\n'
+            "        shell: bash",
+            1,
+        )
+        self.assertNotEqual(weakened, self.text)
         self.assert_rejected(weakened)
 
     def test_capture_checkout_ref_override_rejected(self):

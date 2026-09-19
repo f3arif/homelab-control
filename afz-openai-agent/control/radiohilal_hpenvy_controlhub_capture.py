@@ -482,10 +482,12 @@ def _is_safe_dynamic_secret_source(
             env_key = _static_value(node.args[0], constants) if node.args else None
         if is_sensitive_key(env_key):
             default_node = node.args[1] if len(node.args) > 1 else None
+            if len(node.args) > 2:
+                return False
             for kw in node.keywords:
                 if kw.arg in {"default", "fallback"}:
                     default_node = kw.value
-                elif kw.arg is not None:
+                else:
                     return False
             return _is_empty_value(default_node, constants)
         return False
@@ -565,10 +567,50 @@ class PythonSecretVisitor(ast.NodeVisitor):
         self._visit_assignment_pair(node.target, node.value)
         self.visit(node.value)
 
+    def _invalidate_target(self, target: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            self.constants.pop(target.id, None)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for child in target.elts:
+                self._invalidate_target(child)
+
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         for key in _target_keys(node.target, self.constants):
             self._record_sensitive_value(key, node.value, node.lineno)
         self.visit(node.value)
+        self._invalidate_target(node.target)
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self._invalidate_target(node.target)
+        for statement in node.body:
+            self.visit(statement)
+        for statement in node.orelse:
+            self.visit(statement)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._invalidate_target(node.target)
+        for statement in node.body:
+            self.visit(statement)
+        for statement in node.orelse:
+            self.visit(statement)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._invalidate_target(item.optional_vars)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self.visit_With(node)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        for target in node.targets:
+            self._invalidate_target(target)
 
     def visit_Dict(self, node: ast.Dict) -> None:
         for key_node, value_node in zip(node.keys, node.values):
@@ -652,11 +694,15 @@ class PythonSecretVisitor(ast.NodeVisitor):
             env_name = _static_value(node.args[0], self.constants)
             if is_sensitive_key(env_name):
                 default_node: ast.AST | None = node.args[1] if len(node.args) > 1 else None
+                invalid_call_shape = len(node.args) > 2
                 for kw in node.keywords:
                     if kw.arg in {"default", "fallback"}:
                         default_node = kw.value
-                default_value = _static_value(default_node, self.constants)
-                if _static_is_nonempty(default_value):
+                    else:
+                        invalid_call_shape = True
+                if invalid_call_shape:
+                    self.findings.append((node.lineno, "sensitive-env-call-shape"))
+                elif not _is_empty_value(default_node, self.constants):
                     self.findings.append(
                         (
                             getattr(default_node, "lineno", node.lineno),
