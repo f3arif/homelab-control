@@ -1,0 +1,26 @@
+{
+  "receipt": {
+    "authorization_binding_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "control_hub_source_sha": "0e8987577c5d5860ca55cdff4e1943bc22ff67e9",
+    "cross_host_enabled": false,
+    "expires_unix": 2060,
+    "fresh_read_attestation": "fixed-recipe-contract-revalidated",
+    "fresh_read_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "issued_unix": 1999,
+    "nonce": "public-fixture-nonce-000000000000",
+    "packet_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "production_enforced": false,
+    "recipe": "control-health-readonly-v1",
+    "schema": "afz-authenticated-verifier-receipt-v1",
+    "signature_algorithm": "ECDSA_P256_SHA256",
+    "signer_key_id": "test-fixture-key-v1",
+    "signer_provider": "TEST_ONLY_NOT_OS_BOUNDARY",
+    "signer_thumbprint": "aac2b2920726d63ffc2a9558705be7bcbd72da56dba6d55b6241c631e1d77cf7",
+    "source_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "target_identity": "windows-main@100.70.25.8:8797",
+    "verifier_machine_identity": "DESKTOP-10SKF0M",
+    "verifier_service_identity": "NT SERVICE\\AFZHermesVerifier",
+    "verifier_service_sid": "S-1-5-80-123456789-234567890-345678901-456789012-567890123"
+  },
+  "signature_base64": "MEUCIGsP08iYdXFHRM+c75aISC9MbZK5pC48E+qnu3solzFpAiEApLkLDGkPIhTkqwrJPwslQuzfvtT3dzT9S1qcKcaFwdM="
+}

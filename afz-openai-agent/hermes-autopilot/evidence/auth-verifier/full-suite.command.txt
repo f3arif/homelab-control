@@ -1,0 +1,1 @@
+PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .verify-venv-20260918/Scripts/python.exe -m pytest -q -p no:cacheprovider tests --junitxml evidence/auth-verifier/full-suite.xml
