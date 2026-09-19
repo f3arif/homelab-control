@@ -1,0 +1,101 @@
+name: RadioHilal HP Envy Control Hub read-only capture
+
+on:
+  push:
+    branches: [feature/hpenvy-controlhub-readonly-capture-20260918]
+    paths:
+      - '.github/workflows/radiohilal-hpenvy-controlhub-readonly-capture.yml'
+      - '.github/afz-radiohilal-controlhub-capture-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: radiohilal-hpenvy-controlhub-readonly-capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Capture exact non-secret Control Hub source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p capture
+          remote_manifest=$(cat <<'REMOTE'
+          set -euo pipefail
+          test "$(hostname)" = 'hpenvy'
+          test "$(id -un)" = 'coolyo'
+          root="$HOME/afz-control-hub"
+          test -d "$root"
+          cd "$root"
+          test -f app/main.py
+          echo 'AFZ_CONTROLHUB_CAPTURE_V1'
+          printf 'HOST=%s\nUSER=%s\nPWD=%s\n' "$(hostname)" "$(id -un)" "$PWD"
+          printf 'CAPTURED_UTC=%s\n' "$(date -u +%FT%TZ)"
+          printf 'MAIN_SHA256='
+          sha256sum app/main.py | awk '{print $1}'
+          for f in docker-compose.yml compose.yml requirements.txt pyproject.toml Dockerfile; do
+            if [ -f "$f" ]; then
+              printf 'FILE_SHA256 %s ' "$f"
+              sha256sum "$f" | awk '{print $1}'
+            fi
+          done
+          printf 'HEALTH='
+          curl -fsS --max-time 5 http://127.0.0.1:8789/health
+          echo
+          echo 'COMPOSE_PS_BEGIN'
+          docker compose ps --format json 2>/dev/null || true
+          echo 'COMPOSE_PS_END'
+          REMOTE
+          )
+          printf '%s\n' "$remote_manifest" | tailscale ssh coolyo@100.71.26.69 'bash -s' > capture/controlhub-manifest.txt
+
+          # Stream only an explicit non-secret allowlist. Never include .env or runtime data.
+          tailscale ssh coolyo@100.71.26.69 "bash -lc 'cd \"\$HOME/afz-control-hub\" && files=(app/main.py); for f in docker-compose.yml compose.yml requirements.txt pyproject.toml Dockerfile; do [ -f \"\$f\" ] && files+=(\"\$f\"); done; tar -czf - \"\${files[@]}\"'" > capture/controlhub-source.tgz
+
+          tar -tzf capture/controlhub-source.tgz > capture/archive-files.txt
+          if grep -Eiq '(^|/)(\.env|secrets?|credentials?)(/|$)' capture/archive-files.txt; then
+            echo 'ERROR=secret-bearing path entered capture archive'
+            exit 20
+          fi
+          grep -Fxq 'app/main.py' capture/archive-files.txt
+          sha256sum capture/controlhub-source.tgz capture/controlhub-manifest.txt > capture/local-sha256.txt
+
+      - name: Validate capture boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^AFZ_CONTROLHUB_CAPTURE_V1$' capture/controlhub-manifest.txt
+          grep -q '^HOST=hpenvy$' capture/controlhub-manifest.txt
+          grep -q '^USER=coolyo$' capture/controlhub-manifest.txt
+          grep -q '^MAIN_SHA256=[0-9a-f]\{64\}$' capture/controlhub-manifest.txt
+          grep -q '"service":"afz-control-hub"' capture/controlhub-manifest.txt
+          grep -q '"mode":"safe-readonly"' capture/controlhub-manifest.txt
+          test -s capture/controlhub-source.tgz
+          test -s capture/local-sha256.txt
+          if grep -R -E 'AFZ_HUB_TOKEN=|OPENAI_API_KEY=|API_KEY=|PASSWORD=|PRIVATE KEY' capture --exclude='controlhub-source.tgz'; then
+            echo 'ERROR=possible secret material found in textual capture'
+            exit 21
+          fi
+          echo 'READONLY_CAPTURE_VALIDATION=PASS'
+
+      - name: Upload read-only capture artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: radiohilal-hpenvy-controlhub-readonly-capture
+          path: capture/
+          if-no-files-found: error
+          retention-days: 7
