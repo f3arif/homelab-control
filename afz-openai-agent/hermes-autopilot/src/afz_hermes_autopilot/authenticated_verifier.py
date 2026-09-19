@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -260,8 +261,7 @@ class NonceLedger:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path, timeout=30) as db:
-            db.execute("PRAGMA journal_mode=WAL")
+        with closing(sqlite3.connect(self.path, timeout=30)) as db:
             db.execute(
                 """CREATE TABLE IF NOT EXISTS verifier_nonces (
                     nonce TEXT PRIMARY KEY,
@@ -270,12 +270,13 @@ class NonceLedger:
                     expires_unix INTEGER NOT NULL
                 )"""
             )
+            db.commit()
 
     def consume(
         self, *, nonce: str, receipt_sha256: str, now_unix: int, expires_unix: int
     ) -> None:
         try:
-            with sqlite3.connect(self.path, timeout=30) as db:
+            with closing(sqlite3.connect(self.path, timeout=30)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
                     """INSERT INTO verifier_nonces(
