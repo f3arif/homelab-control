@@ -76,6 +76,31 @@ This phase changes no live Control Hub code, listener, firewall, service, schedu
 
 No deployment occurred. Rollback is source-only: close the draft PR and delete the feature branch. There is no runtime rollback because no production state was changed.
 
+## Authenticated-verifier boundary candidate
+
+`afz_hermes_autopilot.authenticated_verifier` adds an offline, fail-closed
+contract for a future separately installed verifier. It defines canonical
+versioned claims, detached ECDSA P-256 signatures, pinned public-certificate
+verification, exact packet/source/target/recipe/readback/authorization
+bindings, and an atomic SQLite nonce ledger. It performs no network calls.
+
+The production signing-provider interface accepts only a pinned SHA-256
+certificate thumbprint, key id, and dedicated `NT SERVICE` identity/SID. Its
+fixed contract is Windows `LocalMachine\\My`, CNG, and a non-exportable key;
+there is no raw private-key, environment-secret, arbitrary path, or request-body
+input. The only runnable software signer lives under `tests/support/` and is
+labeled `TEST_ONLY_NOT_OS_BOUNDARY`.
+
+Signature verification proves integrity and possession of the matching test
+key only. A caller-supplied dictionary whose fields match the proposed install
+contract is reported only as `installation_contract_matches`; it is never
+reported as an installation attestation. This uninstalled candidate has no
+separately anchored provisioning/admin attestor, so
+`installation_attestation_verified=false`, `authenticated=false`, and
+`authenticated_review_gate=NOT_VERIFIED` remain invariant even when every
+claimed install field matches. See `AUTH-VERIFIER-INSTALLATION-ROLLBACK.md` for
+the future protected installation/attestation boundary and rollback plan.
+
 ## Future endpoint proposal (not implemented or activated)
 
 A future generic Autopilot endpoint should still not accept a URL, shell, command, method, or free-form body. A minimal contract would accept only a versioned recipe name, exact source SHA, idempotency key, and immutable authorization/receipt references; Windows-main would resolve the recipe to a compiled allowlist and reject unknown fields. It must add authenticated identity, OS-separated verification, durable production state, peer/source fencing, and independent security review before activation.

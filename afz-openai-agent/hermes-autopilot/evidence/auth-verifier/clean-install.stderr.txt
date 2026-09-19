@@ -1,0 +1,17 @@
+Using Python 3.12.14 environment at: .verify-venv-20260918
+Resolved 11 packages in 26ms
+   Building afz-hermes-autopilot-control-adapter @ file:///C:/AFZ/Development/AFZ-Hermes-Autopilot-AuthVerifier-20260918/work/afz-openai-agent/hermes-autopilot
+      Built afz-hermes-autopilot-control-adapter @ file:///C:/AFZ/Development/AFZ-Hermes-Autopilot-AuthVerifier-20260918/work/afz-openai-agent/hermes-autopilot
+Prepared 1 package in 2.57s
+Installed 11 packages in 557ms
+ + afz-hermes-autopilot-control-adapter==0.1.0 (from file:///C:/AFZ/Development/AFZ-Hermes-Autopilot-AuthVerifier-20260918/work/afz-openai-agent/hermes-autopilot)
+ + cffi==2.1.1
+ + colorama==0.4.6
+ + cryptography==50.0.1
+ + iniconfig==2.3.0
+ + packaging==26.3
+ + pluggy==1.6.0
+ + pycparser==3.0
+ + pygments==2.21.0
+ + pytest==9.1.1
+ + ruff==0.16.8

@@ -7,7 +7,7 @@ name = "afz-hermes-autopilot-control-adapter"
 version = "0.1.0"
 description = "Fail-closed typed Control Hub adapter around the verified AFZ MissionEngine"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["cryptography>=45,<51"]
 
 [project.scripts]
 afz-autopilot-health-canary = "afz_hermes_autopilot.canary_cli:main"
