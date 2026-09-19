@@ -687,6 +687,13 @@ class SecretScanTests(unittest.TestCase):
             "password = value\n"
         )
 
+    def test_comprehension_lambda_default_namedexpr_invalidates_outer_constant(self):
+        self.scan_reject(
+            "value = ''\n"
+            "[(lambda arg=(value := 'ordinary-value'): arg) for _ in [0]]\n"
+            "password = value\n"
+        )
+
     def test_sensitive_os_environ_subscript_passes(self):
         self.scan_ok(
             "import os\n"

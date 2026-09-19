@@ -518,17 +518,42 @@ def _namedexpr_bound_names(nodes: list[ast.AST]) -> set[str]:
             names.update(_bound_names([node.target]))
             self.visit(node.value)
 
+        def _visit_function_enclosing_expressions(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for default in node.args.defaults:
+                self.visit(default)
+            for default in node.args.kw_defaults:
+                if default is not None:
+                    self.visit(default)
+            if node.returns is not None:
+                self.visit(node.returns)
+
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-            return
+            self._visit_function_enclosing_expressions(node)
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-            return
+            self._visit_function_enclosing_expressions(node)
 
         def visit_Lambda(self, node: ast.Lambda) -> None:
-            return
+            for default in node.args.defaults:
+                self.visit(default)
+            for default in node.args.kw_defaults:
+                if default is not None:
+                    self.visit(default)
+            # The lambda body executes later and must not be traversed here.
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            return
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            # The class body is intentionally skipped for this leak collector.
 
     binder = NamedExprBinder()
     for node in nodes:
