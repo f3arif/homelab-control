@@ -510,6 +510,32 @@ def _bound_names(nodes: list[ast.AST]) -> set[str]:
     return names
 
 
+def _namedexpr_bound_names(nodes: list[ast.AST]) -> set[str]:
+    names: set[str] = set()
+
+    class NamedExprBinder(ast.NodeVisitor):
+        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+            names.update(_bound_names([node.target]))
+            self.visit(node.value)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            return
+
+    binder = NamedExprBinder()
+    for node in nodes:
+        binder.visit(node)
+    return names
+
+
 def _is_empty_value(node: ast.AST | None, constants: dict[str, object]) -> bool:
     if node is None:
         return True
@@ -733,12 +759,15 @@ class PythonSecretVisitor(ast.NodeVisitor):
         self.visit_For(node)
 
     def visit_While(self, node: ast.While) -> None:
-        self.visit(node.test)
         saved = dict(self.constants)
         bound_names = _bound_names([*node.body, *node.orelse])
         conservative = dict(saved)
         for name in bound_names:
             conservative.pop(name, None)
+        # A later iteration evaluates the condition after loop-body writes.
+        # Do not use pre-loop constants when scanning the condition.
+        self.constants = dict(conservative)
+        self.visit(node.test)
         self.constants = dict(conservative)
         for statement in node.body:
             self.visit(statement)
@@ -821,10 +850,19 @@ class PythonSecretVisitor(ast.NodeVisitor):
         generators: list[ast.comprehension],
         *value_nodes: ast.AST,
     ) -> None:
-        saved = self.constants
-        # Comprehensions execute their own runtime binding scope. Do not trust
-        # outer constant values for any bound generator name.
-        self.constants = {}
+        saved = dict(self.constants)
+        generator_targets = [generator.target for generator in generators]
+        namedexpr_nodes: list[ast.AST] = [*value_nodes]
+        for generator in generators:
+            namedexpr_nodes.append(generator.iter)
+            namedexpr_nodes.extend(generator.ifs)
+        leaked_names = _namedexpr_bound_names(namedexpr_nodes)
+
+        conservative = dict(saved)
+        for name in _bound_names(generator_targets) | leaked_names:
+            conservative.pop(name, None)
+        self.constants = conservative
+
         for generator in generators:
             self.visit(generator.iter)
             for key in _target_keys(generator.target, self.constants):
@@ -838,11 +876,25 @@ class PythonSecretVisitor(ast.NodeVisitor):
                 self.visit(condition)
         for value_node in value_nodes:
             self.visit(value_node)
-        self.constants = saved
+
+        self.constants = dict(saved)
+        for name in leaked_names:
+            self.constants.pop(name, None)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        saved = self.constants
-        self.constants = {}
+        saved = dict(self.constants)
+        generator_targets = [generator.target for generator in node.generators]
+        namedexpr_nodes: list[ast.AST] = [node.key, node.value]
+        for generator in node.generators:
+            namedexpr_nodes.append(generator.iter)
+            namedexpr_nodes.extend(generator.ifs)
+        leaked_names = _namedexpr_bound_names(namedexpr_nodes)
+
+        conservative = dict(saved)
+        for name in _bound_names(generator_targets) | leaked_names:
+            conservative.pop(name, None)
+        self.constants = conservative
+
         for generator in node.generators:
             self.visit(generator.iter)
             for key in _target_keys(generator.target, self.constants):
@@ -866,7 +918,10 @@ class PythonSecretVisitor(ast.NodeVisitor):
             )
         self.visit(node.key)
         self.visit(node.value)
-        self.constants = saved
+
+        self.constants = dict(saved)
+        for name in leaked_names:
+            self.constants.pop(name, None)
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._visit_comprehension(node.generators, node.elt)

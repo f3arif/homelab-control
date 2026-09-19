@@ -667,6 +667,26 @@ class SecretScanTests(unittest.TestCase):
             "password = f\"{''!r}\"\n"
         )
 
+    def test_while_condition_uses_loop_carried_value_fail_closed(self):
+        self.scan_reject(
+            "value = ''\n"
+            "while configure(password=value):\n"
+            "    value = 'ordinary-value'\n"
+        )
+
+    def test_dict_comprehension_preserves_outer_sensitive_key_alias(self):
+        self.scan_reject(
+            "field = 'password'\n"
+            "cfg = {field: 'ordinary-value' for _ in [0]}\n"
+        )
+
+    def test_comprehension_namedexpr_invalidates_enclosing_constant(self):
+        self.scan_reject(
+            "value = ''\n"
+            "[(value := 'ordinary-value') for _ in [0]]\n"
+            "password = value\n"
+        )
+
     def test_sensitive_os_environ_subscript_passes(self):
         self.scan_ok(
             "import os\n"
