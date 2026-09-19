@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Read-only HPENVY AFZ Control Hub source capture.
 
-The only remote operation is the already-authorized Tailscale SSH SFTP
-subsystem. No remote shell/exec command, tar, service control, or HTTP request
-is used. The fixed source file is fetched twice and must be stable before the
-validated bytes are scanned and repackaged locally.
+The already-authorized Tailscale SSH SFTP subsystem is used only to attest the
+target user's login shell from /etc/passwd. The source itself is read by one
+fixed noninteractive command that immediately execs isolated Python and opens
+main.py through directory file descriptors with O_NOFOLLOW. No tar, service
+control, package changes, HTTP requests, or remote writes are performed.
 """
 from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import hashlib
 import json
 import os
@@ -100,120 +102,26 @@ def is_sensitive_key(value: object) -> bool:
     )
 
 
-TRANSPORT_WRAPPER_TEMPLATE = r"""#!{python}
-import os
-import sys
-
-USER = {user!r}
-HOST = {host!r}
-TARGET = {target!r}
-TAILSCALE = {tailscale!r}
-
-args = sys.argv[1:]
-try:
-    user_index = args.index("-l")
-except ValueError:
-    raise SystemExit(70)
-if user_index + 1 >= len(args) or args[user_index + 1] != USER:
-    raise SystemExit(71)
-
-if len(args) < 4 or args[-4:] != ["-s", "--", HOST, "sftp"]:
-    raise SystemExit(72)
-
-fixed = [
-    TAILSCALE,
-    "ssh",
-    TARGET,
-    "-oForwardX11=no",
-    "-oPermitLocalCommand=no",
-    "-oClearAllForwardings=yes",
-    "-oBatchMode=yes",
-    "-oForwardAgent=no",
-    "-q",
-    "-s",
-    "sftp",
-]
-os.execv(TAILSCALE, fixed)
-"""
+PASSWD_REMOTE_PATH = "/etc/passwd"
+MAX_PASSWD_BYTES = 1024 * 1024
+MAX_KNOWN_HOSTS_BYTES = 1024 * 1024
+MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
+REMOTE_TIMEOUT_SECONDS = 45
 
 
-def build_transport_wrapper(
-    *,
-    python_path: str | None = None,
-    tailscale_path: str | None = None,
-) -> str:
-    python_path = python_path or sys.executable
-    tailscale_path = tailscale_path or shutil.which("tailscale")
-    if not python_path or not os.path.isabs(python_path):
-        raise CaptureError("absolute Python executable required")
-    if not tailscale_path or not os.path.isabs(tailscale_path):
-        raise CaptureError("absolute tailscale executable required")
-    return TRANSPORT_WRAPPER_TEMPLATE.format(
-        python=python_path,
-        user=TARGET_USER,
-        host=TARGET_HOST,
-        target=TARGET,
-        tailscale=tailscale_path,
-    )
-
-
-def build_sftp_batch() -> str:
-    # No '-' error-ignore prefix. '@' suppresses local command echo only.
+def build_shell_attestation_batch() -> str:
     return (
-        f"@ls -ln {REMOTE_PATH}\n"
-        f"@get {REMOTE_PATH} main.first\n"
-        f"@ls -ln {REMOTE_PATH}\n"
-        f"@get {REMOTE_PATH} main.second\n"
-        f"@ls -ln {REMOTE_PATH}\n"
+        f"@get {PASSWD_REMOTE_PATH} passwd.txt\n"
         "@quit\n"
     )
 
 
-_LONG_LISTING = re.compile(
-    r"^([bcdlps-][rwxStTs-]{9})\s+"
-    r"(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.+)$"
-)
-
-
-def parse_sftp_metadata(text: str) -> list[int]:
-    if "\x00" in text:
-        raise CaptureError("SFTP metadata contains NUL")
-    if len(text.encode("utf-8")) > MAX_METADATA_BYTES:
-        raise CaptureError("SFTP metadata exceeds bound")
-
-    sizes: list[int] = []
-    for raw in text.splitlines():
-        if len(raw) > 2048:
-            raise CaptureError("SFTP metadata line exceeds bound")
-        m = _LONG_LISTING.match(raw.strip())
-        if not m:
-            continue
-        mode, links, uid, gid, size_text, tail = m.groups()
-        if mode[0] != "-":
-            raise CaptureError("remote source is not a regular file")
-        try:
-            size = int(size_text)
-        except ValueError as exc:
-            raise CaptureError("remote size invalid") from exc
-        if size <= 0 or size > MAX_FILE_BYTES:
-            raise CaptureError("remote file size outside bound")
-        final_name = tail.split()[-1]
-        if final_name not in {REMOTE_PATH, "main.py"}:
-            raise CaptureError("unexpected remote listing target")
-        sizes.append(size)
-
-    if len(sizes) != 3:
-        raise CaptureError("expected exactly three remote file listings")
-    if len(set(sizes)) != 1:
-        raise CaptureError("remote source changed size during capture")
-    return sizes
-
-
-def _limit_child_files() -> None:
-    if resource is None:
-        raise CaptureError("POSIX resource limits unavailable")
-    limit = MAX_FILE_BYTES + 4096
-    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+def _make_file_limit(limit: int):
+    def apply_limit() -> None:
+        if resource is None:
+            raise CaptureError("POSIX resource limits unavailable")
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+    return apply_limit
 
 
 def _is_regular_nonsymlink(path: pathlib.Path) -> os.stat_result:
@@ -223,9 +131,51 @@ def _is_regular_nonsymlink(path: pathlib.Path) -> os.stat_result:
     return info
 
 
-def fetch_source_via_sftp(runner_temp: pathlib.Path) -> bytes:
+def parse_attested_bash_login_shell(text: str) -> str:
+    if "\x00" in text:
+        raise CaptureError("passwd capture contains NUL")
+    matches = []
+    for line in text.splitlines():
+        fields = line.split(":")
+        if len(fields) == 7 and fields[0] == TARGET_USER:
+            matches.append(fields)
+    if len(matches) != 1:
+        raise CaptureError("target user passwd entry not unique")
+    fields = matches[0]
+    if fields[5] != "/home/coolyo":
+        raise CaptureError("target user home directory unexpected")
+    shell = fields[6]
+    if shell not in {"/bin/bash", "/usr/bin/bash"}:
+        raise CaptureError("target user login shell is not Bash")
+    return shell
+
+
+def filter_target_known_hosts(text: str) -> bytes:
+    if "\x00" in text or len(text.encode("utf-8")) > MAX_KNOWN_HOSTS_BYTES:
+        raise CaptureError("known_hosts capture invalid")
+    selected: list[str] = []
+    for raw in text.splitlines():
+        parts = raw.split()
+        if len(parts) != 3 or parts[0] != TARGET_HOST:
+            continue
+        host, key_type, key_data = parts
+        if re.fullmatch(r"[A-Za-z0-9@._+-]{3,100}", key_type) is None:
+            raise CaptureError("known_hosts key type invalid")
+        if re.fullmatch(r"[A-Za-z0-9+/=]{20,2000}", key_data) is None:
+            raise CaptureError("known_hosts key data invalid")
+        selected.append(f"{host} {key_type} {key_data}")
+    if not selected:
+        raise CaptureError("target SSH host key missing")
+    if len(selected) != len(set(selected)):
+        raise CaptureError("duplicate target SSH host key")
+    return ("\n".join(selected) + "\n").encode("utf-8")
+
+
+def attest_bash_login_shell_via_sftp(
+    runner_temp: pathlib.Path,
+) -> tuple[str, bytes]:
     if os.name != "posix":
-        raise CaptureError("SFTP capture requires POSIX GitHub runner")
+        raise CaptureError("shell attestation requires POSIX GitHub runner")
 
     sftp = shutil.which("sftp")
     tailscale = shutil.which("tailscale")
@@ -233,54 +183,355 @@ def fetch_source_via_sftp(runner_temp: pathlib.Path) -> bytes:
         raise CaptureError("sftp executable missing")
     if not tailscale or not os.path.isabs(tailscale):
         raise CaptureError("tailscale executable missing")
-
+    if any(ch.isspace() for ch in tailscale):
+        raise CaptureError("tailscale executable path contains whitespace")
     if runner_temp.is_symlink() or not runner_temp.is_dir():
         raise CaptureError("RUNNER_TEMP directory invalid")
 
     with tempfile.TemporaryDirectory(
-        prefix="radiohilal-controlhub-stage-",
+        prefix="radiohilal-shell-attest-",
         dir=runner_temp,
     ) as td:
         stage = pathlib.Path(td)
-        if stage.is_symlink() or not stage.is_dir():
-            raise CaptureError("staging directory invalid")
-
-        wrapper = stage / "transport.py"
+        home = stage / "home"
+        home.mkdir(mode=0o700)
         batch = stage / "batch.txt"
-        metadata = stage / "metadata.txt"
-        first = stage / "main.first"
-        second = stage / "main.second"
+        passwd_path = stage / "passwd.txt"
+        known_hosts_path = stage / "known_hosts"
 
-        wrapper.write_text(
-            build_transport_wrapper(tailscale_path=tailscale),
+        batch.write_text(
+            build_shell_attestation_batch(),
             encoding="utf-8",
             newline="\n",
         )
-        os.chmod(wrapper, 0o700)
-        batch.write_text(build_sftp_batch(), encoding="utf-8", newline="\n")
         os.chmod(batch, 0o600)
 
-        child_env = {
-            "HOME": str(runner_temp),
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-            "LANG": "C",
-            "LC_ALL": "C",
-        }
         args = [
             sftp,
             "-q",
+            "-F",
+            "none",
             "-B",
             "32768",
             "-R",
             "1",
             "-b",
             str(batch),
-            "-S",
-            str(wrapper),
+            "-o",
+            f"UserKnownHostsFile={known_hosts_path}",
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "UpdateHostKeys=no",
+            "-o",
+            "CanonicalizeHostname=no",
+            "-o",
+            "HashKnownHosts=no",
+            "-o",
+            f"ProxyCommand={tailscale} nc %h %p",
+            "-o",
+            "ForwardX11=no",
+            "-o",
+            "PermitLocalCommand=no",
+            "-o",
+            "ClearAllForwardings=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ForwardAgent=no",
+            "-o",
+            "SendEnv=-*",
+            "-o",
+            "LogLevel=ERROR",
             TARGET,
         ]
+        child_env = {
+            "HOME": str(home),
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        }
+        try:
+            proc = subprocess.run(
+                args,
+                cwd=stage,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=REMOTE_TIMEOUT_SECONDS,
+                env=child_env,
+                preexec_fn=_make_file_limit(
+                    max(MAX_PASSWD_BYTES, MAX_KNOWN_HOSTS_BYTES) + 4096
+                ),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise CaptureError("SFTP shell attestation timed out") from exc
+        if proc.returncode != 0:
+            raise CaptureError(
+                f"SFTP shell attestation failed with exit {proc.returncode}"
+            )
 
-        with metadata.open("xb") as stdout_file:
+        info = _is_regular_nonsymlink(passwd_path)
+        if info.st_size <= 0 or info.st_size > MAX_PASSWD_BYTES:
+            raise CaptureError("passwd capture size invalid")
+        try:
+            text = passwd_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise CaptureError("passwd capture is not UTF-8") from exc
+
+        known_info = _is_regular_nonsymlink(known_hosts_path)
+        if (
+            known_info.st_size <= 0
+            or known_info.st_size > MAX_KNOWN_HOSTS_BYTES
+        ):
+            raise CaptureError("known_hosts capture size invalid")
+        try:
+            known_text = known_hosts_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise CaptureError("known_hosts capture is not UTF-8") from exc
+        filtered_known_hosts = filter_target_known_hosts(known_text)
+
+    return parse_attested_bash_login_shell(text), filtered_known_hosts
+
+
+REMOTE_READER = r"""
+import base64
+import hashlib
+import json
+import os
+import pwd
+import socket
+import stat
+
+MAX_FILE = 5 * 1024 * 1024
+DANGEROUS_ENV = {
+    "BASH_ENV",
+    "ENV",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+    "TAR_OPTIONS",
+    "GIT_SSH_COMMAND",
+}
+
+if socket.gethostname().lower() != "hpenvy":
+    raise SystemExit(41)
+if pwd.getpwuid(os.getuid()).pw_name != "coolyo":
+    raise SystemExit(42)
+if DANGEROUS_ENV.intersection(os.environ):
+    raise SystemExit(43)
+if os.environ.get("HOME") != "/home/coolyo":
+    raise SystemExit(44)
+if os.environ.get("USER") != "coolyo":
+    raise SystemExit(45)
+if os.path.basename(os.environ.get("SHELL", "")) != "bash":
+    raise SystemExit(46)
+
+required_flags = ("O_NOFOLLOW", "O_CLOEXEC", "O_DIRECTORY", "O_NONBLOCK")
+if any(not hasattr(os, name) for name in required_flags):
+    raise SystemExit(47)
+
+def open_dir(name, *, dir_fd=None):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    return os.open(name, flags, dir_fd=dir_fd)
+
+def read_regular(name, *, dir_fd):
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(name, flags, dir_fd=dir_fd)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise SystemExit(48)
+        if info.st_size <= 0 or info.st_size > MAX_FILE:
+            raise SystemExit(49)
+        chunks = []
+        seen = 0
+        while True:
+            chunk = os.read(fd, min(65536, MAX_FILE + 1 - seen))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            seen += len(chunk)
+            if seen > MAX_FILE:
+                raise SystemExit(50)
+        data = b"".join(chunks)
+        if len(data) != info.st_size:
+            raise SystemExit(51)
+        return data
+    finally:
+        os.close(fd)
+
+home_fd = open_dir("/home/coolyo")
+try:
+    root_fd = open_dir("afz-control-hub", dir_fd=home_fd)
+    try:
+        app_fd = open_dir("app", dir_fd=root_fd)
+        try:
+            data = read_regular("main.py", dir_fd=app_fd)
+        finally:
+            os.close(app_fd)
+    finally:
+        os.close(root_fd)
+finally:
+    os.close(home_fd)
+
+print(json.dumps({
+    "schema": "afz-controlhub-source-capture-v2",
+    "host": "hpenvy",
+    "user": "coolyo",
+    "size": len(data),
+    "sha256": hashlib.sha256(data).hexdigest(),
+    "data_b64": base64.b64encode(data).decode("ascii"),
+}, separators=(",", ":"), sort_keys=True))
+"""
+
+
+def build_remote_reader_command() -> str:
+    encoded = base64.b64encode(REMOTE_READER.encode("utf-8")).decode("ascii")
+    bootstrap = (
+        "import base64;"
+        f"exec(compile(base64.b64decode({encoded!r}),"
+        "'<afz-controlhub-readonly-capture>','exec'))"
+    )
+    return "exec /usr/bin/python3 -I -S -c " + shlex.quote(bootstrap)
+
+
+def _reject_duplicate_json_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise CaptureError(f"duplicate JSON key rejected: {key}")
+        obj[key] = value
+    return obj
+
+
+def _decode_remote_envelope(raw: bytes) -> bytes:
+    if len(raw) <= 0 or len(raw) > MAX_ENVELOPE_BYTES:
+        raise CaptureError("remote capture envelope size invalid")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CaptureError("remote capture envelope is not UTF-8") from exc
+    try:
+        obj = json.loads(text, object_pairs_hook=_reject_duplicate_json_keys)
+    except CaptureError:
+        raise
+    except json.JSONDecodeError as exc:
+        raise CaptureError("remote capture envelope is not strict JSON") from exc
+    if not isinstance(obj, dict):
+        raise CaptureError("remote capture envelope type invalid")
+    if set(obj) != {"schema", "host", "user", "size", "sha256", "data_b64"}:
+        raise CaptureError("remote capture envelope fields invalid")
+    if obj["schema"] != "afz-controlhub-source-capture-v2":
+        raise CaptureError("remote capture envelope schema invalid")
+    if obj["host"] != "hpenvy" or obj["user"] != TARGET_USER:
+        raise CaptureError("remote capture identity invalid")
+
+    size = obj["size"]
+    digest = obj["sha256"]
+    encoded = obj["data_b64"]
+    if isinstance(size, bool) or not isinstance(size, int):
+        raise CaptureError("remote source size type invalid")
+    if size <= 0 or size > MAX_FILE_BYTES:
+        raise CaptureError("remote source size outside bound")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise CaptureError("remote source hash invalid")
+    if not isinstance(encoded, str):
+        raise CaptureError("remote source payload type invalid")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise CaptureError("remote source payload base64 invalid") from exc
+    if len(data) != size or _sha(data) != digest:
+        raise CaptureError("remote source payload integrity mismatch")
+    return data
+
+
+def fetch_source_via_identity_bound_exec(
+    runner_temp: pathlib.Path,
+    login_shell: str,
+    known_hosts_bytes: bytes,
+) -> bytes:
+    if os.name != "posix":
+        raise CaptureError("source capture requires POSIX GitHub runner")
+    if login_shell not in {"/bin/bash", "/usr/bin/bash"}:
+        raise CaptureError("Bash login shell attestation missing")
+
+    ssh = shutil.which("ssh")
+    tailscale = shutil.which("tailscale")
+    if not ssh or not os.path.isabs(ssh):
+        raise CaptureError("ssh executable missing")
+    if not tailscale or not os.path.isabs(tailscale):
+        raise CaptureError("tailscale executable missing")
+    if any(ch.isspace() for ch in tailscale):
+        raise CaptureError("tailscale executable path contains whitespace")
+    if runner_temp.is_symlink() or not runner_temp.is_dir():
+        raise CaptureError("RUNNER_TEMP directory invalid")
+    filtered = filter_target_known_hosts(
+        known_hosts_bytes.decode("utf-8", errors="strict")
+    )
+    if filtered != known_hosts_bytes:
+        raise CaptureError("known_hosts input is not canonical filtered form")
+
+    with tempfile.TemporaryDirectory(
+        prefix="radiohilal-source-exec-",
+        dir=runner_temp,
+    ) as td:
+        stage = pathlib.Path(td)
+        home = stage / "home"
+        home.mkdir(mode=0o700)
+        known_hosts = stage / "known_hosts"
+        known_hosts.write_bytes(known_hosts_bytes)
+        os.chmod(known_hosts, 0o600)
+        stdout_path = stage / "envelope.json"
+        args = [
+            ssh,
+            "-F",
+            "none",
+            "-o",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
+            "-o",
+            "UpdateHostKeys=no",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "CanonicalizeHostname=no",
+            "-o",
+            f"ProxyCommand={tailscale} nc %h %p",
+            "-o",
+            "ForwardX11=no",
+            "-o",
+            "PermitLocalCommand=no",
+            "-o",
+            "ClearAllForwardings=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ForwardAgent=no",
+            "-o",
+            "RequestTTY=no",
+            "-o",
+            "SendEnv=-*",
+            "-o",
+            "LogLevel=ERROR",
+            "-l",
+            TARGET_USER,
+            TARGET_HOST,
+            build_remote_reader_command(),
+        ]
+        child_env = {
+            "HOME": str(home),
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        }
+
+        with stdout_path.open("xb") as stdout_file:
             try:
                 proc = subprocess.run(
                     args,
@@ -289,40 +540,21 @@ def fetch_source_via_sftp(runner_temp: pathlib.Path) -> bytes:
                     stdout=stdout_file,
                     stderr=subprocess.DEVNULL,
                     check=False,
-                    timeout=SFTP_TIMEOUT_SECONDS,
+                    timeout=REMOTE_TIMEOUT_SECONDS,
                     env=child_env,
-                    preexec_fn=_limit_child_files,
+                    preexec_fn=_make_file_limit(MAX_ENVELOPE_BYTES + 4096),
                 )
             except subprocess.TimeoutExpired as exc:
-                raise CaptureError("SFTP capture timed out") from exc
+                raise CaptureError("remote source capture timed out") from exc
 
         if proc.returncode != 0:
-            raise CaptureError(f"SFTP capture failed with exit {proc.returncode}")
-
-        metadata_info = _is_regular_nonsymlink(metadata)
-        if metadata_info.st_size <= 0 or metadata_info.st_size > MAX_METADATA_BYTES:
-            raise CaptureError("SFTP metadata file size invalid")
-        try:
-            metadata_text = metadata.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            raise CaptureError("SFTP metadata is not UTF-8") from exc
-        remote_sizes = parse_sftp_metadata(metadata_text)
-
-        first_info = _is_regular_nonsymlink(first)
-        second_info = _is_regular_nonsymlink(second)
-        if first_info.st_size != remote_sizes[0]:
-            raise CaptureError("first download size does not match remote listing")
-        if second_info.st_size != remote_sizes[0]:
-            raise CaptureError("second download size does not match remote listing")
-
-        first_bytes = first.read_bytes()
-        second_bytes = second.read_bytes()
-        if first_bytes != second_bytes:
-            raise CaptureError("remote source changed during capture")
-        if len(first_bytes) <= 0 or len(first_bytes) > MAX_FILE_BYTES:
-            raise CaptureError("downloaded source size outside bound")
-        return first_bytes
-
+            raise CaptureError(
+                f"remote source capture failed with exit {proc.returncode}"
+            )
+        info = _is_regular_nonsymlink(stdout_path)
+        if info.st_size <= 0 or info.st_size > MAX_ENVELOPE_BYTES:
+            raise CaptureError("remote capture envelope file size invalid")
+        return _decode_remote_envelope(stdout_path.read_bytes())
 
 def _static_value(node: ast.AST | None, constants: dict[str, object]) -> object:
     if node is None:
@@ -340,6 +572,24 @@ def _static_value(node: ast.AST | None, constants: dict[str, object]) -> object:
             return left + right
         if isinstance(left, bytes) and isinstance(right, bytes):
             return left + right
+        return None
+    if isinstance(node, ast.BoolOp):
+        values = [_static_value(item, constants) for item in node.values]
+        for value in values:
+            if _static_is_nonempty(value):
+                return value
+        if all(value is not None for value in values):
+            return values[-1] if values else None
+        return None
+    if isinstance(node, ast.IfExp):
+        body = _static_value(node.body, constants)
+        alternate = _static_value(node.orelse, constants)
+        if _static_is_nonempty(body):
+            return body
+        if _static_is_nonempty(alternate):
+            return alternate
+        if body is not None and alternate is not None and body == alternate:
+            return body
         return None
     if isinstance(node, ast.JoinedStr):
         parts: list[str] = []
@@ -513,6 +763,19 @@ class PythonSecretVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
 
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        positional = [*node.args.posonlyargs, *node.args.args]
+        if node.args.defaults:
+            for arg, default in zip(
+                positional[-len(node.args.defaults) :],
+                node.args.defaults,
+            ):
+                self._record_sensitive_value(arg.arg, default, default.lineno)
+        for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults):
+            if default is not None:
+                self._record_sensitive_value(arg.arg, default, default.lineno)
+        self.visit(node.body)
+
     def visit_Call(self, node: ast.Call) -> None:
         for kw in node.keywords:
             if kw.arg is not None:
@@ -573,6 +836,36 @@ def scan_python_source(data: bytes) -> None:
         tree = ast.parse(text, filename="app/main.py")
     except SyntaxError as exc:
         raise CaptureError("app/main.py is not valid Python") from exc
+
+    # Scan parser-folded/static string expressions too, not only physical
+    # source lines, so adjacent/concatenated literals cannot split a token.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr)):
+            continue
+        value = _static_value(node, {})
+        if isinstance(value, bytes):
+            try:
+                candidate = value.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        elif isinstance(value, str):
+            candidate = value
+        else:
+            continue
+        kind = None
+        if PRIVATE_KEY.search(candidate):
+            kind = "private-key"
+        elif TOKEN_PREFIX.search(candidate):
+            kind = "token-prefix"
+        elif CREDENTIAL_URL.search(candidate):
+            kind = "credential-url"
+        elif JWT.search(candidate):
+            kind = "jwt"
+        if kind is not None:
+            raise CaptureError(
+                f"secret scan rejected app/main.py:{getattr(node, 'lineno', 0)}:{kind}"
+            )
+
     visitor = PythonSecretVisitor()
     visitor.visit(tree)
     if visitor.findings:
@@ -627,7 +920,7 @@ def emit_outputs(
         "schema": "afz-controlhub-source-artifact-v2",
         "target": TARGET,
         "remote_path": REMOTE_PATH,
-        "transport": "tailscale-ssh-sftp-subsystem",
+        "transport": "tailscale-sftp-attestation-plus-pinned-openssh-identity-bound-exec",
         "captured_at_utc": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat()
@@ -646,8 +939,8 @@ def emit_outputs(
     manifest_path.write_bytes(manifest_bytes)
 
     validation_path.write_text(
-        "SFTP_SUBSYSTEM_CAPTURE=PASS\n"
-        "DOUBLE_READ_STABILITY=PASS\n"
+        "SFTP_SHELL_ATTESTATION=PASS\n"
+        "IDENTITY_BOUND_NOFOLLOW_READ=PASS\n"
         "SOURCE_SECRET_SCAN=PASS\n"
         "DETERMINISTIC_REPACK=PASS\n"
         "REMOTE_MUTATION_PERFORMED=false\n",
@@ -676,7 +969,14 @@ def capture(output: pathlib.Path) -> None:
     if runner_temp.is_symlink() or not runner_temp.is_dir():
         raise CaptureError("RUNNER_TEMP invalid")
 
-    source = fetch_source_via_sftp(runner_temp)
+    login_shell, known_hosts_bytes = attest_bash_login_shell_via_sftp(
+        runner_temp
+    )
+    source = fetch_source_via_identity_bound_exec(
+        runner_temp,
+        login_shell,
+        known_hosts_bytes,
+    )
     scan_python_source(source)
     emit_outputs(output, runner_temp, source)
 
