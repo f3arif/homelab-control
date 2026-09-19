@@ -117,6 +117,20 @@ def validate_workflow_text(text: str) -> None:
     capture_lines = lines[capture_start:]
 
     validate_text = "\n".join(validate_lines)
+    validate_steps_index = validate_lines.index("    steps:")
+    validate_header_block = [
+        line for line in validate_lines[: validate_steps_index + 1]
+        if line.strip()
+    ]
+    if validate_header_block != [
+        "  validate-readonly-boundary:",
+        "    runs-on: ubuntu-latest",
+        "    timeout-minutes: 2",
+        "    steps:",
+    ]:
+        raise ValueError(
+            f"validation job header invalid: {validate_header_block}"
+        )
     if "permissions:" in validate_text:
         raise ValueError("validation job permission override forbidden")
     required_validation = (
@@ -204,6 +218,24 @@ def validate_workflow_text(text: str) -> None:
     capture_text = "\n".join(capture_lines)
     capture_header_end = capture_lines.index("    steps:")
     capture_header = capture_lines[:capture_header_end]
+    capture_header_block = [
+        line for line in capture_lines[: capture_header_end + 1]
+        if line.strip()
+    ]
+    if capture_header_block != [
+        "  capture:",
+        "    needs: validate-readonly-boundary",
+        "    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+        "    permissions:",
+        "      contents: read",
+        "      id-token: write",
+        "    runs-on: ubuntu-latest",
+        "    timeout-minutes: 5",
+        "    steps:",
+    ]:
+        raise ValueError(
+            f"capture job header invalid: {capture_header_block}"
+        )
     if "    needs: validate-readonly-boundary" not in capture_header:
         raise ValueError("capture dependency missing")
     condition_lines = [
@@ -469,11 +501,48 @@ class SecretScanTests(unittest.TestCase):
             "TOKEN = os.getenv('TOKEN', **{'default': 'ordinary-value'})\n"
         )
 
+    def test_keyword_only_env_default_wrapped_expression_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "value = os.getenv(key='PASSWORD', default=str('ordinary-value'))\n"
+        )
+
+    def test_keyword_unpacking_env_call_rejected(self):
+        self.scan_reject(
+            "import os\n"
+            "value = os.getenv(**{'key': 'PASSWORD', 'default': 'ordinary-value'})\n"
+        )
+
+    def test_keyword_only_sensitive_env_empty_default_passes(self):
+        self.scan_ok(
+            "import os\n"
+            "password = os.getenv(key='PASSWORD', default='')\n"
+        )
+
     def test_augassign_invalidates_empty_alias(self):
         self.scan_reject(
             "value = ''\n"
             "value += 'ordinary-value'\n"
             "password = value\n"
+        )
+
+    def test_if_branch_cannot_overwrite_runtime_constant_state(self):
+        self.scan_reject(
+            "value = 'ordinary-value'\n"
+            "if False:\n"
+            "    value = ''\n"
+            "password = value\n"
+        )
+
+    def test_dict_constructor_pair_secret_rejected(self):
+        self.scan_reject(
+            "cfg = dict([('password', 'ordinary-value')])\n"
+        )
+
+    def test_sensitive_loop_target_rejected(self):
+        self.scan_reject(
+            "for password in ['ordinary-value']:\n"
+            "    pass\n"
         )
 
     def test_or_fallback_secret_rejected(self):
@@ -912,6 +981,31 @@ class WorkflowContractTests(unittest.TestCase):
             "      - name: Validate capture implementation\n"
             '        "continue-on-error": true\n'
             "        shell: bash",
+            1,
+        )
+        self.assertNotEqual(weakened, self.text)
+        self.assert_rejected(weakened)
+
+    def test_job_level_quoted_continue_on_error_rejected(self):
+        weakened = self.text.replace(
+            "    timeout-minutes: 2\n"
+            "    steps:",
+            "    timeout-minutes: 2\n"
+            '    "continue-on-error": true\n'
+            "    steps:",
+            1,
+        )
+        self.assertNotEqual(weakened, self.text)
+        self.assert_rejected(weakened)
+
+    def test_capture_job_level_quoted_env_rejected(self):
+        weakened = self.text.replace(
+            "    timeout-minutes: 5\n"
+            "    steps:",
+            "    timeout-minutes: 5\n"
+            '    "env":\n'
+            "      BASH_ENV: /tmp/hook\n"
+            "    steps:",
             1,
         )
         self.assertNotEqual(weakened, self.text)

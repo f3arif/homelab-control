@@ -438,6 +438,44 @@ def _target_value_pairs(
     return [(target, value)]
 
 
+def _bound_names(nodes: list[ast.AST]) -> set[str]:
+    names: set[str] = set()
+
+    class Binder(ast.NodeVisitor):
+        def visit_Name(self, node: ast.Name) -> None:
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            names.add(node.name)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            names.add(node.name)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            names.add(node.name)
+
+        def visit_Import(self, node: ast.Import) -> None:
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+            if isinstance(node.name, str):
+                names.add(node.name)
+            for statement in node.body:
+                self.visit(statement)
+
+    binder = Binder()
+    for node in nodes:
+        binder.visit(node)
+    return names
+
+
 def _is_empty_value(node: ast.AST | None, constants: dict[str, object]) -> bool:
     if node is None:
         return True
@@ -456,6 +494,58 @@ def _is_os_environ(node: ast.AST) -> bool:
     )
 
 
+def _parse_env_lookup(
+    node: ast.AST | None,
+    constants: dict[str, object],
+) -> tuple[bool, object, ast.AST | None, bool]:
+    if not isinstance(node, ast.Call):
+        return False, None, None, False
+    is_env_call = (
+        isinstance(node.func, ast.Attribute)
+        and (
+            (
+                node.func.attr == "getenv"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+            )
+            or (
+                node.func.attr == "get"
+                and _is_os_environ(node.func.value)
+            )
+        )
+    )
+    if not is_env_call:
+        return False, None, None, False
+
+    if len(node.args) > 2 or any(kw.arg is None for kw in node.keywords):
+        return True, None, None, False
+
+    keyword_map: dict[str, ast.AST] = {}
+    for kw in node.keywords:
+        if kw.arg not in {"key", "default"} or kw.arg in keyword_map:
+            return True, None, None, False
+        keyword_map[kw.arg] = kw.value
+
+    if node.args:
+        if "key" in keyword_map:
+            return True, None, None, False
+        key_node = node.args[0]
+    else:
+        key_node = keyword_map.get("key")
+    if key_node is None:
+        return True, None, None, False
+
+    if len(node.args) > 1:
+        if "default" in keyword_map:
+            return True, None, None, False
+        default_node = node.args[1]
+    else:
+        default_node = keyword_map.get("default")
+
+    env_key = _static_value(key_node, constants)
+    return True, env_key, default_node, True
+
+
 def _is_safe_dynamic_secret_source(
     node: ast.AST | None,
     constants: dict[str, object],
@@ -465,32 +555,15 @@ def _is_safe_dynamic_secret_source(
     if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
         key = _static_value(node.slice, constants)
         return is_sensitive_key(key)
-    if isinstance(node, ast.Call):
-        env_key = None
-        if (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr == "getenv"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "os"
-        ):
-            env_key = _static_value(node.args[0], constants) if node.args else None
-        elif (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr == "get"
-            and _is_os_environ(node.func.value)
-        ):
-            env_key = _static_value(node.args[0], constants) if node.args else None
-        if is_sensitive_key(env_key):
-            default_node = node.args[1] if len(node.args) > 1 else None
-            if len(node.args) > 2:
-                return False
-            for kw in node.keywords:
-                if kw.arg in {"default", "fallback"}:
-                    default_node = kw.value
-                else:
-                    return False
-            return _is_empty_value(default_node, constants)
-        return False
+    is_env_call, env_key, default_node, shape_ok = _parse_env_lookup(
+        node, constants
+    )
+    if is_env_call:
+        return (
+            shape_ok
+            and is_sensitive_key(env_key)
+            and _is_empty_value(default_node, constants)
+        )
     if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
         saw_dynamic = False
         for item in node.values:
@@ -581,32 +654,98 @@ class PythonSecretVisitor(ast.NodeVisitor):
         self.visit(node.value)
         self._invalidate_target(node.target)
 
+    def _restore_and_invalidate(
+        self,
+        saved: dict[str, object],
+        nodes: list[ast.AST],
+    ) -> None:
+        self.constants = saved
+        for name in _bound_names(nodes):
+            self.constants.pop(name, None)
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        saved = dict(self.constants)
+        self.constants = dict(saved)
+        for statement in node.body:
+            self.visit(statement)
+        self.constants = dict(saved)
+        for statement in node.orelse:
+            self.visit(statement)
+        self._restore_and_invalidate(saved, [*node.body, *node.orelse])
+
     def visit_For(self, node: ast.For) -> None:
         self.visit(node.iter)
+        for key in _target_keys(node.target, self.constants):
+            self._record_sensitive_value(key, node.iter, node.lineno)
+        saved = dict(self.constants)
+        self.constants = dict(saved)
         self._invalidate_target(node.target)
         for statement in node.body:
             self.visit(statement)
+        self.constants = dict(saved)
         for statement in node.orelse:
             self.visit(statement)
+        self._restore_and_invalidate(
+            saved, [node.target, *node.body, *node.orelse]
+        )
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        self.visit(node.iter)
-        self._invalidate_target(node.target)
+        self.visit_For(node)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        saved = dict(self.constants)
+        self.constants = dict(saved)
         for statement in node.body:
             self.visit(statement)
+        self.constants = dict(saved)
         for statement in node.orelse:
             self.visit(statement)
+        self._restore_and_invalidate(saved, [*node.body, *node.orelse])
 
     def visit_With(self, node: ast.With) -> None:
         for item in node.items:
             self.visit(item.context_expr)
+        saved = dict(self.constants)
+        self.constants = dict(saved)
+        for item in node.items:
             if item.optional_vars is not None:
                 self._invalidate_target(item.optional_vars)
         for statement in node.body:
             self.visit(statement)
+        bound_nodes: list[ast.AST] = [*node.body]
+        bound_nodes.extend(
+            item.optional_vars
+            for item in node.items
+            if item.optional_vars is not None
+        )
+        self._restore_and_invalidate(saved, bound_nodes)
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
         self.visit_With(node)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        saved = dict(self.constants)
+        for block in (node.body, node.orelse, node.finalbody):
+            self.constants = dict(saved)
+            for statement in block:
+                self.visit(statement)
+        for handler in node.handlers:
+            self.constants = dict(saved)
+            if isinstance(handler.name, str):
+                self.constants.pop(handler.name, None)
+            if handler.type is not None:
+                self.visit(handler.type)
+            for statement in handler.body:
+                self.visit(statement)
+        bound: list[ast.AST] = [
+            *node.body,
+            *node.orelse,
+            *node.finalbody,
+            *node.handlers,
+        ]
+        self._restore_and_invalidate(saved, bound)
 
     def visit_Delete(self, node: ast.Delete) -> None:
         for target in node.targets:
@@ -660,9 +799,36 @@ class PythonSecretVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._visit_function(node)
+        self.constants.pop(node.name, None)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
+        self.constants.pop(node.name, None)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        saved = dict(self.constants)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        self.constants = dict(saved)
+        for statement in node.body:
+            self.visit(statement)
+        self.constants = saved
+        self.constants.pop(node.name, None)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.constants.pop(
+                alias.asname or alias.name.split(".", 1)[0], None
+            )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.constants.pop(alias.asname or alias.name, None)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         positional = [*node.args.posonlyargs, *node.args.args]
@@ -690,25 +856,38 @@ class PythonSecretVisitor(ast.NodeVisitor):
         elif isinstance(node.func, ast.Attribute):
             func_name = node.func.attr
 
-        if func_name in {"getenv", "get"} and node.args:
-            env_name = _static_value(node.args[0], self.constants)
-            if is_sensitive_key(env_name):
-                default_node: ast.AST | None = node.args[1] if len(node.args) > 1 else None
-                invalid_call_shape = len(node.args) > 2
-                for kw in node.keywords:
-                    if kw.arg in {"default", "fallback"}:
-                        default_node = kw.value
-                    else:
-                        invalid_call_shape = True
-                if invalid_call_shape:
-                    self.findings.append((node.lineno, "sensitive-env-call-shape"))
-                elif not _is_empty_value(default_node, self.constants):
-                    self.findings.append(
-                        (
-                            getattr(default_node, "lineno", node.lineno),
-                            "sensitive-env-default",
-                        )
+        is_env_call, env_name, default_node, shape_ok = _parse_env_lookup(
+            node, self.constants
+        )
+        if is_env_call:
+            if not shape_ok:
+                self.findings.append((node.lineno, "sensitive-env-call-shape"))
+            elif is_sensitive_key(env_name) and not _is_empty_value(
+                default_node, self.constants
+            ):
+                self.findings.append(
+                    (
+                        getattr(default_node, "lineno", node.lineno),
+                        "sensitive-env-default",
                     )
+                )
+
+        if func_name == "dict":
+            for arg in node.args:
+                if isinstance(arg, (ast.List, ast.Tuple)):
+                    for item in arg.elts:
+                        if (
+                            isinstance(item, (ast.List, ast.Tuple))
+                            and len(item.elts) == 2
+                        ):
+                            key = _static_value(
+                                item.elts[0], self.constants
+                            )
+                            self._record_sensitive_value(
+                                key,
+                                item.elts[1],
+                                getattr(item.elts[1], "lineno", node.lineno),
+                            )
 
         if func_name == "setattr" and len(node.args) >= 3:
             key = _static_value(node.args[1], self.constants)
