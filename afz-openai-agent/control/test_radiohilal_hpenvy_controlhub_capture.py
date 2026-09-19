@@ -31,6 +31,10 @@ EXPECTED_UPLOAD_PATHS = {
     "${{ runner.temp }}/radiohilal-controlhub-capture/" + name
     for name in cap.OUTPUT_NAMES
 }
+KNOWN_HOST = (
+    "100.71.26.69 ssh-ed25519 "
+    "AAAAC3NzaC1lZDI1NTE5AAAAIMOCKMOCKMOCKMOCKMOCKMOCKMOCKMOCK12\n"
+).encode("utf-8")
 
 
 def validate_workflow_text(text: str) -> None:
@@ -41,6 +45,23 @@ def validate_workflow_text(text: str) -> None:
             top_keys.append(line.split(":", 1)[0])
     if top_keys != ["name", "on", "permissions", "concurrency", "jobs"]:
         raise ValueError(f"top-level workflow structure invalid: {top_keys}")
+
+    forbidden_security_keys = (
+        "continue-on-error:",
+        "env:",
+        "environment:",
+        "container:",
+        "services:",
+        "defaults:",
+        "working-directory:",
+        "ref:",
+    )
+    for line in lines:
+        stripped = line.strip()
+        if any(stripped.startswith(key) for key in forbidden_security_keys):
+            raise ValueError(f"security-sensitive workflow override forbidden: {stripped}")
+        if stripped.startswith("shell:") and stripped != "shell: bash":
+            raise ValueError(f"workflow shell override invalid: {stripped}")
 
     on_index = lines.index("on:")
     permission_index = lines.index("permissions:")
@@ -123,6 +144,22 @@ def validate_workflow_text(text: str) -> None:
         raise ValueError(
             f"validation step structure invalid: {validate_step_headers}"
         )
+    validate_checkout_start = validate_lines.index("      - uses: actions/checkout@v4")
+    validate_test_start = validate_lines.index(
+        "      - name: Validate capture implementation"
+    )
+    validate_checkout_block = [
+        line for line in validate_lines[validate_checkout_start:validate_test_start]
+        if line.strip()
+    ]
+    if validate_checkout_block != [
+        "      - uses: actions/checkout@v4",
+        "        with:",
+        "          persist-credentials: false",
+    ]:
+        raise ValueError(
+            f"validation checkout block invalid: {validate_checkout_block}"
+        )
     if any(
         line.strip().startswith("if:")
         for line in validate_lines
@@ -188,6 +225,55 @@ def validate_workflow_text(text: str) -> None:
         raise ValueError(
             f"capture step structure invalid: {capture_step_headers}"
         )
+
+    capture_checkout_start = capture_lines.index("      - uses: actions/checkout@v4")
+    tailscale_start = capture_lines.index("      - name: Join AFZ tailnet")
+    capture_step_start = capture_lines.index(
+        "      - name: Capture exact validated Control Hub source"
+    )
+    upload_start = capture_lines.index(
+        "      - name: Upload validated read-only capture"
+    )
+    capture_checkout_block = [
+        line for line in capture_lines[capture_checkout_start:tailscale_start]
+        if line.strip()
+    ]
+    if capture_checkout_block != [
+        "      - uses: actions/checkout@v4",
+        "        with:",
+        "          persist-credentials: false",
+    ]:
+        raise ValueError(
+            f"capture checkout block invalid: {capture_checkout_block}"
+        )
+    tailscale_block = [
+        line for line in capture_lines[tailscale_start:capture_step_start]
+        if line.strip()
+    ]
+    if tailscale_block != [
+        "      - name: Join AFZ tailnet",
+        "        uses: tailscale/github-action@v4",
+        "        with:",
+        "          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}",
+        "          audience: ${{ secrets.TS_AUDIENCE }}",
+        "          tags: tag:afz-deploy",
+    ]:
+        raise ValueError(f"Tailscale block invalid: {tailscale_block}")
+    capture_command_block = [
+        line for line in capture_lines[capture_step_start:upload_start]
+        if line.strip()
+    ]
+    if capture_command_block != [
+        "      - name: Capture exact validated Control Hub source",
+        "        shell: bash",
+        "        run: |",
+        "          set -euo pipefail",
+        "          python3 afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py \\",
+        '            --output "${RUNNER_TEMP}/radiohilal-controlhub-capture"',
+    ]:
+        raise ValueError(
+            f"capture command block invalid: {capture_command_block}"
+        )
     if any(
         line.strip().startswith("if:")
         for line in capture_lines[capture_header_end + 1 :]
@@ -248,14 +334,27 @@ def validate_workflow_text(text: str) -> None:
             upload_paths.append(line.strip())
             continue
         break
-    if set(upload_paths) != EXPECTED_UPLOAD_PATHS or len(upload_paths) != len(EXPECTED_UPLOAD_PATHS):
-        raise ValueError(f"upload path set invalid: {upload_paths}")
+    expected_upload_paths = [
+        "${{ runner.temp }}/radiohilal-controlhub-capture/" + name
+        for name in cap.OUTPUT_NAMES
+    ]
+    if upload_paths != expected_upload_paths:
+        raise ValueError(f"upload path order invalid: {upload_paths}")
+    upload_block = [line for line in upload_lines if line.strip()]
+    expected_upload_block = [
+        "      - name: Upload validated read-only capture",
+        "        uses: actions/upload-artifact@v4",
+        "        with:",
+        "          name: radiohilal-hpenvy-controlhub-readonly-capture",
+        "          path: |",
+        *["            " + path for path in expected_upload_paths],
+        "          if-no-files-found: error",
+        "          retention-days: 7",
+    ]
+    if upload_block != expected_upload_block:
+        raise ValueError(f"upload block invalid: {upload_block}")
     if capture_text.count("actions/upload-artifact@v4") != 1:
         raise ValueError("upload action count invalid")
-    if "          retention-days: 7" not in upload_lines:
-        raise ValueError("artifact retention invalid")
-    if "          if-no-files-found: error" not in upload_lines:
-        raise ValueError("artifact missing-file policy invalid")
 
 
 class SecretScanTests(unittest.TestCase):
@@ -370,6 +469,35 @@ class SecretScanTests(unittest.TestCase):
     def test_function_default_secret_rejected(self):
         self.scan_reject("def f(password='ordinary-value'):\n    return password\n")
 
+    def test_function_default_nested_dict_secret_rejected(self):
+        self.scan_reject(
+            "def f(cfg={'password': 'ordinary-value'}):\n"
+            "    return cfg\n"
+        )
+
+    def test_lambda_default_nested_dict_secret_rejected(self):
+        self.scan_reject(
+            "f = lambda cfg={'client_secret': 'ordinary-value'}: cfg\n"
+        )
+
+    def test_unsupported_sensitive_call_expression_rejected(self):
+        self.scan_reject("password = str('ordinary-value')\n")
+
+    def test_unsupported_sensitive_runtime_expression_rejected(self):
+        self.scan_reject("password = load_runtime_value()\n")
+
+    def test_sensitive_os_environ_subscript_passes(self):
+        self.scan_ok(
+            "import os\n"
+            "password = os.environ['PASSWORD']\n"
+        )
+
+    def test_sensitive_os_getenv_or_empty_passes(self):
+        self.scan_ok(
+            "import os\n"
+            "token = os.getenv('AFZ_HUB_TOKEN') or ''\n"
+        )
+
     def test_keyword_secret_rejected(self):
         self.scan_reject("configure(password='ordinary-value')\n")
 
@@ -394,53 +522,32 @@ class SecretScanTests(unittest.TestCase):
         self.scan_reject("def broken(:\n")
 
 
-def remote_envelope(data: bytes = b"x = 1\n") -> bytes:
-    obj = {
-        "schema": "afz-controlhub-source-capture-v2",
-        "host": "hpenvy",
-        "user": "coolyo",
-        "size": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "data_b64": base64.b64encode(data).decode("ascii"),
-    }
-    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+class SftpTransportPureTests(unittest.TestCase):
+    def test_hostkey_probe_batch_is_read_only(self):
+        batch = cap.build_hostkey_probe_batch()
+        commands = [
+            line.lstrip("@").split(None, 1)[0]
+            for line in batch.splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(commands, ["pwd", "quit"])
+        for forbidden in ("get", "put", "rm", "rename", "mkdir", "chmod", "chown", "ln"):
+            self.assertNotRegex(batch, rf"(?m)^@?{forbidden}\b")
 
-
-KNOWN_HOST = (
-    "100.71.26.69 ssh-ed25519 "
-    "AAAAC3NzaC1lZDI1NTE5AAAAIMOCKMOCKMOCKMOCKMOCKMOCKMOCKMOCK12\n"
-).encode("utf-8")
-
-
-class HybridTransportPureTests(unittest.TestCase):
-    def test_shell_attestation_batch_is_read_only(self):
-        batch = cap.build_shell_attestation_batch()
+    def test_source_fetch_batch_is_read_only_and_exact(self):
+        batch = cap.build_source_fetch_batch()
+        self.assertEqual(
+            batch,
+            f"get {cap.REMOTE_PATH} source.py\nquit\n",
+        )
         commands = [
             line.lstrip("@").split(None, 1)[0]
             for line in batch.splitlines()
             if line.strip()
         ]
         self.assertEqual(commands, ["get", "quit"])
-        self.assertIn(cap.PASSWD_REMOTE_PATH, batch)
         for forbidden in ("put", "rm", "rename", "mkdir", "chmod", "chown", "ln"):
             self.assertNotRegex(batch, rf"(?m)^@?{forbidden}\b")
-
-    def test_passwd_shell_attestation_accepts_bash(self):
-        text = (
-            "root:x:0:0:root:/root:/bin/bash\n"
-            "coolyo:x:1000:1000:Coolyo:/home/coolyo:/bin/bash\n"
-        )
-        self.assertEqual(cap.parse_attested_bash_login_shell(text), "/bin/bash")
-
-    def test_passwd_shell_attestation_rejects_non_bash(self):
-        text = "coolyo:x:1000:1000:Coolyo:/home/coolyo:/bin/zsh\n"
-        with self.assertRaisesRegex(cap.CaptureError, "not Bash"):
-            cap.parse_attested_bash_login_shell(text)
-
-    def test_passwd_shell_attestation_rejects_duplicate_user(self):
-        line = "coolyo:x:1000:1000:Coolyo:/home/coolyo:/bin/bash\n"
-        with self.assertRaisesRegex(cap.CaptureError, "not unique"):
-            cap.parse_attested_bash_login_shell(line + line)
 
     def test_known_hosts_filter_accepts_only_target(self):
         text = (
@@ -459,69 +566,46 @@ class HybridTransportPureTests(unittest.TestCase):
         with self.assertRaisesRegex(cap.CaptureError, "duplicate"):
             cap.filter_target_known_hosts((KNOWN_HOST * 2).decode())
 
-    def test_remote_reader_compiles_and_is_identity_bound_nofollow(self):
-        compile(cap.REMOTE_READER, "<remote-reader>", "exec")
-        for token in (
-            "O_NOFOLLOW",
-            "O_DIRECTORY",
-            "os.fstat",
-            'open_dir("/home/coolyo")',
-            'open_dir("afz-control-hub"',
-            'open_dir("app"',
-            'read_regular("main.py"',
-        ):
-            self.assertIn(token, cap.REMOTE_READER)
-        self.assertNotIn("write(", cap.REMOTE_READER)
-        self.assertNotIn("subprocess", cap.REMOTE_READER)
-        self.assertNotIn("socket.create_connection", cap.REMOTE_READER)
-
-    def test_remote_reader_command_is_fixed_exec_python(self):
-        command = cap.build_remote_reader_command()
-        self.assertTrue(command.startswith("exec /usr/bin/python3 -I -S -c "))
-        for forbidden in (" tar ", "curl ", "systemctl", "docker ", "sudo "):
-            self.assertNotIn(forbidden, command)
-
-    def test_valid_remote_envelope_decodes(self):
-        data = b"x = 1\n"
-        self.assertEqual(cap._decode_remote_envelope(remote_envelope(data)), data)
-
-    def test_duplicate_json_key_rejected(self):
-        raw = (
-            b'{"schema":"afz-controlhub-source-capture-v2","schema":"x",'
-            b'"host":"hpenvy","user":"coolyo","size":1,'
-            b'"sha256":"00","data_b64":"eA=="}'
+    def test_sftp_args_are_fixed_and_no_shell_command(self):
+        args = cap._sftp_args(
+            sftp="/usr/bin/sftp",
+            tailscale="/usr/bin/tailscale",
+            batch=pathlib.Path("/tmp/batch"),
+            known_hosts=pathlib.Path("/tmp/known_hosts"),
+            strict_host_key="yes",
         )
-        with self.assertRaisesRegex(cap.CaptureError, "duplicate JSON key"):
-            cap._decode_remote_envelope(raw)
+        self.assertEqual(args[0], "/usr/bin/sftp")
+        self.assertEqual(args[-1], cap.TARGET)
+        self.assertIn("StrictHostKeyChecking=yes", args)
+        self.assertIn("ProxyCommand=/usr/bin/tailscale nc %h %p", args)
+        self.assertNotIn("ssh", pathlib.Path(args[0]).name)
+        joined = " ".join(args)
+        for forbidden in ("bash -c", "python -c", "exec ", "sudo ", "systemctl", "docker "):
+            self.assertNotIn(forbidden, joined)
 
-    def test_remote_envelope_integrity_mismatch_rejected(self):
-        obj = json.loads(remote_envelope())
-        obj["sha256"] = "0" * 64
-        with self.assertRaisesRegex(cap.CaptureError, "integrity mismatch"):
-            cap._decode_remote_envelope(json.dumps(obj).encode())
-
-    def test_remote_envelope_oversize_rejected(self):
-        with self.assertRaisesRegex(cap.CaptureError, "size invalid"):
-            cap._decode_remote_envelope(b"x" * (cap.MAX_ENVELOPE_BYTES + 1))
+    def test_invalid_hostkey_mode_rejected(self):
+        with self.assertRaisesRegex(cap.CaptureError, "host-key mode"):
+            cap._sftp_args(
+                sftp="/usr/bin/sftp",
+                tailscale="/usr/bin/tailscale",
+                batch=pathlib.Path("/tmp/batch"),
+                known_hosts=pathlib.Path("/tmp/known_hosts"),
+                strict_host_key="no",
+            )
 
 
 @unittest.skipUnless(os.name == "posix", "POSIX subprocess/resource test")
-class HybridTransportPosixTests(unittest.TestCase):
+class SftpTransportPosixTests(unittest.TestCase):
     @mock.patch.object(cap.subprocess, "run")
     @mock.patch.object(cap.shutil, "which")
-    def test_shell_attestation_uses_direct_hardened_sftp(self, which, run):
+    def test_hostkey_probe_uses_only_sftp_subsystem(self, which, run):
         which.side_effect = lambda name: {
             "sftp": "/usr/bin/sftp",
             "tailscale": "/usr/bin/tailscale",
         }[name]
-        passwd = (
-            "root:x:0:0:root:/root:/bin/bash\n"
-            "coolyo:x:1000:1000:Coolyo:/home/coolyo:/bin/bash\n"
-        )
 
         def fake_run(args, **kwargs):
             stage = pathlib.Path(kwargs["cwd"])
-            (stage / "passwd.txt").write_text(passwd, encoding="utf-8")
             known = pathlib.Path(
                 next(
                     x.split("=", 1)[1]
@@ -536,103 +620,87 @@ class HybridTransportPosixTests(unittest.TestCase):
             self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
             self.assertTrue(callable(kwargs["preexec_fn"]))
             self.assertEqual(args[0], "/usr/bin/sftp")
-            self.assertEqual(args[1:3], ["-q", "-F"])
-            self.assertEqual(args[3], "none")
             self.assertIn("StrictHostKeyChecking=accept-new", args)
             self.assertIn("GlobalKnownHostsFile=/dev/null", args)
             self.assertIn("SendEnv=-*", args)
             self.assertIn("ProxyCommand=/usr/bin/tailscale nc %h %p", args)
             self.assertEqual(args[-1], cap.TARGET)
             batch = pathlib.Path(args[args.index("-b") + 1]).read_text()
-            self.assertEqual(batch, cap.build_shell_attestation_batch())
+            self.assertEqual(batch, cap.build_hostkey_probe_batch())
+            self.assertEqual(stage.name.startswith("radiohilal-hostkey-probe-"), True)
             return SimpleNamespace(returncode=0)
 
         run.side_effect = fake_run
         with tempfile.TemporaryDirectory() as td:
-            shell, known = cap.attest_bash_login_shell_via_sftp(
-                pathlib.Path(td)
-            )
-        self.assertEqual(shell, "/bin/bash")
+            known = cap.establish_pinned_host_key_via_sftp(pathlib.Path(td))
         self.assertEqual(known, KNOWN_HOST)
+        which.assert_any_call("sftp")
+        which.assert_any_call("tailscale")
 
     @mock.patch.object(cap.subprocess, "run")
     @mock.patch.object(cap.shutil, "which")
-    def test_identity_bound_exec_uses_direct_hardened_ssh(self, which, run):
+    def test_source_fetch_uses_pinned_sftp_only(self, which, run):
         which.side_effect = lambda name: {
-            "ssh": "/usr/bin/ssh",
+            "sftp": "/usr/bin/sftp",
             "tailscale": "/usr/bin/tailscale",
         }[name]
         payload = b"print('safe')\n"
-        env = remote_envelope(payload)
 
         def fake_run(args, **kwargs):
+            stage = pathlib.Path(kwargs["cwd"])
+            (stage / "source.py").write_bytes(payload)
             self.assertNotIn("shell", kwargs)
             self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stdout"], subprocess.DEVNULL)
             self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
             self.assertTrue(callable(kwargs["preexec_fn"]))
-            self.assertEqual(args[0], "/usr/bin/ssh")
-            self.assertEqual(args[1:3], ["-F", "none"])
-            for token in (
-                "StrictHostKeyChecking=yes",
-                "UpdateHostKeys=no",
-                "GlobalKnownHostsFile=/dev/null",
-                "CanonicalizeHostname=no",
-                "ForwardX11=no",
-                "PermitLocalCommand=no",
-                "ClearAllForwardings=yes",
-                "BatchMode=yes",
-                "ForwardAgent=no",
-                "RequestTTY=no",
-                "SendEnv=-*",
-                "LogLevel=ERROR",
-            ):
-                self.assertIn(token, args)
-            self.assertIn(
-                "ProxyCommand=/usr/bin/tailscale nc %h %p",
-                args,
+            self.assertEqual(args[0], "/usr/bin/sftp")
+            self.assertIn("StrictHostKeyChecking=yes", args)
+            self.assertIn("GlobalKnownHostsFile=/dev/null", args)
+            self.assertIn("ProxyCommand=/usr/bin/tailscale nc %h %p", args)
+            self.assertEqual(args[-1], cap.TARGET)
+            user_known = pathlib.Path(
+                next(
+                    x.split("=", 1)[1]
+                    for x in args
+                    if x.startswith("UserKnownHostsFile=")
+                )
             )
-            self.assertEqual(args[args.index("-l") + 1], cap.TARGET_USER)
-            self.assertEqual(args[-2], cap.TARGET_HOST)
-            self.assertTrue(args[-1].startswith("exec /usr/bin/python3 -I -S -c "))
-            user_known = next(
-                x.split("=", 1)[1]
-                for x in args
-                if x.startswith("UserKnownHostsFile=")
-            )
-            self.assertEqual(pathlib.Path(user_known).read_bytes(), KNOWN_HOST)
-            kwargs["stdout"].write(env)
-            kwargs["stdout"].flush()
+            self.assertEqual(user_known.read_bytes(), KNOWN_HOST)
+            batch = pathlib.Path(args[args.index("-b") + 1]).read_text()
+            self.assertEqual(batch, cap.build_source_fetch_batch())
             return SimpleNamespace(returncode=0)
 
         run.side_effect = fake_run
         with tempfile.TemporaryDirectory() as td:
-            result = cap.fetch_source_via_identity_bound_exec(
-                pathlib.Path(td), "/bin/bash", KNOWN_HOST
+            result = cap.fetch_source_via_pinned_sftp(
+                pathlib.Path(td), KNOWN_HOST
             )
         self.assertEqual(result, payload)
 
     @mock.patch.object(cap.subprocess, "run")
     @mock.patch.object(cap.shutil, "which")
-    def test_identity_bound_exec_never_exposes_remote_stderr(self, which, run):
+    def test_source_fetch_never_exposes_remote_stderr(self, which, run):
         which.side_effect = lambda name: {
-            "ssh": "/usr/bin/ssh",
+            "sftp": "/usr/bin/sftp",
             "tailscale": "/usr/bin/tailscale",
         }[name]
         run.return_value = SimpleNamespace(returncode=7)
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaisesRegex(cap.CaptureError, "exit 7"):
-                cap.fetch_source_via_identity_bound_exec(
-                    pathlib.Path(td), "/bin/bash", KNOWN_HOST
+                cap.fetch_source_via_pinned_sftp(
+                    pathlib.Path(td), KNOWN_HOST
                 )
         _, kwargs = run.call_args
         self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
 
-    def test_identity_bound_exec_requires_bash_attestation(self):
+    def test_source_fetch_rejects_duplicate_known_hosts(self):
         with tempfile.TemporaryDirectory() as td:
-            with self.assertRaisesRegex(cap.CaptureError, "attestation"):
-                cap.fetch_source_via_identity_bound_exec(
-                    pathlib.Path(td), "/bin/zsh", KNOWN_HOST
+            with self.assertRaisesRegex(cap.CaptureError, "duplicate"):
+                cap.fetch_source_via_pinned_sftp(
+                    pathlib.Path(td), KNOWN_HOST + KNOWN_HOST
                 )
+
 
 class OutputTests(unittest.TestCase):
     def test_output_requires_direct_runner_temp_child(self):
@@ -686,7 +754,7 @@ class OutputTests(unittest.TestCase):
             )
             self.assertEqual(
                 manifest["transport"],
-                "tailscale-sftp-attestation-plus-pinned-openssh-identity-bound-exec",
+                "tailscale-sftp-hostkey-probe-plus-pinned-sftp-source-read",
             )
             self.assertEqual(manifest["remote_path"], cap.REMOTE_PATH)
             self.assertFalse(manifest["secret_values_emitted"])
@@ -699,12 +767,12 @@ class OutputTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(runner)}, clear=False):
                 with mock.patch.object(
                     cap,
-                    "attest_bash_login_shell_via_sftp",
-                    return_value=("/bin/bash", KNOWN_HOST),
+                    "establish_pinned_host_key_via_sftp",
+                    return_value=KNOWN_HOST,
                 ):
                     with mock.patch.object(
                         cap,
-                        "fetch_source_via_identity_bound_exec",
+                        "fetch_source_via_pinned_sftp",
                         return_value=b"AFZ_HUB_TOKEN = 'hardcoded'\n",
                     ):
                         with self.assertRaises(cap.CaptureError):
@@ -774,6 +842,69 @@ class WorkflowContractTests(unittest.TestCase):
             "    timeout-minutes: 2\n    steps:",
             "    timeout-minutes: 2\n    permissions:\n      id-token: write\n"
             "    steps:",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_continue_on_error_rejected(self):
+        weakened = self.text.replace(
+            "      - name: Validate capture implementation\n"
+            "        shell: bash",
+            "      - name: Validate capture implementation\n"
+            "        continue-on-error: true\n"
+            "        shell: bash",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_capture_checkout_ref_override_rejected(self):
+        weakened = self.text.replace(
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          persist-credentials: false\n\n"
+            "      - name: Join AFZ tailnet",
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          persist-credentials: false\n"
+            "          ref: main\n\n"
+            "      - name: Join AFZ tailnet",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_tailscale_tag_change_rejected(self):
+        weakened = self.text.replace(
+            "          tags: tag:afz-deploy",
+            "          tags: tag:unexpected",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_tailscale_extra_input_rejected(self):
+        weakened = self.text.replace(
+            "          tags: tag:afz-deploy",
+            "          tags: tag:afz-deploy\n"
+            "          hostname: unexpected",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_step_env_override_rejected(self):
+        weakened = self.text.replace(
+            "      - name: Capture exact validated Control Hub source\n"
+            "        shell: bash",
+            "      - name: Capture exact validated Control Hub source\n"
+            "        env:\n"
+            "          BASH_ENV: /tmp/hook\n"
+            "        shell: bash",
+            1,
+        )
+        self.assert_rejected(weakened)
+
+    def test_shell_override_rejected(self):
+        weakened = self.text.replace(
+            "        shell: bash",
+            "        shell: sh",
             1,
         )
         self.assert_rejected(weakened)
