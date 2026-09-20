@@ -1,0 +1,40 @@
+name: AFZ Tailnet Peer Inventory Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-tailnet-peer-inventory-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  peers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Expiry guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T07:00:00Z' +%s)"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join existing AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Read-only peer inventory
+        shell: bash
+        run: |
+          set +e
+          echo 'AFZ_TAILNET_PEER_INVENTORY_V1'
+          tailscale status
+          echo '--- HP ---'
+          tailscale ping -c 1 --timeout=5s 100.71.26.69
+          echo '--- H3 ---'
+          tailscale ping -c 1 --timeout=5s 100.106.186.118
+          echo 'FINAL_CLASSIFICATION=READ_ONLY_PEER_INVENTORY_COMPLETE'
