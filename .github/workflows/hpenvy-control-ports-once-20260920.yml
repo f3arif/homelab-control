@@ -1,0 +1,47 @@
+name: HP Envy Control Ports Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-control-ports-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe HP Envy read only
+        shell: bash
+        run: |
+          set +e
+          h=100.71.26.69
+          echo "TAILSCALE_STATUS"
+          tailscale status
+          for p in 22 80 443 4533 5149 8788 8789 8790 8791 8792 8793 8794 8795 8796 8797 9000 3000; do
+            if timeout 2 bash -c "</dev/tcp/$h/$p" 2>/dev/null; then
+              echo "PORT_$p=OPEN"
+            else
+              echo "PORT_$p=CLOSED"
+            fi
+          done
+          for u in http://$h:8789/health http://$h:8791/ http://$h:8795/health http://$h:8796/health http://$h:8797/health http://$h:8788/health; do
+            echo "GET=$u"
+            curl -sS --connect-timeout 2 --max-time 5 -i "$u" | sed -n '1,25p' || true
+          done
+          echo "FINAL=READ_ONLY"
