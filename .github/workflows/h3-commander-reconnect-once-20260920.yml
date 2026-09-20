@@ -1,0 +1,86 @@
+name: H3 Commander Reconnect Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-commander-reconnect-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-commander-reconnect-once
+  cancel-in-progress: false
+
+jobs:
+  reconnect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Reject delayed or replayed execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T06:05:00Z' +%s)"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join existing AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Start only existing H3 Commander task through HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > reconnect.ps1 <<'PS'
+          $ErrorActionPreference = 'Stop'
+          if ($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN') { throw 'HOST_GUARD_FAILED' }
+          if ([DateTime]::UtcNow -ge [DateTime]::Parse('2026-09-20T06:05:00Z').ToUniversalTime()) { throw 'REQUEST_EXPIRED' }
+          $name = 'AFZ H3 Desktop Commander Remote'
+          $launcher = 'C:\Users\Faiz\AppData\Local\AFZ\DesktopCommander\h3-remote.cmd'
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'EXISTING_LAUNCHER_MISSING' }
+          $t = Get-ScheduledTask -TaskName $name -TaskPath '\' -ErrorAction Stop
+          $a = (@($t.Actions | ForEach-Object { $_.Execute + ' ' + $_.Arguments }) -join ' ')
+          $silent = ($a -match '(?i)wscript|windowstyle\s+hidden') -or ([string]$t.Principal.LogonType -in @('S4U','Password','ServiceAccount'))
+          if (-not $silent) { throw 'SILENT_EXISTING_TASK_NOT_VERIFIED_NO_CHANGE' }
+          Write-Output ('HOST=' + $env:COMPUTERNAME)
+          Write-Output ('TASK_BEFORE=' + $t.State)
+          if ([string]$t.State -eq 'Disabled') { throw 'TASK_DISABLED_NO_CONFIGURATION_CHANGE' }
+          if ([string]$t.State -eq 'Running') {
+            Stop-ScheduledTask -TaskName $name -TaskPath '\' -ErrorAction Stop
+            Start-Sleep -Seconds 2
+          }
+          $left = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object {
+            $_.CommandLine -match '(?i)desktop-commander' -and $_.CommandLine -match '(?i)(^|\s)remote(\s|$)'
+          })
+          if ($left.Count -gt 0) { throw 'REMOTE_PROCESS_REMAINS_NO_DUPLICATE_STARTED' }
+          Start-ScheduledTask -TaskName $name -TaskPath '\' -ErrorAction Stop
+          Start-Sleep -Seconds 8
+          $after = Get-ScheduledTask -TaskName $name -TaskPath '\' -ErrorAction Stop
+          $info = Get-ScheduledTaskInfo -TaskName $name -TaskPath '\' -ErrorAction Stop
+          Write-Output ('TASK_AFTER=' + $after.State)
+          Write-Output ('TASK_LAST_RESULT=' + $info.LastTaskResult)
+          Write-Output 'TASK_START_REQUESTED=TRUE'
+          Write-Output 'CREDENTIALS_CHANGED=FALSE;NETWORK_RULES_CHANGED=FALSE;SSD_COMMANDS=NONE'
+          PS
+          pwsh -NoProfile -NonInteractive -Command '$e=$null;$t=$null;[void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) "reconnect.ps1"),[ref]$t,[ref]$e);if($e.Count){throw "PowerShell parse failed"}'
+          python3 - <<'PY' > relay-command.txt
+          import base64, pathlib, shlex
+          ps = pathlib.Path('reconnect.ps1').read_text()
+          bootstrap = '$ErrorActionPreference="Stop";try{$s=[Console]::In.ReadToEnd();if([string]::IsNullOrWhiteSpace($s)){throw "EMPTY_SCRIPT"};& ([ScriptBlock]::Create($s))}catch{Write-Output ("RECOVERY_FAILED="+$_.Exception.Message);exit 1}'
+          encoded = base64.b64encode(bootstrap.encode('utf-16le')).decode()
+          relay = '\n'.join([
+              'import getpass,socket,subprocess,sys',
+              'assert getpass.getuser()=="coolyo", "HP_USER_GUARD_FAILED"',
+              'assert socket.gethostname().split(".")[0].lower()=="hpenvy", "HP_HOST_GUARD_FAILED"',
+              'command='+repr(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=8','-o','ConnectionAttempts=1','Faiz@100.106.186.118','powershell.exe -NoProfile -NonInteractive -EncodedCommand '+encoded]),
+              'r=subprocess.run(command,input='+repr(ps)+',text=True,timeout=35)',
+              'sys.exit(r.returncode)',
+          ])
+          payload=base64.b64encode(relay.encode()).decode()
+          print('python3 -c '+shlex.quote('import base64;exec(base64.b64decode('+repr(payload)+'))'))
+          PY
+          timeout 50s tailscale ssh coolyo@100.71.26.69 "$(cat relay-command.txt)"
