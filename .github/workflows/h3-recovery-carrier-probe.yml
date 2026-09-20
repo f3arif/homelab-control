@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: h3-recovery-carrier-probe-${{ github.event.pull_request.number || github.ref }}
@@ -28,9 +27,7 @@ jobs:
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:afz-deploy
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
       - name: Probe H3 recovery carriers read only
         shell: bash
