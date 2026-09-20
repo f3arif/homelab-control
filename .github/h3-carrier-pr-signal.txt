@@ -1,0 +1,3 @@
+requested=2026-09-20T12:38:00-04:00
+purpose=read-only H3 carrier probe for DNS/Desktop Commander recovery
+mutation=false
