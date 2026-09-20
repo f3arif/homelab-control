@@ -63,7 +63,7 @@ jobs:
 
 
   h3-carrier-probe:
-    if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'f3arif' && github.event.pull_request.title == 'AFZ H3 carrier recovery probe' }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'f3arif' && github.event.pull_request.title == 'AFZ H3 carrier recovery probe') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
