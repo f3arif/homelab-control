@@ -1,0 +1,49 @@
+name: HP Envy LAN SSH Reachability Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-lan-ssh-reachability-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Expiry guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T07:30:00Z' +%s)"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe HP Envy LAN route read-only
+        shell: bash
+        run: |
+          set +e
+          host=192.168.50.116
+          echo 'AFZ_HPENVY_LAN_REACHABILITY_V1'
+          ip route get "$host" || true
+          if timeout 5 bash -c "</dev/tcp/$host/22" 2>/dev/null; then
+            echo 'LAN_TCP_22=OPEN'
+          else
+            echo 'LAN_TCP_22=CLOSED_OR_UNROUTABLE'
+          fi
+          for p in 80 443 445 8446; do
+            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "LAN_TCP_$p=OPEN"
+            else
+              echo "LAN_TCP_$p=CLOSED_OR_UNROUTABLE"
+            fi
+          done
+          echo 'FINAL_CLASSIFICATION=AFZ_HPENVY_LAN_REACHABILITY_COMPLETE'
