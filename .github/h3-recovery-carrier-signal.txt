@@ -1,3 +1,4 @@
-requested=2026-09-20T06:35:00Z
+requested=2026-09-20
 purpose=read-only H3 management carrier discovery for DNS/Commander recovery
 mutation=false
+attempt=oauth-secret-fallback-r1
