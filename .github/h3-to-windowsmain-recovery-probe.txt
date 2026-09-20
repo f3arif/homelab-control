@@ -1,2 +1,2 @@
-trigger=2026-09-16T14:06:30-04:00
-purpose=commander-recovery-relay
+trigger=2026-09-20T12:34:00-04:00
+purpose=h3-dns-commander-recovery-carrier-check
