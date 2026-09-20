@@ -33,3 +33,4 @@ jobs:
             echo "DNS_API_${ep^^}_HTTP=$code"
             if [ "$code" = 200 ]; then jq . "/tmp/${ep}.json"; fi
           done
+# trigger: 2026-09-20 dns repair probe
