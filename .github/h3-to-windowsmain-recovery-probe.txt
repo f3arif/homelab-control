@@ -1,4 +1,4 @@
-trigger=2026-09-20T06:52:00Z
+trigger=2026-09-20T06:53:00Z
 purpose=h3-trusted-carrier-port-probe-readonly
 mutation=false
-attempt=sync-r2
+attempt=trusted-path-pr-r3
