@@ -11,17 +11,20 @@ on:
     paths:
       - '.github/h3-recovery-carrier-signal.txt'
       - '.github/workflows/h3-recovery-carrier-probe.yml'
+  issues:
+    types: [opened]
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: h3-recovery-carrier-probe-${{ github.event.pull_request.number || github.ref }}
+  group: h3-recovery-carrier-probe-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
   probe:
+    if: ${{ github.event_name != 'issues' || github.event.issue.title == 'AFZ-H3-RECOVERY-CARRIER-PROBE' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
