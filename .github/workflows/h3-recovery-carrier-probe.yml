@@ -11,6 +11,11 @@ on:
     paths:
       - '.github/h3-recovery-carrier-signal.txt'
       - '.github/workflows/h3-recovery-carrier-probe.yml'
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/h3-recovery-carrier-signal.txt'
   issues:
     types: [opened]
 
@@ -40,6 +45,8 @@ jobs:
         run: |
           set +e
           ip=100.106.186.118
+          echo "EVENT=${{ github.event_name }}"
+          echo "REF=${{ github.ref }}"
           echo "H3_IP=$ip"
           tailscale ping --timeout=5s -c 2 "$ip" || true
           for p in 22 135 139 445 3389 5985 5986 8788 8789 8790 8791 8795 8796 8797; do
