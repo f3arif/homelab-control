@@ -47,3 +47,5 @@ jobs:
             done
           done
           echo "MUTATION=false"
+
+# retrigger: 2026-09-20-h3-dns-recovery-r2
