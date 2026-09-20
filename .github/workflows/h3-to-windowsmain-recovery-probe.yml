@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/h3-to-windowsmain-recovery-probe.yml'
       - '.github/h3-to-windowsmain-recovery-probe.txt'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/h3-to-windowsmain-recovery-probe.txt'
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -62,7 +67,7 @@ jobs:
           timeout 120s tailscale ssh Faiz@100.106.186.118 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
 
   h3-carrier-probe:
-    if: ${{ github.event_name == 'pull_request_target' }}
+    if: ${{ github.event_name == 'pull_request_target' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
