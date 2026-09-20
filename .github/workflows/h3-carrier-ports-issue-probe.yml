@@ -1,0 +1,46 @@
+name: H3 Carrier Ports Probe
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  probe:
+    if: ${{ github.event.issue.title == 'AFZ-H3-CARRIER-PORTS-PROBE' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 fixed management ports
+        shell: bash
+        run: |
+          set +e
+          host='100.106.186.118'
+          echo "H3=$host"
+          tailscale ping --timeout=5s -c 2 "$host" || true
+          for p in 22 80 443 135 139 445 3389 5985 5986 8642 8787 8788 8789 8790 8791 8795 8796 8797 9119 11434; do
+            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          echo "READ_ONLY=true"
+
+      - name: Report completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body "H3 carrier port probe completed. See Actions run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}."
