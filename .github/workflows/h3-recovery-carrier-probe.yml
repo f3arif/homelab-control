@@ -1,0 +1,49 @@
+name: H3 Recovery Carrier Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-recovery-carrier-probe.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-recovery-carrier-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 recovery carriers read only
+        shell: bash
+        run: |
+          set +e
+          ip=100.106.186.118
+          echo "H3_IP=$ip"
+          tailscale ping --timeout=5s -c 2 "$ip" || true
+          for p in 22 135 139 445 3389 5985 5986 8788 8789 8790 8791 8795 8796 8797; do
+            if timeout 3 bash -c "</dev/tcp/$ip/$p" 2>/dev/null; then
+              echo "PORT_$p=OPEN"
+            else
+              echo "PORT_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          for port in 8788 8789 8790 8791 8795 8796 8797; do
+            for scheme in http https; do
+              echo "PROBE=${scheme}://${ip}:${port}/"
+              curl -k -sS --connect-timeout 2 --max-time 5 -D - "${scheme}://${ip}:${port}/" -o /dev/null || true
+            done
+          done
+          echo "MUTATION=false"
