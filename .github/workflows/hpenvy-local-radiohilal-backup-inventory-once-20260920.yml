@@ -1,0 +1,84 @@
+name: HP Envy Local RadioHilal Backup Inventory Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-local-radiohilal-backup-inventory-once-20260920.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 8
+    steps:
+      - name: Host and expiry guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T18:30:00Z' +%s)"
+          test "$(hostname -s | tr '[:upper:]' '[:lower:]')" = "hpenvy"
+          test "$(id -un)" = "coolyo"
+          echo "HP_ENVY_LOCAL_GUARD=PASS"
+      - name: Read-only backup inventory
+        shell: bash
+        run: |
+          set -u
+          echo 'AFZ_RADIOHILAL_HP_LOCAL_BACKUP_INVENTORY_V1'
+          echo "UTC=$(date -u +%FT%TZ)"
+          echo "HOST=$(hostname -f 2>/dev/null || hostname) USER=$(id -un)"
+          echo 'MODE=READ_ONLY RESTORE=FALSE SERVICE_CHANGES=FALSE PUBLISH=FALSE'
+          echo '--- FILESYSTEMS ---'
+          findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS | sed -n '1,160p' || true
+          echo '--- DISKS ---'
+          lsblk -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,SERIAL 2>/dev/null | sed -n '1,180p' || true
+          echo '--- RECENT LARGE/BACKUP ROOTS ---'
+          for r in /mnt /media /run/media /srv /opt /home/coolyo; do
+            [ -d "$r" ] || continue
+            find "$r" -xdev -maxdepth 7 -mmin -10080 \( -iname '*backup*' -o -iname '*asus*' -o -iname '*windows*main*' -o -iname '*radiohilal*' \) -printf '%TY-%Tm-%TdT%TH:%TM:%TS %y %s %p\n' 2>/dev/null | head -n 240 || true
+          done
+          echo '--- HIGH VALUE RADIOHILAL FILES ---'
+          matches=0
+          for r in /mnt /media /run/media /srv /opt /home/coolyo; do
+            [ -d "$r" ] || continue
+            while IFS= read -r -d '' p; do
+              printf 'MATCH\t%s\n' "$p"
+              if [ -f "$p" ]; then
+                stat -c 'META size=%s mtime=%y path=%n' -- "$p" 2>/dev/null || true
+                case "$(basename "$p")" in
+                  RadioHilal.db|RadioHilal.db-wal|RadioHilal.db-shm|LectureSpeakerSourceCatalog.json|*94174bc2*|*candidate-promo-auto-20260908-230623*|*217822E396751EDD*)
+                    sha256sum -- "$p" 2>/dev/null | sed 's/^/SHA256 /' || true ;;
+                esac
+              fi
+              matches=$((matches+1))
+              [ "$matches" -ge 400 ] && break 2
+            done < <(find "$r" -xdev \(
+              -iname 'RadioHilal.db' -o -iname 'RadioHilal.db-wal' -o -iname 'RadioHilal.db-shm' -o
+              -iname 'LectureSpeakerSourceCatalog.json' -o -iname '*RadioHilal*' -o -iname '*radiohilal*' -o
+              -iname '*94174bc2f43c4903b81ca45ed3206a11*' -o -iname '*94174bc2-f43c-4903-b81c-a45ed3206a11*' -o
+              -iname '*candidate-promo-auto-20260908-230623*' -o -iname '*217822E396751EDD*'
+            \) -print0 2>/dev/null)
+          done
+          echo "MATCH_COUNT=$matches"
+          echo '--- GIT RADIOHILAL ---'
+          repos=0
+          for r in /mnt /media /run/media /srv /opt /home/coolyo; do
+            [ -d "$r" ] || continue
+            while IFS= read -r -d '' g; do
+              wd=${g%/.git}
+              u=$(git -C "$wd" remote get-url origin 2>/dev/null || true)
+              case "$u $wd" in
+                *RadioHilal*|*radiohilal*)
+                  echo "GIT_REPO=$wd ORIGIN=$u"
+                  git -C "$wd" status --short --branch 2>/dev/null | sed -n '1,25p' || true
+                  git -C "$wd" log -1 --format='GIT_HEAD=%H %cI %s' 2>/dev/null || true
+                  repos=$((repos+1))
+                  [ "$repos" -ge 20 ] && break 2 ;;
+              esac
+            done < <(find "$r" -xdev -type d -name .git -print0 2>/dev/null)
+          done
+          echo "GIT_REPOS=$repos"
+          echo 'FINAL_CLASSIFICATION=AFZ_RADIOHILAL_HP_LOCAL_BACKUP_INVENTORY_COMPLETE'
