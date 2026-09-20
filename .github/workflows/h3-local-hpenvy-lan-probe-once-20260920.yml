@@ -1,0 +1,42 @@
+name: H3 Local HP Envy LAN Probe Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-local-hpenvy-lan-probe-once-20260920.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Guard and probe HP Envy from H3 LAN
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN') { throw 'HOST_GUARD_FAILED' }
+          if ([DateTime]::UtcNow -ge [DateTime]::Parse('2026-09-20T18:15:00Z').ToUniversalTime()) { throw 'REQUEST_EXPIRED' }
+          Write-Output ('HOST=' + $env:COMPUTERNAME)
+          Write-Output ('USER=' + $env:USERNAME)
+          Write-Output ('UTC=' + [DateTime]::UtcNow.ToString('o'))
+          $targets = @(
+            @{Host='192.168.50.116';Port=22},
+            @{Host='192.168.50.116';Port=8446},
+            @{Host='192.168.50.116';Port=8791},
+            @{Host='100.71.26.69';Port=22}
+          )
+          foreach($t in $targets){
+            try {
+              $c = [System.Net.Sockets.TcpClient]::new()
+              $iar = $c.BeginConnect($t.Host,$t.Port,$null,$null)
+              $ok = $iar.AsyncWaitHandle.WaitOne(2500)
+              if($ok -and $c.Connected){ $c.EndConnect($iar); Write-Output ("TCP_{0}_{1}=OPEN" -f $t.Host,$t.Port) }
+              else { Write-Output ("TCP_{0}_{1}=CLOSED_OR_TIMEOUT" -f $t.Host,$t.Port) }
+              $c.Dispose()
+            } catch { Write-Output ("TCP_{0}_{1}=ERROR:{2}" -f $t.Host,$t.Port,$_.Exception.Message) }
+          }
+          Write-Output 'CHANGES=NONE'
