@@ -1,0 +1,149 @@
+name: RadioHilal HP Envy ASUS Backup Inventory Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/radiohilal-hpenvy-asus-backup-inventory-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: radiohilal-hpenvy-asus-backup-inventory-once-20260920
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Reject delayed or replayed execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T07:00:00Z' +%s)"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join existing AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Read-only Radio Hilal backup inventory on HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 360s tailscale ssh coolyo@100.71.26.69 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          [ "$(id -un)" = "coolyo" ] || { echo 'HP_USER_GUARD_FAILED'; exit 2; }
+          [ "$(hostname -s | tr '[:upper:]' '[:lower:]')" = "hpenvy" ] || { echo 'HP_HOST_GUARD_FAILED'; exit 3; }
+          echo 'AFZ_RADIOHILAL_ASUS_BACKUP_INVENTORY_V1'
+          echo "UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "HOST=$(hostname -f 2>/dev/null || hostname) USER=$(id -un)"
+          echo 'MODE=READ_ONLY;RESTORE=FALSE;SERVICE_CHANGES=FALSE;PUBLISH=FALSE'
+          echo '--- FILESYSTEMS ---'
+          findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS | sed -n '1,120p'
+          echo '--- DISK USAGE ---'
+          df -hT | sed -n '1,120p'
+          echo '--- RECENT BACKUP/ASUS/WINDOWS-MAIN MARKERS (last 4 days, bounded) ---'
+          for r in /mnt /media /run/media /srv /opt /home/coolyo; do
+            [ -d "$r" ] || continue
+            find "$r" -xdev -maxdepth 7 -mmin -5760 \( -iname '*backup*' -o -iname '*asus*' -o -iname '*windows*main*' -o -iname '*radiohilal*' \) -printf '%TY-%Tm-%TdT%TH:%TM:%TS %y %s %p\n' 2>/dev/null | head -n 160 || true
+          done
+          echo '--- LOCAL DATA MOUNTS SELECTED FOR DEEP NAME SCAN ---'
+          mapfile -t roots < <(df -PT | awk 'NR>1 && $2 ~ /^(ext2|ext3|ext4|xfs|btrfs|ntfs|ntfs3|exfat|fuseblk|vfat)$/ {print $7}' | sort -u)
+          printf '%s\n' "${roots[@]:-}"
+          scan_roots=("${roots[@]}")
+          for r in /home/coolyo /srv /opt; do
+            [ -d "$r" ] && scan_roots+=("$r")
+          done
+          declare -A seen=()
+          count=0
+          echo '--- HIGH-VALUE RADIO HILAL PATH MATCHES ---'
+          for r in "${scan_roots[@]}"; do
+            [ -d "$r" ] || continue
+            while IFS= read -r -d '' p; do
+              [ -n "${seen[$p]:-}" ] && continue
+              seen[$p]=1
+              printf 'MATCH\t%s\n' "$p"
+              count=$((count+1))
+              [ "$count" -ge 350 ] && break 2
+            done < <(find "$r" -xdev \(
+              -iname 'RadioHilal.db' -o -iname 'RadioHilal.db-wal' -o -iname 'RadioHilal.db-shm' -o
+              -iname 'LectureSpeakerSourceCatalog.json' -o -iname '*RadioHilal*' -o -iname '*radiohilal*' -o
+              -iname '*94174bc2f43c4903b81ca45ed3206a11*' -o -iname '*94174bc2-f43c-4903-b81c-a45ed3206a11*' -o
+              -iname '*candidate-promo-auto-20260908-230623*' -o -iname '*217822E396751EDD*'
+            \) -print0 2>/dev/null)
+          done
+          echo "MATCH_COUNT=$count"
+          echo '--- EXACT HIGH-VALUE FILE METADATA + SHA256 (bounded) ---'
+          exact=0
+          for p in "${!seen[@]}"; do
+            [ -f "$p" ] || continue
+            b=$(basename "$p")
+            case "$b" in
+              RadioHilal.db|RadioHilal.db-wal|RadioHilal.db-shm|LectureSpeakerSourceCatalog.json|*94174bc2*|*candidate-promo-auto-20260908-230623*|*217822E396751EDD*) ;;
+              *) continue ;;
+            esac
+            stat -c 'FILEMETA size=%s mtime=%y path=%n' -- "$p" 2>/dev/null || true
+            sha256sum -- "$p" 2>/dev/null | sed 's/^/SHA256 /' || true
+            exact=$((exact+1))
+            [ "$exact" -ge 80 ] && break
+          done
+          echo "EXACT_HASHED=$exact"
+          echo '--- SMALL TEXT/MANIFEST IDENTIFIER HITS (bounded) ---'
+          text_hits=0
+          for p in "${!seen[@]}"; do
+            [ -f "$p" ] || continue
+            sz=$(stat -c %s -- "$p" 2>/dev/null || echo 999999999)
+            [ "$sz" -le 5242880 ] || continue
+            case "$p" in
+              *.json|*.txt|*.md|*.srt|*.yaml|*.yml|*.manifest|*.log)
+                if grep -IEn -m 8 '94174bc2|217822E396751EDD|100 Years Ago A Snapshot Of The Ummah|2026-09-08-astra-v1' -- "$p" 2>/dev/null; then
+                  echo "TEXTFILE=$p"
+                  text_hits=$((text_hits+1))
+                  [ "$text_hits" -ge 60 ] && break
+                fi
+                ;;
+            esac
+          done
+          echo "TEXT_HIT_FILES=$text_hits"
+          echo '--- SQLITE READ-ONLY IDENTITY CHECKS ---'
+          if command -v sqlite3 >/dev/null 2>&1; then
+            dbchecked=0
+            for p in "${!seen[@]}"; do
+              [ -f "$p" ] || continue
+              [ "$(basename "$p")" = 'RadioHilal.db' ] || continue
+              echo "DB=$p"
+              sqlite3 -readonly "$p" '.tables' 2>&1 | sed -n '1,8p' || true
+              sqlite3 -readonly "$p" "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE '%review%' LIMIT 20;" 2>&1 | sed -n '1,20p' || true
+              dbchecked=$((dbchecked+1))
+              [ "$dbchecked" -ge 12 ] && break
+            done
+            echo "DB_CHECKED=$dbchecked"
+          else
+            echo 'SQLITE3=NOT_FOUND'
+          fi
+          echo '--- RADIOHILAL GIT REPOSITORIES (bounded) ---'
+          grepos=0
+          for r in "${scan_roots[@]}"; do
+            [ -d "$r" ] || continue
+            while IFS= read -r -d '' g; do
+              wd=${g%/.git}
+              url=$(git -C "$wd" remote get-url origin 2>/dev/null || true)
+              case "$url $wd" in
+                *RadioHilal*|*radiohilal*)
+                  echo "GIT_REPO=$wd ORIGIN=$url"
+                  git -C "$wd" status --short --branch 2>/dev/null | sed -n '1,20p' || true
+                  git -C "$wd" log -1 --format='GIT_HEAD=%H %cI %s' 2>/dev/null || true
+                  grepos=$((grepos+1))
+                  [ "$grepos" -ge 20 ] && break 2
+                  ;;
+              esac
+            done < <(find "$r" -xdev -type d -name .git -print0 2>/dev/null)
+          done
+          echo "GIT_REPOS=$grepos"
+          echo 'FINAL_CLASSIFICATION=AFZ_RADIOHILAL_ASUS_BACKUP_INVENTORY_COMPLETE'
+          REMOTE
