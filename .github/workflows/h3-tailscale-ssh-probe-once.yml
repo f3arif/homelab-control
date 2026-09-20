@@ -1,4 +1,4 @@
-# r5 relay probe refresh 2026-09-05T18:20-04:00
+# H3 Commander reconnect transport check 2026-09-20; no SSD or service changes
 name: H3 Tailscale SSH Probe Once
 
 on:
