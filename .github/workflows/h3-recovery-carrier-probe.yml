@@ -1,39 +1,23 @@
 name: H3 Recovery Carrier Probe
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/h3-recovery-carrier-probe.yml'
-      - '.github/h3-recovery-carrier-signal.txt'
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/h3-recovery-carrier-signal.txt'
-      - '.github/workflows/h3-recovery-carrier-probe.yml'
-  pull_request_target:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-    paths:
-      - '.github/h3-recovery-carrier-signal.txt'
   issues:
     types: [opened]
 
 permissions:
   contents: read
+  issues: write
   id-token: write
-
-concurrency:
-  group: h3-recovery-carrier-probe-${{ github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   probe:
-    if: ${{ github.event_name != 'issues' || github.event.issue.title == 'AFZ-H3-RECOVERY-CARRIER-PROBE' }}
+    if: ${{ github.event.issue.title == 'AFZ-H3-RECOVERY-CARRIER-DEFAULT-CONTEXT' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Join AFZ tailnet
+        id: tailscale
+        continue-on-error: true
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -41,25 +25,46 @@ jobs:
           tags: tag:afz-deploy
 
       - name: Probe H3 recovery carriers read only
+        id: carrier
+        if: ${{ steps.tailscale.outcome == 'success' }}
         shell: bash
         run: |
           set +e
           ip=100.106.186.118
-          echo "EVENT=${{ github.event_name }}"
-          echo "REF=${{ github.ref }}"
-          echo "H3_IP=$ip"
-          tailscale ping --timeout=5s -c 2 "$ip" || true
-          for p in 22 135 139 445 3389 5985 5986 8788 8789 8790 8791 8795 8796 8797; do
-            if timeout 3 bash -c "</dev/tcp/$ip/$p" 2>/dev/null; then
-              echo "PORT_$p=OPEN"
-            else
-              echo "PORT_$p=CLOSED_OR_FILTERED"
-            fi
-          done
-          for port in 8788 8789 8790 8791 8795 8796 8797; do
-            for scheme in http https; do
-              echo "PROBE=${scheme}://${ip}:${port}/"
-              curl -k -sS --connect-timeout 2 --max-time 5 -D - "${scheme}://${ip}:${port}/" -o /dev/null || true
+          {
+            echo "event=${{ github.event_name }}"
+            echo "ref=${{ github.ref }}"
+            tailscale ping --timeout=5s -c 2 "$ip" || true
+            for p in 22 135 139 445 3389 5985 5986 8788 8789 8790 8791 8795 8796 8797; do
+              if timeout 3 bash -c "</dev/tcp/$ip/$p" 2>/dev/null; then
+                echo "PORT_$p=OPEN"
+              else
+                echo "PORT_$p=CLOSED_OR_FILTERED"
+              fi
             done
-          done
-          echo "MUTATION=false"
+          } | tee /tmp/h3-probe.txt
+
+      - name: Report result to trigger issue
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          TS_OUTCOME: ${{ steps.tailscale.outcome }}
+          CARRIER_OUTCOME: ${{ steps.carrier.outcome }}
+        shell: bash
+        run: |
+          {
+            echo "H3 carrier probe result"
+            echo
+            echo "event: ${{ github.event_name }}"
+            echo "ref: ${{ github.ref }}"
+            echo "tailscale: $TS_OUTCOME"
+            echo "carrier: $CARRIER_OUTCOME"
+            if [ -f /tmp/h3-probe.txt ]; then
+              echo
+              echo '~~~'
+              cat /tmp/h3-probe.txt
+              echo '~~~'
+            fi
+          } >/tmp/report.md
+          gh issue comment "$ISSUE" --repo "${{ github.repository }}" --body-file /tmp/report.md
