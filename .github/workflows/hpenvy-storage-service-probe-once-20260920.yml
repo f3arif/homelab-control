@@ -1,0 +1,49 @@
+name: HP Envy Storage Service Probe Once 20260920
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-storage-service-probe-once-20260920.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Expiry guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-09-20T07:15:00Z' +%s)"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe read-only storage surfaces
+        shell: bash
+        run: |
+          set +e
+          host=100.71.26.69
+          echo 'AFZ_HPENVY_STORAGE_SURFACE_PROBE_V1'
+          tailscale ping --timeout=5s -c 1 "$host" || true
+          for p in 22 80 111 139 443 445 873 2049 3000 8080 8181 8500 9000; do
+            if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          echo '--- HTTP HEADS ---'
+          for u in             "http://$host/"             "https://$host/"             "http://$host:8080/"             "http://$host:8181/"             "http://$host:3000/"; do
+            echo "URL=$u"
+            curl -k -sS -I --connect-timeout 3 --max-time 5 "$u" | sed -n '1,8p' || true
+          done
+          echo 'FINAL_CLASSIFICATION=AFZ_HPENVY_STORAGE_SURFACE_PROBE_COMPLETE'
