@@ -1,2 +1,3 @@
-trigger=2026-09-16T14:06:30-04:00
-purpose=commander-recovery-relay
+trigger=2026-09-20T06:50:00Z
+purpose=h3-trusted-carrier-port-probe-readonly
+mutation=false
