@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/h3-to-windowsmain-recovery-probe.yml'
       - '.github/h3-to-windowsmain-recovery-probe.txt'
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/h3-to-windowsmain-recovery-probe.txt'
 
 permissions:
   contents: read
@@ -13,6 +18,7 @@ permissions:
 
 jobs:
   probe:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -54,3 +60,32 @@ jobs:
           )
           enc=$(printf '%s' "$ps" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
           timeout 120s tailscale ssh Faiz@100.106.186.118 "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
+
+  h3-carrier-probe:
+    if: ${{ github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe fixed H3 management ports
+        shell: bash
+        run: |
+          set +e
+          host='100.106.186.118'
+          echo "EVENT=${{ github.event_name }}"
+          echo "REF=${{ github.ref }}"
+          tailscale ping --timeout=5s -c 2 "$host" || true
+          for p in 22 80 443 445 3389 5985 5986 8642 8788 8789 8790 8791 8795 8796 8797 9119 11434; do
+            if timeout 4 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then
+              echo "TCP_$p=OPEN"
+            else
+              echo "TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          echo "READ_ONLY=PASS"
