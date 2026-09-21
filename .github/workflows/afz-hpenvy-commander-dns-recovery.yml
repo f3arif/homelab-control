@@ -7,46 +7,14 @@ permissions:
   contents: read
 concurrency:
   group: afz-hpenvy-commander-dns-recovery
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
-  diagnose:
-    runs-on: [self-hosted, Linux, X64, afz-linux, h3]
-    timeout-minutes: 3
+  close-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
-      - name: Diagnose HP with existing local SSH identity and pinned host key
-        shell: bash
+      - name: End remote diagnostic without further connection attempts
         run: |
-          set -euo pipefail
-          umask 077
-          test "$RUNNER_NAME" = h3-linux || { echo UNEXPECTED_RUNNER; exit 40; }
-          key=/mnt/c/Users/Faiz/.ssh/afz_hplaptop_worker
-          test -f "$key" || { echo EXISTING_HP_KEY_NOT_AVAILABLE; exit 41; }
-          work=$(mktemp -d)
-          trap 'rm -f "$work/identity" "$work/known_hosts"; rmdir "$work"' EXIT
-          ssh-keyscan -T 5 -t ed25519 192.168.50.116 > "$work/known_hosts" 2>/dev/null
-          fingerprint=$(ssh-keygen -lf "$work/known_hosts" | awk '{print $2}')
-          test "$fingerprint" = SHA256:P8KqbKaQjXZBvJXZuehLZD5LapnoC1lN+lYdtjEBbbQ || { echo HP_HOST_KEY_MISMATCH; exit 42; }
-          echo HP_HOST_KEY_MATCH=true
-          cp "$key" "$work/identity"
-          chmod 600 "$work/identity"
-          timeout 70 ssh -i "$work/identity" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$work/known_hosts" -o ConnectTimeout=5 coolyo@192.168.50.116 'bash -s' <<'REMOTE'
-          set -u
-          test "$(hostname -s)" = hpenvy || exit 40
-          echo HOST_CONFIRMED=hpenvy
-          date -u '+UTC=%Y-%m-%dT%H:%M:%SZ'
-          echo '===RESOLVER==='; ls -l /etc/resolv.conf; cat /etc/resolv.conf
-          echo '===DNS_MANAGERS==='; systemctl is-active systemd-resolved NetworkManager tailscaled || true
-          command -v resolvectl >/dev/null && resolvectl status --no-pager || true
-          command -v nmcli >/dev/null && nmcli -t -f NAME,TYPE,DEVICE connection show --active || true
-          echo '===TAILSCALE_DNS==='; timeout 5 tailscale dns status 2>&1 || true
-          echo '===ROUTE==='; ip -4 route show default
-          echo '===NAME_LOOKUP==='; timeout 7 getent ahostsv4 mcp.desktopcommander.app || true
-          timeout 7 getent ahostsv4 registry.npmjs.org || true
-          echo '===DIRECT_HTTPS==='; curl -sS --connect-timeout 3 --max-time 6 -o /dev/null -w 'CLOUDFLARE_IP_HTTP=%{http_code}\n' https://1.1.1.1 || true
-          echo '===COMMANDER_UNITS==='; systemctl list-unit-files --type=service --no-pager --no-legend | grep -Ei 'commander|remote-mcp' || true
-          systemctl --user list-unit-files --type=service --no-pager --no-legend | grep -Ei 'commander|remote-mcp' || true
-          echo '===COMMANDER_PROCESS_COUNT==='; pgrep -f 'node .*desktop-commander.*remote|node .*remote-device' | wc -l
-          echo '===SUDO_CHECK==='; sudo -n true >/dev/null 2>&1 && echo SUDO_AVAILABLE=true || echo SUDO_AVAILABLE=false
-          echo '===FAMILYPTT_HEALTH==='; curl -fsS --connect-timeout 2 --max-time 4 http://127.0.0.1:7883/health || true; echo
-          echo DIAGNOSIS_FINISHED_NO_REMOTE_MUTATIONS
-          REMOTE
+          echo 'STOPPED: hosted Tailscale identity was denied; H3 existing SSH identity was denied.'
+          echo 'No HP DNS, authentication, service or production configuration was changed.'
+          echo 'Any older queued diagnostic in this concurrency group is superseded.'
