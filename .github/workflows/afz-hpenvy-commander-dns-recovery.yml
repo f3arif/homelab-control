@@ -1,4 +1,4 @@
-name: HP Envy Commander DNS recovery
+name: HP temporary FamilyPTT edge external probe
 on:
   push:
     branches: [ops/hpenvy-commander-dns-recovery-20260921]
@@ -9,12 +9,20 @@ concurrency:
   group: afz-hpenvy-commander-dns-recovery
   cancel-in-progress: true
 jobs:
-  close-diagnostic:
+  probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 2
     steps:
-      - name: End remote diagnostic without further connection attempts
+      - name: Probe public API and LiveKit from outside home LAN
+        shell: bash
         run: |
-          echo 'STOPPED: hosted Tailscale identity was denied; H3 existing SSH identity was denied.'
-          echo 'No HP DNS, authentication, service or production configuration was changed.'
-          echo 'Any older queued diagnostic in this concurrency group is superseded.'
+          set -euo pipefail
+          echo '===API==='
+          api=$(curl -fsS --connect-timeout 5 --max-time 15 https://ptt-api.afzeng.ca/health)
+          printf '%s\n' "$api"
+          grep -q '"ok":true' <<<"$api"
+          echo '===LIVEKIT==='
+          live=$(curl -fsS --connect-timeout 5 --max-time 15 https://ptt-livekit.afzeng.ca/)
+          printf '%s\n' "$live"
+          test "$live" = "OK"
+          echo 'EXTERNAL_FAMILYPTT_EDGE=PASS'
