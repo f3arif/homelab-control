@@ -1,0 +1,21 @@
+{
+  "schema": "afz-hermes-autopilot-github-readback-v1",
+  "observed_utc": "2026-09-15T02:18:17Z",
+  "repository": "f3arif/homelab-control",
+  "base_branch": "main",
+  "base_sha": "0e8987577c5d5860ca55cdff4e1943bc22ff67e9",
+  "feature_branch": "feature/hermes-autopilot-protected-integration-20260914",
+  "source_evidence_commit": "0d8d1e51835d9b463eca82bd9775db954344840d",
+  "remote_branch_sha_at_pr_creation": "0d8d1e51835d9b463eca82bd9775db954344840d",
+  "pull_request": {
+    "number": 238,
+    "url": "https://github.com/f3arif/homelab-control/pull/238",
+    "state": "OPEN",
+    "draft": true,
+    "base": "main",
+    "head": "feature/hermes-autopilot-protected-integration-20260914"
+  },
+  "merged": false,
+  "deployed": false,
+  "production_enforced": false
+}

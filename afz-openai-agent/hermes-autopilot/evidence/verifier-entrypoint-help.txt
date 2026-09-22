@@ -1,0 +1,15 @@
+usage: afz-autopilot-health-verify [-h] --packet PACKET --packet-sha256
+                                   PACKET_SHA256 --source-sha256 SOURCE_SHA256
+                                   --expected-commit EXPECTED_COMMIT
+                                   --approval-id APPROVAL_ID --output OUTPUT
+
+Fresh-process verifier entrypoint for immutable health packets.
+
+options:
+  -h, --help            show this help message and exit
+  --packet PACKET
+  --packet-sha256 PACKET_SHA256
+  --source-sha256 SOURCE_SHA256
+  --expected-commit EXPECTED_COMMIT
+  --approval-id APPROVAL_ID
+  --output OUTPUT
