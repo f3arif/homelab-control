@@ -1,0 +1,72 @@
+name: RadioHilal HP Envy Control Hub read-only capture
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/radiohilal-hpenvy-controlhub-readonly-capture.yml'
+      - '.github/afz-radiohilal-controlhub-capture-signal.txt'
+      - 'afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py'
+      - 'afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: radiohilal-hpenvy-controlhub-readonly-capture
+  cancel-in-progress: false
+
+jobs:
+  validate-readonly-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate capture implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py
+          python3 afz-openai-agent/control/test_radiohilal_hpenvy_controlhub_capture.py -v
+
+  capture:
+    needs: validate-readonly-boundary
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Capture exact validated Control Hub source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 afz-openai-agent/control/radiohilal_hpenvy_controlhub_capture.py \
+            --output "${RUNNER_TEMP}/radiohilal-controlhub-capture"
+
+      - name: Upload validated read-only capture
+        uses: actions/upload-artifact@v4
+        with:
+          name: radiohilal-hpenvy-controlhub-readonly-capture
+          path: |
+            ${{ runner.temp }}/radiohilal-controlhub-capture/controlhub-source.zip
+            ${{ runner.temp }}/radiohilal-controlhub-capture/controlhub-manifest.json
+            ${{ runner.temp }}/radiohilal-controlhub-capture/validation.txt
+            ${{ runner.temp }}/radiohilal-controlhub-capture/sha256.txt
+          if-no-files-found: error
+          retention-days: 7
