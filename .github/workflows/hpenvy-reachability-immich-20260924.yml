@@ -1,0 +1,41 @@
+name: HP Envy Reachability for Immich 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-reachability-immich-20260924.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Check HP Envy reachability
+        shell: bash
+        run: |
+          set +e
+          echo '=== PEER ==='
+          tailscale status | grep -E '100[.]71[.]26[.]69|hpenvy' || true
+          echo '=== PING ==='
+          tailscale ping --timeout=6s --c=2 100.71.26.69 || true
+          echo '=== TCP ==='
+          for p in 22 80 443 8500 8792 8646 2283; do
+            if timeout 5 bash -c "</dev/tcp/100.71.26.69/$p" 2>/dev/null; then
+              echo "HPENVY_TCP_$p=OPEN"
+            else
+              echo "HPENVY_TCP_$p=CLOSED_OR_FILTERED"
+            fi
+          done
+          echo 'CHECK=COMPLETE'
