@@ -1,0 +1,65 @@
+name: H3 to HP Envy Immich Probe 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-hpenvy-immich-probe-20260924.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 8
+    steps:
+      - name: Verify H3 and inspect HP Envy for Immich
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN') { throw "HOST_GUARD_FAILED: $env:COMPUTERNAME" }
+
+          $ssh = (Get-Command ssh.exe -ErrorAction Stop).Source
+          $target = 'coolyo@100.71.26.69'
+          Write-Output ('RUNNER_HOST=' + $env:COMPUTERNAME)
+          Write-Output ('SSH=' + $ssh)
+
+          $tcp = [System.Net.Sockets.TcpClient]::new()
+          try {
+            $iar = $tcp.BeginConnect('100.71.26.69',22,$null,$null)
+            if (-not $iar.AsyncWaitHandle.WaitOne(5000) -or -not $tcp.Connected) { throw 'HP_ENVY_SSH_PORT_UNREACHABLE' }
+            $tcp.EndConnect($iar)
+            Write-Output 'HP_ENVY_SSH_PORT=OPEN'
+          } finally {
+            $tcp.Dispose()
+          }
+
+          $remote = @'
+          set -eu
+          echo HOSTNAME=$(hostname)
+          echo USER=$(id -un)
+          echo UTC=$(date -u +%FT%TZ)
+          echo OS=$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')
+          echo CPU_THREADS=$(nproc)
+          free -h
+          echo '--- DISK ---'
+          df -h / /home 2>/dev/null || true
+          echo '--- DOCKER ---'
+          docker --version || true
+          docker compose version || true
+          docker ps --format 'table {{.Names}}	{{.Status}}	{{.Ports}}' || true
+          echo '--- IMMICH EXISTING ---'
+          docker ps -a --format '{{.Names}} {{.Image}} {{.Status}} {{.Ports}}' 2>/dev/null | grep -i immich || true
+          echo '--- PORT 2283 ---'
+          ss -ltn 2>/dev/null | grep ':2283 ' || true
+          echo '--- TAILSCALE ---'
+          command -v tailscale >/dev/null 2>&1 && tailscale ip -4 || true
+          if sudo -n true 2>/dev/null; then echo SUDO_NONINTERACTIVE=YES; else echo SUDO_NONINTERACTIVE=NO; fi
+          '@
+
+          $out = & $ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new $target $remote 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Output $_ }
+          if ($code -ne 0) { throw "SSH_REMOTE_PROBE_FAILED_EXIT_$code" }
+          Write-Output 'PROBE=PASS'
