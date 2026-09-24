@@ -1,0 +1,65 @@
+name: H3 LAN Recovery Probe via HP Envy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h3-lan-recovery-probe-via-hpenvy.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 LAN/control paths from HP Envy
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ping --timeout=5s -c 2 100.71.26.69
+
+          py=$(cat <<'PY'
+          import json, socket, subprocess
+          host='192.168.50.185'
+          ports=[22,135,139,445,3389,5985,5986,8642,8788,8789,8790,8791,8795,8796,8797,9119,11434]
+          result={'host':host,'ports':{}}
+          for p in ports:
+              s=socket.socket()
+              s.settimeout(2)
+              try:
+                  s.connect((host,p))
+                  result['ports'][str(p)]='OPEN'
+              except Exception as e:
+                  result['ports'][str(p)]='CLOSED_OR_FILTERED'
+              finally:
+                  s.close()
+
+          cmd=[
+              'ssh','-o','BatchMode=yes','-o','ConnectTimeout=8',
+              '-o','ConnectionAttempts=1',
+              '-o','StrictHostKeyChecking=accept-new',
+              'Faiz@192.168.50.185','hostname'
+          ]
+          try:
+              r=subprocess.run(cmd,capture_output=True,text=True,timeout=15)
+              result['sshExit']=r.returncode
+              result['sshStdout']=r.stdout.strip()[:500]
+              result['sshStderr']=r.stderr.strip()[:1200]
+          except Exception as e:
+              result['sshExit']=None
+              result['sshError']=str(e)
+          print(json.dumps(result,separators=(',',':')))
+          PY
+          )
+          enc=$(printf '%s' "$py" | base64 -w0)
+          timeout 60s tailscale ssh coolyo@100.71.26.69 "python3 -c \"import base64;exec(base64.b64decode('$enc'))\""
