@@ -1,0 +1,55 @@
+name: Pi Relay to HP Envy Probe 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pi-relay-hpenvy-probe-20260924.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe Pi relay and HP Envy from Pi
+        shell: bash
+        run: |
+          set +e
+          echo '=== PI PEER ==='
+          tailscale status | grep -E '100[.]91[.]50[.]9|rasp|pi' || true
+          tailscale ping --timeout=5s --c=1 100.91.50.9 || true
+          for p in 22 8087; do
+            if timeout 4 bash -c "</dev/tcp/100.91.50.9/$p" 2>/dev/null; then echo "PI_TCP_$p=OPEN"; else echo "PI_TCP_$p=CLOSED_OR_FILTERED"; fi
+          done
+
+          relay=$(cat <<'RELAY'
+          set +e
+          echo "RELAY_HOST=$(hostname)"
+          echo "RELAY_USER=$(id -un)"
+          echo '--- HP LAN CANDIDATES ---'
+          for host in 192.168.50.116 192.168.50.185; do
+            echo "HOST=$host"
+            ping -c 1 -W 2 "$host" 2>/dev/null | tail -2 || true
+            for p in 22 8500 8792; do
+              if timeout 3 bash -c "</dev/tcp/$host/$p" 2>/dev/null; then echo "$host TCP $p OPEN"; else echo "$host TCP $p CLOSED"; fi
+            done
+          done
+          echo '--- HP TAILSCALE FROM PI ---'
+          tailscale ping --timeout=5s --c=1 100.71.26.69 || true
+          if timeout 4 bash -c "</dev/tcp/100.71.26.69/22" 2>/dev/null; then echo HP_TS_TCP_22=OPEN; else echo HP_TS_TCP_22=CLOSED; fi
+          echo 'RELAY_PROBE=COMPLETE'
+          RELAY
+          )
+          printf '%s\n' "$relay" | tailscale ssh coolyo@100.91.50.9 'bash -s'
+          echo "PI_SSH_EXIT=$?"
