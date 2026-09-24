@@ -1,0 +1,39 @@
+name: AFZ Relay Reachability 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-relay-reachability-20260924.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe possible relay nodes
+        shell: bash
+        run: |
+          set +e
+          echo '=== STATUS ==='
+          tailscale status
+          for spec in 'H3 100.106.186.118' 'WINDOWSMAIN 100.70.25.8' 'HPLAPTOP 100.99.242.89' 'HPENVY 100.71.26.69' 'PI 100.91.50.9'; do
+            set -- $spec
+            name=$1; ip=$2
+            echo "=== $name $ip ==="
+            tailscale ping --timeout=3s --c=1 "$ip" || true
+            for p in 22 8797 9119; do
+              if timeout 2 bash -c "</dev/tcp/$ip/$p" 2>/dev/null; then echo "$name TCP $p OPEN"; else echo "$name TCP $p CLOSED_OR_FILTERED"; fi
+            done
+          done
+          echo RELAY_PROBE=COMPLETE
