@@ -1,0 +1,66 @@
+name: HP Envy Immich Preflight 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-immich-preflight-20260924.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Inspect HP Envy for Immich
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_script=$(cat <<'REMOTE'
+          set -eu
+          echo "HOSTNAME=$(hostname)"
+          echo "USER=$(id -un)"
+          echo "UTC=$(date -u +%FT%TZ)"
+          echo "OS=$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+          echo "CPU_THREADS=$(nproc)"
+          echo '--- MEMORY ---'
+          free -h
+          awk '/MemTotal|MemAvailable|SwapTotal|SwapFree/ {print}' /proc/meminfo
+          echo '--- LOAD ---'
+          uptime
+          echo '--- DISKS ---'
+          df -hT /
+          df -hT /home 2>/dev/null || true
+          lsblk -o NAME,SIZE,FSTYPE,FSAVAIL,FSUSE%,MOUNTPOINTS
+          echo '--- DOCKER ---'
+          docker --version || true
+          docker compose version || true
+          echo '--- RUNNING CONTAINERS ---'
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
+          echo '--- IMMICH EXISTING ---'
+          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null | grep -i immich || true
+          echo '--- PORTS ---'
+          ss -ltnp 2>/dev/null | grep -E ':(2283|5432|6379)[[:space:]]' || true
+          echo '--- TAILSCALE ---'
+          tailscale ip -4 || true
+          tailscale serve status || true
+          echo '--- SUDO ---'
+          if sudo -n true 2>/dev/null; then echo SUDO_NONINTERACTIVE=YES; else echo SUDO_NONINTERACTIVE=NO; fi
+          echo '--- CANDIDATE DIRS ---'
+          for d in /srv /opt /home/coolyo /var/lib/docker; do
+            [ -e "$d" ] && du -sh "$d" 2>/dev/null || true
+          done
+          echo 'PREFLIGHT=PASS'
+          REMOTE
+          )
+          printf '%s\n' "$remote_script" | tailscale ssh coolyo@100.71.26.69 'bash -s'
