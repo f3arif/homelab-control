@@ -1,0 +1,29 @@
+name: H3 Blog OAuth auth help
+
+on:
+  push:
+    branches:
+      - ops/h3-blog-oauth-reauth-20260924
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Inspect Hermes auth command on H3
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference=''Continue''; $env:HERMES_HOME=''C:\AFZ\HermesProfiles\afz-blog-oauth-only''; $h=Join-Path $env:LOCALAPPDATA ''hermes\bin\hermes.exe''; Write-Output ''=== HERMES AUTH HELP ===''; & $h auth --help 2>&1; Write-Output ''=== HERMES LOGIN HELP ===''; & $h login --help 2>&1; Write-Output ''=== HERMES PROVIDER HELP ===''; & $h auth add --help 2>&1"'
+          timeout 60s tailscale ssh Faiz@100.106.186.118 "$remote"
