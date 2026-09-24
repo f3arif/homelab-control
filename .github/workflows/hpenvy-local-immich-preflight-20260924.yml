@@ -1,0 +1,57 @@
+name: HP Envy Local Immich Preflight 20260924
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hpenvy-local-immich-preflight-20260924.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 6
+    steps:
+      - name: Guard exact HP Envy host
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "HOST=$(hostname -s) USER=$(id -un)"
+          test "$(hostname -s | tr '[:upper:]' '[:lower:]')" = "hpenvy"
+          test "$(id -un)" = "coolyo"
+          echo "HP_ENVY_LOCAL_GUARD=PASS"
+
+      - name: Inspect Immich readiness read only
+        shell: bash
+        run: |
+          set -u
+          echo "UTC=$(date -u +%FT%TZ)"
+          echo "OS=$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+          echo "CPU_THREADS=$(nproc)"
+          echo '--- MEMORY ---'
+          free -h
+          awk '/MemTotal|MemAvailable|SwapTotal|SwapFree/ {print}' /proc/meminfo
+          echo '--- LOAD ---'
+          uptime
+          echo '--- FILESYSTEMS ---'
+          df -hT /
+          df -hT /home 2>/dev/null || true
+          lsblk -o NAME,SIZE,FSTYPE,FSAVAIL,FSUSE%,MOUNTPOINTS
+          echo '--- DOCKER ---'
+          docker --version || true
+          docker compose version || true
+          echo '--- CONTAINERS ---'
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
+          echo '--- IMMICH EXISTING ---'
+          docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null | grep -i immich || true
+          echo '--- PORTS ---'
+          ss -ltnp 2>/dev/null | grep -E ':(2283|5432|6379)[[:space:]]' || true
+          echo '--- TAILSCALE ---'
+          tailscale ip -4 || true
+          tailscale status --self=true 2>/dev/null || true
+          tailscale serve status || true
+          echo '--- SUDO ---'
+          if sudo -n true 2>/dev/null; then echo SUDO_NONINTERACTIVE=YES; else echo SUDO_NONINTERACTIVE=NO; fi
+          echo 'PREFLIGHT=PASS'
