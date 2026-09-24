@@ -1,0 +1,67 @@
+name: H3 Blog Hermes OAuth Device Auth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'afz-openai-agent/Invoke-H3-Hermes-Blog-OpenAICodexAuth.ps1'
+      - '.github/workflows/h3-blog-hermes-oauth-device-auth.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: h3-blog-hermes-oauth-device-auth
+  cancel-in-progress: false
+
+jobs:
+  start-device-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Start guarded H3 Blog OpenAI device auth
+        env:
+          AFZ_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tailscale ping --timeout=5s -c 2 100.106.186.118
+
+          url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/Invoke-H3-Hermes-Blog-OpenAICodexAuth.ps1"
+
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script""
+
+          raw=$(timeout 75s tailscale ssh Faiz@100.106.186.118 "$remote")
+          printf '%s\n' "$raw"
+
+          RAW="$raw" python3 - <<'PY'
+          import json,os
+          lines=[x.strip() for x in os.environ.get('RAW','').splitlines() if x.strip()]
+          parsed=None
+          for line in reversed(lines):
+              try:
+                  value=json.loads(line)
+              except Exception:
+                  continue
+              if isinstance(value,dict):
+                  parsed=value
+                  break
+          assert parsed is not None, 'No JSON result returned from H3 auth launcher'
+          assert parsed.get('classification')=='AUTH_DEVICE_CODE_READY', parsed
+          assert parsed.get('provider')=='openai-codex', parsed
+          assert parsed.get('secretValuesEmitted') is False, parsed
+          print('AUTH_DEVICE_CODE_READY=PASS')
+          print('DEVICE_URL='+str(parsed.get('deviceUrl') or ''))
+          print('DEVICE_CODE='+str(parsed.get('deviceCode') or ''))
+          print('REMOTE_AUTH_PID='+str(parsed.get('pid') or ''))
+          print('REUSED_EXISTING_ATTEMPT='+str(bool(parsed.get('reusedExistingAttempt',False))).lower())
+          PY
