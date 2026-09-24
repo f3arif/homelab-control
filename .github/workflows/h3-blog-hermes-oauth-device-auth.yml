@@ -38,7 +38,7 @@ jobs:
 
           url="https://raw.githubusercontent.com/f3arif/homelab-control/${AFZ_SHA}/afz-openai-agent/Invoke-H3-Hermes-Blog-OpenAICodexAuth.ps1"
 
-          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script""
+          remote="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"\$ProgressPreference='SilentlyContinue'; \$script=(Invoke-WebRequest -UseBasicParsing '$url').Content; Invoke-Expression \$script\""
 
           raw=$(timeout 75s tailscale ssh Faiz@100.106.186.118 "$remote")
           printf '%s\n' "$raw"
