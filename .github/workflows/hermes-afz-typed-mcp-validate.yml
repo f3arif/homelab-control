@@ -4,11 +4,16 @@ on:
   pull_request:
     paths:
       - 'afz-openai-agent/hermes-mcp/**'
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/deploy-peers.json'
       - '.github/workflows/hermes-afz-typed-mcp-validate.yml'
   push:
     branches: [main]
     paths:
       - 'afz-openai-agent/hermes-mcp/**'
+      - 'afz-openai-agent/AFZ-Agent-Control-Core.ps1'
+      - 'afz-openai-agent/deploy-peers.json'
+      - '.github/workflows/hermes-afz-typed-mcp-validate.yml'
 
 permissions:
   contents: read
@@ -28,7 +33,7 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest afz-openai-agent/hermes-mcp/test_afz_hermes_mcp.py -v
 
-      - name: Validate typed read-only contract
+      - name: Validate typed bounded contract
         shell: python
         run: |
           from pathlib import Path
@@ -41,9 +46,22 @@ jobs:
               'ALLOWED_PORT = 8797',
               '"/health"',
               '"/api/windows-wsl-memory-audit"',
-              '"action": "audit"',
+              '"/api/h3-qwen27b-benchmark"',
+              '"/api/queue-orphan-remediation"',
+              '"/api/jellyfin-visibility-repair"',
+              '"/api/movierecommender-catalog"',
+              '"/api/stremio-organize"',
+              '"/api/hermes-radiohilal-cron"',
               'afz_control_health',
               'afz_windows_wsl_memory_audit',
+              'afz_h3_benchmark_status',
+              'afz_stremio_organize_audit',
+              'afz_stremio_organize_apply',
+              'afz_queue_orphan_audit',
+              'afz_queue_orphan_apply',
+              'afz_jellyfin_visibility_audit',
+              'afz_movierecommender_catalog_audit',
+              'afz_radiohilal_cron_audit',
               'MCPServer(',
           ]
           for token in required_bridge:
@@ -53,8 +71,7 @@ jobs:
           forbidden_bridge = [
               'subprocess', 'os.system', 'Popen(', 'shell=True',
               '/api/control', '/api/update-now', '/api/push-deploy',
-              '/api/h3-qwen27b-benchmark', '/api/queue-orphan-remediation',
-              '/api/jellyfin-visibility-repair', '/api/hpenvy-surfshark-exitnode',
+              '/api/h3-ollama-repair0332', '/api/hpenvy-surfshark-exitnode',
               '11434', 'ssh ', 'scp ',
           ]
           for token in forbidden_bridge:
