@@ -1,0 +1,7 @@
+[Unit]
+Description=AFZ Movies HP Backup Health Check
+After=network-online.target afz-stremio-backup.service afz-stremio-provider-bridge.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/coolyo/afz-stremio-secondhost-20260918/bin/health-backup.sh
