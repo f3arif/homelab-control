@@ -1,0 +1,11 @@
+[Unit]
+Description=AFZ Movies HP Backup Health Watch
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
