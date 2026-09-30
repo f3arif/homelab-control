@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync AFZ Movies HP backup from H3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/coolyo/afz-stremio-secondhost-20260918/sync-from-h3.sh
