@@ -1,0 +1,108 @@
+name: HP Envy timeout recovery diagnostic
+
+on:
+  push:
+    branches:
+      - feat/chat-timeout-safe-jobs-20260930
+    paths:
+      - '.github/workflows/hpenvy-timeout-recovery-diagnostic.yml'
+      - '.github/hpenvy-timeout-recovery-diagnostic-signal.txt'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: hpenvy-timeout-recovery-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Read-only HP Envy diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_script=$(cat <<'REMOTE'
+          set +e
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+
+          echo 'AFZ_DIAG_SCHEMA=1'
+          printf 'HOST=%s\n' "$(hostname)"
+          printf 'UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          echo 'COMMANDER_BEGIN'
+          systemctl --user is-active afz-desktop-commander.service 2>/dev/null | sed 's/^/COMMANDER_ACTIVE=/'
+          systemctl --user show afz-desktop-commander.service -p LoadState -p ActiveState -p SubState -p MainPID -p NRestarts -p ExecMainStatus --no-pager 2>/dev/null | sed 's/^/COMMANDER_/'
+          recent=$(journalctl --user -u afz-desktop-commander.service --since '-2 hours' --no-pager 2>/dev/null)
+          printf 'COMMANDER_LOG_LINES_2H=%s\n' "$(printf '%s\n' "$recent" | wc -l)"
+          printf 'COMMANDER_ERROR_LINES_2H=%s\n' "$(printf '%s\n' "$recent" | grep -Eic 'error|failed|exception|disconnect|closed|timeout' || true)"
+          printf 'COMMANDER_LAST_LOG_UTC=%s\n' "$(journalctl --user -u afz-desktop-commander.service -n 1 --output=short-iso-precise --no-pager 2>/dev/null | cut -d' ' -f1 || true)"
+          echo 'COMMANDER_END'
+
+          c=radiohilal-azuracast-prod-stage
+          echo 'RADIOHILAL_BEGIN'
+          docker inspect --format 'CONTAINER_STATUS={{.State.Status}} RESTARTS={{.RestartCount}} STARTED={{.State.StartedAt}}' "$c" 2>/dev/null || echo 'CONTAINER_STATUS=UNKNOWN'
+          for proc in supervisord liquidsoap icecast2 nginx php-fpm php-fpm8.3; do
+            count=$(docker exec "$c" sh -lc "ps -eo comm= 2>/dev/null | grep -Fx '$proc' | wc -l" 2>/dev/null || true)
+            printf 'PROC_%s=%s\n' "$(printf '%s' "$proc" | tr '.-' '__')" "${count:-UNKNOWN}"
+          done
+          echo 'SUPERVISOR_BEGIN'
+          timeout 8 docker exec "$c" supervisorctl status 2>/dev/null | sed -E 's/[[:space:]]+pid[[:space:]]+[0-9]+,[[:space:]]+uptime[[:space:]]+[^[:space:]]+//g' | head -80 || echo 'SUPERVISOR_STATUS=TIMEOUT_OR_ERROR'
+          echo 'SUPERVISOR_END'
+
+          cfg=/var/azuracast/stations/radiohilal/config
+          if timeout 8 docker exec "$c" test -d "$cfg" 2>/dev/null; then
+            echo 'STATION_CONFIG_DIR=YES'
+            timeout 8 docker exec "$c" sh -lc "find '$cfg' -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null | sort | head -40" || true
+          else
+            echo 'STATION_CONFIG_DIR=NO'
+          fi
+
+          api=$(curl -fsS --max-time 6 http://127.0.0.1:18088/api/nowplaying/1 2>/dev/null || true)
+          API_JSON="$api" python3 - <<'PY'
+          import json, os
+          try:
+              d=json.loads(os.environ.get('API_JSON') or '{}')
+          except Exception:
+              print('NOWPLAYING_PARSE=ERROR')
+          else:
+              print('NOWPLAYING_PARSE=OK')
+              print('STATION_ID='+str((d.get('station') or {}).get('id')))
+              print('STATION_ONLINE='+str(bool(d.get('is_online'))).lower())
+              print('NOWPLAYING_TITLE='+str(((d.get('now_playing') or {}).get('song') or {}).get('title') or '')[:80].replace('\n',' '))
+          PY
+
+          for u in http://127.0.0.1:18088/listen/radiohilal/radio.mp3 http://127.0.0.1:18088/listen/radiohilal/mobile.mp3; do
+            code=$(curl -sS -o /dev/null --connect-timeout 3 --max-time 6 -w '%{http_code}' "$u" 2>/dev/null || true)
+            case "$u" in
+              */radio.mp3) printf 'MOUNT_RADIO_HTTP=%s\n' "${code:-000}" ;;
+              */mobile.mp3) printf 'MOUNT_MOBILE_HTTP=%s\n' "${code:-000}" ;;
+            esac
+          done
+          echo 'RADIOHILAL_END'
+          REMOTE
+          )
+
+          printf '%s\n' "$remote_script" | timeout 120s tailscale ssh coolyo@100.71.26.69 'bash -s'
+
+      - name: Enforce read-only contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wf='.github/workflows/hpenvy-timeout-recovery-diagnostic.yml'
+          ! grep -Eq '\b(systemctl[[:space:]]+(start|stop|restart|enable|disable)|docker[[:space:]]+(start|stop|restart|rm)|compose[[:space:]]+(up|down)|sudo|kill|pkill|reboot|shutdown)\b' "$wf"
+          ! grep -Eq 'curl.*(-X|--request)[[:space:]]*(POST|PUT|PATCH|DELETE)' "$wf"
+          echo 'READ_ONLY_CONTRACT=PASS'
