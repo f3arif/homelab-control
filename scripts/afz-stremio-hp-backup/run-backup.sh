@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="/home/coolyo/afz-stremio-secondhost-20260918"
+mkdir -p "$BASE/state/afz-badge-posters"
+PUBLIC_TOKEN="$(cat "$BASE/private/public-transport-token.txt")"
+export STREMIO_PUBLIC_BASE_URL="https://hpenvy.tailc9bb62.ts.net:8443/$PUBLIC_TOKEN"
+export AFZ_STREMIO_FAILOVER_MODE=1
+export AFZ_BACKUP_STANDBY_MODE=1
+export AFZ_PRIMARY_HEALTH_URL="https://desktop-h3r6cqn.tailc9bb62.ts.net:8445/manifest.json"
+export STREMIO_MEDIA_ROOT="$BASE/media"
+export STREMIO_MEDIA_STORAGE_ROOT="$BASE/media"
+export STREMIO_TV_ROOT="$BASE/tv"
+export STREMIO_TV_STORAGE_ROOT="$BASE/tv"
+export STREMIO_JELLYFIN_ROOT="$BASE/jellyfin"
+export AFZ_STATE_FILE="$BASE/state/stremio-state.json"
+export STREMIO_BADGE_POSTER_DIR="$BASE/state/afz-badge-posters"
+export STREMIO_KIDS_MODE_FILE="$BASE/state/kids-mode.json"
+export STREMIO_KIDS_CURATED_CACHE_FILE="$BASE/state/kids-curated-catalogs.json"
+export AFZ_HIDDEN_HOME_FILE="$BASE/state/hidden-home-movies.json"
+export JELLYFIN_URL="http://127.0.0.1:8096"
+export JELLYFIN_WEB_BASE="https://hpenvy.tailc9bb62.ts.net:8097"
+export AFZ_HP_JELLYFIN_ENABLED=1
+export JELLYFIN_DB="$BASE/state/missing-jellyfin.db"
+export JELLYSEERR_SETTINGS="$BASE/state/missing-jellyseerr.json"
+export SEERR_URL="http://127.0.0.1:9/api/v1"
+export SEERR_API_KEY=""
+export RADARR_URL="http://127.0.0.1:9/api/v3"
+export RADARR_API_KEY=""
+export SONARR_URL="http://127.0.0.1:9/api/v3"
+export RDT_TORBOX_DB="$BASE/state/missing-rdt-torbox.db"
+export RDT_RD_DB="$BASE/state/missing-rdt-rd.db"
+export NTFY_URL="http://127.0.0.1:9"
+export STREMIO_CONTROL_BRIDGE_URL="http://127.0.0.1:18768"
+cd "$BASE"
+exec "$BASE/.venv/bin/python" -m uvicorn stremio_catalog:app --host 127.0.0.1 --port 18775 --log-level info
