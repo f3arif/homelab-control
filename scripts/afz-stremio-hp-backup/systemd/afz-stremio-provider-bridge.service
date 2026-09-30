@@ -1,0 +1,14 @@
+[Unit]
+Description=AFZ Stremio HP Backup Provider Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/coolyo/afz-stremio-secondhost-20260918
+ExecStart=/home/coolyo/.hermes/node/bin/node /home/coolyo/afz-stremio-secondhost-20260918/bridge.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
