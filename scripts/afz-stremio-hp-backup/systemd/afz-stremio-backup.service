@@ -1,0 +1,16 @@
+[Unit]
+Description=AFZ Movies & TV HP Backup Standby
+After=network-online.target afz-stremio-provider-bridge.service
+Wants=network-online.target afz-stremio-provider-bridge.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/coolyo/afz-stremio-secondhost-20260918
+ExecStart=/home/coolyo/afz-stremio-secondhost-20260918/run-backup.sh
+Restart=always
+RestartSec=3
+TimeoutStartSec=90
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
