@@ -6,6 +6,9 @@ SEL="$BASE/config/selection.json"
 LOG="$BASE/logs/sync.log"
 STATUS="$BASE/state/status.json"
 LOCK="$BASE/state/sync.lock"
+HELPER="$BASE/hotmirror.py"
+# Movie copies stop while free space would fall below this reserve.
+RESERVE_BYTES="${AFZ_HOTMIRROR_RESERVE_BYTES:-$((40 * 1024 * 1024 * 1024))}"
 mkdir -p "$BASE"/{Movies,TV,config,logs,state}
 exec 9>"$LOCK"
 flock -n 9 || exit 0
@@ -28,83 +31,72 @@ if ! mountpoint -q "$SRC"; then
   write_status blocked "source-mount-unavailable"
   exit 0
 fi
-if [ ! -d "$SRC/Movies" ] || [ ! -d "$SRC/TV" ] || [ ! -f "$SEL" ]; then
-  echo "[$(now)] source or selection missing" >>"$LOG"
-  write_status blocked "source-or-selection-missing"
+if [ ! -d "$SRC/Movies" ] || [ ! -d "$SRC/TV" ]; then
+  echo "[$(now)] source tree missing" >>"$LOG"
+  write_status blocked "source-tree-missing"
   exit 0
 fi
 
 echo "[$(now)] START" >>"$LOG"
+# Refresh the newest-first selection so new H3 movies are picked up. On failure
+# the previous selection stays in place. Pruning runs only after a successful
+# refresh in this same run; AFZ_HOTMIRROR_FREEZE_SELECTION=1 disables both.
+PRUNE_ARG=()
+if [ "${AFZ_HOTMIRROR_FREEZE_SELECTION:-0}" = 1 ]; then
+  export AFZ_PRUNE_SKIP_REASON=frozen
+elif python3 "$HELPER" select "$SRC" "$SEL" >>"$LOG" 2>&1; then
+  PRUNE_ARG=(--prune)
+else
+  echo "[$(now)] selection refresh failed; keeping previous selection, no pruning" >>"$LOG"
+  export AFZ_PRUNE_SKIP_REASON=selection-refresh-failed
+fi
+if [ ! -f "$SEL" ]; then
+  write_status blocked "selection-missing"
+  exit 0
+fi
+
 write_status running "copying-tv"
-rsync -a --no-owner --no-group --partial --human-readable --stats   "$SRC/TV/" "$BASE/TV/" >>"$LOG" 2>&1 || {
+rsync -a --no-owner --no-group --partial --human-readable --stats "$SRC/TV/" "$BASE/TV/" >>"$LOG" 2>&1 || {
     write_status failed "tv-rsync"
     exit 20
   }
 
 write_status running "copying-movies"
-python3 - "$SEL" <<'PY' | while IFS= read -r name; do
-import json,sys
-d=json.load(open(sys.argv[1],encoding="utf-8-sig"))
-for x in d.get("selectedMovies",[]):
-    print(x["name"])
-PY
+# Process substitution (not a pipe) so a failed rsync exits the script itself.
+while IFS=$'\t' read -r name bytes; do
   [ -d "$SRC/Movies/$name" ] || {
     echo "[$(now)] SKIP missing movie: $name" >>"$LOG"
     continue
   }
+  have=0
+  [ -d "$BASE/Movies/$name" ] && have="$(du -sb "$BASE/Movies/$name" | cut -f1)"
+  free="$(df -B1 --output=avail "$BASE" | tail -1 | tr -d ' ')"
+  need=$(( bytes > have ? bytes - have : 0 ))
+  if [ $(( free - need )) -lt "$RESERVE_BYTES" ]; then
+    echo "[$(now)] LOW_DISK stop before $name need=$need free=$free reserve=$RESERVE_BYTES" >>"$LOG"
+    write_status blocked "low-disk:$name"
+    exit 0
+  fi
   mkdir -p "$BASE/Movies/$name"
   echo "[$(now)] MOVIE $name" >>"$LOG"
-  rsync -a --no-owner --no-group --partial --human-readable --stats     "$SRC/Movies/$name/" "$BASE/Movies/$name/" >>"$LOG" 2>&1 || {
+  rsync -a --no-owner --no-group --partial --human-readable --stats "$SRC/Movies/$name/" "$BASE/Movies/$name/" >>"$LOG" 2>&1 || {
       write_status failed "movie-rsync:$name"
       exit 21
     }
-done
+done < <(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1],encoding="utf-8-sig"))
+for x in d.get("selectedMovies",[]):
+    print(x["name"]+"\t"+str(int(x.get("bytes") or 0)))
+' "$SEL")
 
-python3 - "$SEL" "$BASE" "$STATUS" <<'PY'
-import json,sys,os,datetime
-sel=json.load(open(sys.argv[1],encoding="utf-8-sig"))
-base=sys.argv[2]
-out=sys.argv[3]
-
-def tree_bytes(p):
-    total=0
-    files=0
-    for root,dirs,names in os.walk(p):
-        for n in names:
-            try:
-                total += os.path.getsize(os.path.join(root,n))
-                files += 1
-            except OSError:
-                pass
-    return total,files
-
-tv_b,tv_f=tree_bytes(os.path.join(base,"TV"))
-movie_b=movie_f=0
-missing=[]
-for x in sel.get("selectedMovies",[]):
-    p=os.path.join(base,"Movies",x["name"])
-    if not os.path.isdir(p):
-        missing.append(x["name"])
-        continue
-    b,f=tree_bytes(p)
-    movie_b += b
-    movie_f += f
-
-ok=(not missing and tv_b==int(sel["tvBytes"]) and movie_b==int(sel["selectedMovieBytes"]))
-json.dump({
-  "status":"completed" if ok else "verify-mismatch",
-  "updatedUtc":datetime.datetime.now(datetime.timezone.utc).isoformat(),
-  "selectedMovieCount":len(sel.get("selectedMovies",[])),
-  "tvBytes":tv_b,
-  "expectedTvBytes":int(sel["tvBytes"]),
-  "movieBytes":movie_b,
-  "expectedMovieBytes":int(sel["selectedMovieBytes"]),
-  "tvFiles":tv_f,
-  "movieFiles":movie_f,
-  "missing":missing
-},open(out,"w"),indent=2)
-raise SystemExit(0 if ok else 30)
-PY
+# Re-check the mount right before verify/prune; a dropped mount is not "files removed".
+if ! mountpoint -q "$SRC"; then
+  echo "[$(now)] source mount lost before verify" >>"$LOG"
+  write_status blocked "source-mount-lost"
+  exit 0
+fi
+python3 "$HELPER" verify "$SRC" "$BASE" "$SEL" "$STATUS" "${PRUNE_ARG[@]}"
 rc=$?
 echo "[$(now)] FINISH rc=$rc" >>"$LOG"
 exit $rc

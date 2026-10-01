@@ -21,7 +21,8 @@ def _primary_is_healthy():
         headers={'Host':PRIMARY_HEALTH_HOST} if PRIMARY_HEALTH_HOST else None
         r=requests.get(PRIMARY_HEALTH_URL,headers=headers,timeout=2)
         d=r.json() if r.ok else {}
-        ok=bool(r.ok and d.get('id')=='com.afzengineering.releasecatalog' and d.get('version')==APP_VERSION)
+        # A version skew during the H3->HP sync window is not an outage; only the id matters.
+        ok=bool(r.ok and d.get('id')=='com.afzengineering.releasecatalog')
     except Exception: ok=False
     _primary_health_cache.update({'ts':now,'ok':ok})
     return ok
