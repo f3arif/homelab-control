@@ -72,7 +72,7 @@ When H3 is unavailable:
 `install.sh` copies this bundle to the deployed paths on HP (`run-backup.sh`, `sync-from-h3.sh`, `apply-hp-standby.py` and `bin/health-backup.sh` under `afz-stremio-secondhost-20260918`; `sync.sh` and `verify/` under `afz-stremio-hotmirror`; units under `~/.config/systemd/user`). Changed files are backed up as `*.before-install-<stamp>.bak`; unchanged files are skipped. `install.sh --enable` also reloads systemd and enables the services and timers.
 
 - `python3 verify/prod-verify.py`: healthy-primary gate, expects `HEALTHY_GATE_STREAMS 0` while H3 is up.
-- `verify/canary.sh`: starts an isolated H3-unavailable canary on `127.0.0.1:18776`, requires an `AFZ Local` stream plus a 1 MiB `206` range fetch from the mirror, prints `AFZ_HP_CANARY_OK`, then stops the canary. Production on 18775 is not touched.
+- `bash verify/canary.sh`: starts an isolated H3-unavailable canary on `127.0.0.1:18776`, requires an `AFZ Local` stream plus a 1 MiB `206` range fetch from the mirror, prints `AFZ_HP_CANARY_OK`, then stops the canary. Production on 18775 is not touched.
 
 ## Hardening R3 (2026-10-01)
 
@@ -85,9 +85,9 @@ When H3 is unavailable:
 If HP is rebuilt:
 1. restore this directory from GitHub,
 2. restore the private transport token, addon collection, `bridge.mjs` and the Python venv separately,
-3. run `./install.sh --enable`,
+3. run `bash install.sh --enable`,
 4. restore/generate `/home/coolyo/afz-stremio-hotmirror/config/selection.json`,
 5. confirm the sync and health timers are listed in `systemctl --user list-timers`,
-6. run `verify/prod-verify.py` and `verify/canary.sh`.
+6. run `python3 verify/prod-verify.py` and `bash verify/canary.sh`.
 
 Resume key: `AFZ-NUVIO-HP-HARDENING-R3-20261001`.
