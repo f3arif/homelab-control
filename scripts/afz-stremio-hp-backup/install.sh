@@ -22,6 +22,7 @@ put "$HERE/sync-from-h3.sh"     "$BASE/sync-from-h3.sh"        0755
 put "$HERE/apply-hp-standby.py" "$BASE/apply-hp-standby.py"    0755
 put "$HERE/health-backup.sh"    "$BASE/bin/health-backup.sh"   0755
 put "$HERE/sync-hotmirror.sh"   "$MIR/sync.sh"                 0755
+put "$HERE/hotmirror.py"        "$MIR/hotmirror.py"            0755
 for f in canary.sh test-canary.py prod-verify.py; do
   put "$HERE/verify/$f" "$MIR/verify/$f" 0755
 done

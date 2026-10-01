@@ -23,11 +23,11 @@ The real independent mirror is stored on HP Envy at:
 It is populated from the existing read-only SSHFS mount of H3's `F:\Media` tree. The mirror currently contains:
 
 - all selected TV content,
-- a bounded newest-movie selection,
-- a generated selection manifest,
+- a bounded newest-movie selection (200 GiB cap), rebuilt from the H3 tree on every sync run by `hotmirror.py select`,
+- the generated selection manifest `config/selection.json`,
 - sync status and logs.
 
-`sync-hotmirror.sh` is additive and restart-safe. It uses `rsync --partial`, does not purge destination files, and validates byte totals after each completed pass.
+`sync-hotmirror.sh` is additive and restart-safe. It uses `rsync --partial` and does not purge destination files. After each pass `hotmirror.py verify` checks that every source file of TV and of the selected movies exists in the mirror with the same size, and records movies that are still on disk but no longer selected as `unselectedPresent` in `state/status.json`. Movie copying stops (status `blocked`, `low-disk:<name>`) before free space would drop below 40 GiB (`AFZ_HOTMIRROR_RESERVE_BYTES`). `AFZ_HOTMIRROR_FREEZE_SELECTION=1` keeps the current selection unchanged.
 
 The sync timer runs every six hours and is persistent across reboots.
 
@@ -79,6 +79,9 @@ When H3 is unavailable:
 - Health check derives the expected version from the deployed `stremio_catalog.py` instead of a hard-coded `0.6.243`, so an H3 version bump no longer causes a restart loop on HP.
 - H3 primary is considered healthy on manifest id alone; version skew during the 15-minute sync window no longer makes HP serve duplicate streams.
 - Hot-mirror movie rsync failures now fail the sync (exit 21, `movie-rsync:<name>`) instead of being swallowed inside a pipe subshell.
+- `sync-from-h3.sh` waits up to 45s for a restarted backend before probing it, instead of failing the unit after a fixed 2s.
+- The mirror selection is rebuilt each run instead of being frozen at its 2026-10-01 snapshot, and verification is per file instead of against frozen byte totals (which would have failed every run after H3 gained any TV episode).
+- Deployed 2026-10-01 21:50Z. HP patched source SHA-256 is now `fbfdced81f8402f4572fff34546f24cd24ce3dd66a54fe60f68642c83a6745ab` (same H3 raw source). Healthy gate returned 0 streams; isolated canary returned `AFZ Local` with a `206` 1 MiB range read.
 
 ## Recovery
 
@@ -86,7 +89,7 @@ If HP is rebuilt:
 1. restore this directory from GitHub,
 2. restore the private transport token, addon collection, `bridge.mjs` and the Python venv separately,
 3. run `bash install.sh --enable`,
-4. restore/generate `/home/coolyo/afz-stremio-hotmirror/config/selection.json`,
+4. run `python3 /home/coolyo/afz-stremio-hotmirror/hotmirror.py select /home/coolyo/afz-jellyfin-primary/mounts/afz-media /home/coolyo/afz-stremio-hotmirror/config/selection.json` once the H3 media mount is up (the sync also does this itself),
 5. confirm the sync and health timers are listed in `systemctl --user list-timers`,
 6. run `python3 verify/prod-verify.py` and `bash verify/canary.sh`.
 
