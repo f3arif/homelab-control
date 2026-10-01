@@ -39,10 +39,16 @@ fi
 
 echo "[$(now)] START" >>"$LOG"
 # Refresh the newest-first selection so new H3 movies are picked up. On failure
-# the previous selection stays in place.
-if [ "${AFZ_HOTMIRROR_FREEZE_SELECTION:-0}" != 1 ]; then
-  python3 "$HELPER" select "$SRC" "$SEL" >>"$LOG" 2>&1 ||
-    echo "[$(now)] selection refresh failed; keeping previous selection" >>"$LOG"
+# the previous selection stays in place. Pruning runs only after a successful
+# refresh in this same run; AFZ_HOTMIRROR_FREEZE_SELECTION=1 disables both.
+PRUNE_ARG=()
+if [ "${AFZ_HOTMIRROR_FREEZE_SELECTION:-0}" = 1 ]; then
+  export AFZ_PRUNE_SKIP_REASON=frozen
+elif python3 "$HELPER" select "$SRC" "$SEL" >>"$LOG" 2>&1; then
+  PRUNE_ARG=(--prune)
+else
+  echo "[$(now)] selection refresh failed; keeping previous selection, no pruning" >>"$LOG"
+  export AFZ_PRUNE_SKIP_REASON=selection-refresh-failed
 fi
 if [ ! -f "$SEL" ]; then
   write_status blocked "selection-missing"
@@ -84,7 +90,13 @@ for x in d.get("selectedMovies",[]):
     print(x["name"]+"\t"+str(int(x.get("bytes") or 0)))
 ' "$SEL")
 
-python3 "$HELPER" verify "$SRC" "$BASE" "$SEL" "$STATUS"
+# Re-check the mount right before verify/prune; a dropped mount is not "files removed".
+if ! mountpoint -q "$SRC"; then
+  echo "[$(now)] source mount lost before verify" >>"$LOG"
+  write_status blocked "source-mount-lost"
+  exit 0
+fi
+python3 "$HELPER" verify "$SRC" "$BASE" "$SEL" "$STATUS" "${PRUNE_ARG[@]}"
 rc=$?
 echo "[$(now)] FINISH rc=$rc" >>"$LOG"
 exit $rc

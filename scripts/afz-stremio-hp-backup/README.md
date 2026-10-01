@@ -27,7 +27,15 @@ It is populated from the existing read-only SSHFS mount of H3's `F:\Media` tree.
 - the generated selection manifest `config/selection.json`,
 - sync status and logs.
 
-`sync-hotmirror.sh` is additive and restart-safe. It uses `rsync --partial` and does not purge destination files. After each pass `hotmirror.py verify` checks that every source file of TV and of the selected movies exists in the mirror with the same size, and records movies that are still on disk but no longer selected as `unselectedPresent` in `state/status.json`. Movie copying stops (status `blocked`, `low-disk:<name>`) before free space would drop below 40 GiB (`AFZ_HOTMIRROR_RESERVE_BYTES`). `AFZ_HOTMIRROR_FREEZE_SELECTION=1` keeps the current selection unchanged.
+`sync-hotmirror.sh` is additive and restart-safe. It uses `rsync --partial` and does not purge destination files. After each pass `hotmirror.py verify` checks that every source file of TV and of the selected movies exists in the mirror with the same size, and records movies that are still on disk but no longer selected as `unselectedPresent` in `state/status.json`. Movie copying stops (status `blocked`, `low-disk:<name>`) before free space would drop below 40 GiB (`AFZ_HOTMIRROR_RESERVE_BYTES`). `AFZ_HOTMIRROR_FREEZE_SELECTION=1` keeps the current selection unchanged and disables pruning (manual freeze/rollback control).
+
+### Pruning
+
+After a run has rebuilt the selection, copied everything it needs and passed per-file verification, `hotmirror.py verify --prune` removes mirror copies outside the active selection: whole movie folders no longer selected, and files inside selected folders that no longer exist on H3 (e.g. a replaced release). Pruning only touches `/home/coolyo/afz-stremio-hotmirror/Movies`; it never writes to the H3 mount. TV is never pruned.
+
+It aborts without removing anything when any of these holds: the selection was not rebuilt in this run (refresh failed or frozen), verification failed, the manifest is inconsistent (schema, duplicate names, byte sum, cap), the H3 mount is not mounted or shares a device or path with the mirror, a selected movie is missing or empty on H3, the mirror contains a symlink or a non-directory entry, more than 10 folders (`AFZ_HOTMIRROR_PRUNE_MAX_DIRS`) or more than the cap would be removed. A run blocked by low disk, a lost mount or an rsync failure never reaches pruning, so the 40 GiB reserve rule is unchanged.
+
+Removals are staged by rename under `.prune-staging/` on the mirror filesystem, then deleted. Every plan, removed file (path and bytes), abort and error is appended as JSON lines to `logs/prune.log`; the outcome is also in `state/status.json` under `prune`. An error during removal stops immediately and exits 31. `AFZ_HOTMIRROR_PRUNE=0` disables pruning alone.
 
 The sync timer runs every six hours and is persistent across reboots.
 
