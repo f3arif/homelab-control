@@ -30,6 +30,16 @@ The HP backup add-on is stream-only so it does not duplicate the primary AFZ hom
 - H3 account add-on export contained exactly one HP backup add-on entry.
 - Last manual sync check exited 0 and reported providerBridgeOk=true.
 
+## HP-local hot mirror
+
+A bounded local-media hot mirror is maintained on the HP Envy G-volume under:
+
+`G:\AFZ-Backups\AFZ-Stremio\HotMirror`
+
+The H3-side sync script `Sync-AFZ-Stremio-HotMirror.ps1` is additive only; it never purges destination media. Current policy copies all AFZ TV content plus the newest movie folders that fit within a 200 GiB movie budget. The first 2026-09-30 selection is about 231.6 GiB total, leaving roughly 85 GiB free on the HP G-volume at selection time.
+
+Use `Test-AFZ-Stremio-HotMirror.ps1` after a sync to compare the destination byte totals to the saved selection manifest.
+
 ## Important limitation
 
 HP Envy can keep online provider/debrid playback working when H3 is unavailable. Some AFZ local media still depends on H3-hosted storage/mounts, so a full H3 hardware/storage outage can make those local files unavailable even though the HP backend remains healthy. Move or replicate the media storage to HP-accessible independent storage before treating local-file playback as fully redundant.
