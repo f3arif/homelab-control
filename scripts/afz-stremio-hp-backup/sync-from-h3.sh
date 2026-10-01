@@ -53,7 +53,11 @@ if [ "$SRC_CHANGED" -eq 1 ]; then
   systemctl --user restart afz-stremio-backup.service
 fi
 
-sleep 2
+# A restarted backend needs several seconds to import; wait for it before probing.
+for _ in $(seq 1 45); do
+  curl -fsS --max-time 2 http://127.0.0.1:18775/manifest.json >/dev/null 2>&1 && break
+  sleep 1
+done
 MANIFEST_ID="$(curl -fsS --max-time 10 http://127.0.0.1:18775/manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')"
 BRIDGE_OK="$(curl -fsS --max-time 10 'http://127.0.0.1:18768/external-streams?imdb=tt36958312' | python3 -c 'import json,sys; d=json.load(sys.stdin); print("true" if d.get("ok") and int(d.get("sourceCount") or 0)>0 else "false")')"
 SRC_HASH="$(sha256sum "$BASE/stremio_catalog.py" | awk '{print $1}')"
