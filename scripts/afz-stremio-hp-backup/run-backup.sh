@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="/home/coolyo/afz-stremio-secondhost-20260918"
-mkdir -p "$BASE/state/afz-badge-posters"
+MIRROR="/home/coolyo/afz-stremio-hotmirror"
+mkdir -p "$BASE/state/afz-badge-posters" "$MIRROR/Movies" "$MIRROR/TV"
 PUBLIC_TOKEN="$(cat "$BASE/private/public-transport-token.txt")"
 export STREMIO_PUBLIC_BASE_URL="https://hpenvy.tailc9bb62.ts.net:8443/$PUBLIC_TOKEN"
 export AFZ_STREMIO_FAILOVER_MODE=1
 export AFZ_BACKUP_STANDBY_MODE=1
-export AFZ_PRIMARY_HEALTH_URL="https://desktop-h3r6cqn.tailc9bb62.ts.net:8445/manifest.json"
-export STREMIO_MEDIA_ROOT="$BASE/media"
-export STREMIO_MEDIA_STORAGE_ROOT="$BASE/media"
-export STREMIO_TV_ROOT="$BASE/tv"
-export STREMIO_TV_STORAGE_ROOT="$BASE/tv"
+export AFZ_PRIMARY_HEALTH_URL="http://100.106.186.118:18777/manifest.json"
+export AFZ_PRIMARY_HEALTH_HOST="desktop-h3r6cqn.tailc9bb62.ts.net:18777"
+export STREMIO_MEDIA_ROOT="$MIRROR"
+export STREMIO_MEDIA_STORAGE_ROOT="$MIRROR/Movies"
+export STREMIO_TV_ROOT="$MIRROR/TV"
+export STREMIO_TV_STORAGE_ROOT="$MIRROR/TV"
 export STREMIO_JELLYFIN_ROOT="$BASE/jellyfin"
 export AFZ_STATE_FILE="$BASE/state/stremio-state.json"
 export STREMIO_BADGE_POSTER_DIR="$BASE/state/afz-badge-posters"

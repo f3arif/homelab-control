@@ -9,7 +9,8 @@ s=src.read_text(encoding='utf-8')
 marker="FAILOVER_MODE=str(os.getenv('AFZ_STREMIO_FAILOVER_MODE','')).strip().lower() in ('1','true','yes','on')\n"
 insert="""FAILOVER_MODE=str(os.getenv('AFZ_STREMIO_FAILOVER_MODE','')).strip().lower() in ('1','true','yes','on')
 BACKUP_STANDBY_MODE=str(os.getenv('AFZ_BACKUP_STANDBY_MODE','')).strip().lower() in ('1','true','yes','on')
-PRIMARY_HEALTH_URL=os.getenv('AFZ_PRIMARY_HEALTH_URL','https://desktop-h3r6cqn.tailc9bb62.ts.net:8445/manifest.json').strip()
+PRIMARY_HEALTH_URL=os.getenv('AFZ_PRIMARY_HEALTH_URL','http://100.106.186.118:18777/manifest.json').strip()
+PRIMARY_HEALTH_HOST=os.getenv('AFZ_PRIMARY_HEALTH_HOST','desktop-h3r6cqn.tailc9bb62.ts.net:18777').strip()
 _primary_health_cache={'ts':0.0,'ok':False}
 def _primary_is_healthy():
     if not BACKUP_STANDBY_MODE: return False
@@ -17,7 +18,8 @@ def _primary_is_healthy():
     if now-float(_primary_health_cache.get('ts') or 0)<5: return bool(_primary_health_cache.get('ok'))
     ok=False
     try:
-        r=requests.get(PRIMARY_HEALTH_URL,timeout=2)
+        headers={'Host':PRIMARY_HEALTH_HOST} if PRIMARY_HEALTH_HOST else None
+        r=requests.get(PRIMARY_HEALTH_URL,headers=headers,timeout=2)
         d=r.json() if r.ok else {}
         ok=bool(r.ok and d.get('id')=='com.afzengineering.releasecatalog' and d.get('version')==APP_VERSION)
     except Exception: ok=False

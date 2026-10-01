@@ -3,7 +3,8 @@ set -u
 BASE=/home/coolyo/afz-stremio-secondhost-20260918
 STATE="$BASE/state"
 STATUS="$STATE/hp-backup-health.json"
-PRIMARY=https://desktop-h3r6cqn.tailc9bb62.ts.net:8445/manifest.json
+PRIMARY=http://100.106.186.118:18777/manifest.json
+PRIMARY_HOST=desktop-h3r6cqn.tailc9bb62.ts.net:18777
 mkdir -p "$STATE"
 actions=""
 local_ok=false
@@ -20,7 +21,6 @@ check_bridge() {
   curl --connect-timeout 2 --max-time 6 -fsS http://127.0.0.1:18768/health 2>/dev/null |
     python3 -c "import json,sys;d=json.load(sys.stdin);assert d.get('ok') is True" >/dev/null 2>&1
 }
-
 if check_bridge; then
   bridge_ok=true
 else
@@ -29,7 +29,6 @@ else
   sleep 2
   check_bridge && bridge_ok=true
 fi
-
 if check_local; then
   local_ok=true
 else
@@ -44,14 +43,12 @@ if printf '%s' "$serve" | grep -Fq 'hpenvy.tailc9bb62.ts.net:8445' &&
    printf '%s' "$serve" | grep -Fq 'proxy http://127.0.0.1:18775'; then
   route_ok=true
 fi
-
 token="$(cat "$BASE/private/public-transport-token.txt" 2>/dev/null || true)"
 if [ -n "$token" ] && printf '%s' "$serve" | grep -Fq "/$token" &&
    printf '%s' "$serve" | grep -Fq 'proxy http://127.0.0.1:18775'; then
   public_route_ok=true
 fi
-
-if curl --connect-timeout 2 --max-time 6 -fsS "$PRIMARY" 2>/dev/null |
+if curl --connect-timeout 2 --max-time 6 -fsS -H "Host: $PRIMARY_HOST" "$PRIMARY" 2>/dev/null |
    python3 -c "import json,sys;m=json.load(sys.stdin);assert m.get('id')=='com.afzengineering.releasecatalog' and m.get('version')=='0.6.243'" >/dev/null 2>&1; then
   primary_ok=true
 fi
