@@ -6,6 +6,9 @@ STATUS="$STATE/hp-backup-health.json"
 PRIMARY=http://100.106.186.118:18777/manifest.json
 PRIMARY_HOST=desktop-h3r6cqn.tailc9bb62.ts.net:18777
 mkdir -p "$STATE"
+# Expected version follows the deployed (H3-synced) source so H3 upgrades do not
+# turn into a restart loop here.
+EXPECTED_VERSION="$(sed -n "s/^APP_VERSION='\\([^']*\\)'.*/\\1/p" "$BASE/stremio_catalog.py" | head -1)"
 actions=""
 local_ok=false
 bridge_ok=false
@@ -15,7 +18,7 @@ primary_ok=false
 
 check_local() {
   curl --connect-timeout 2 --max-time 8 -fsS http://127.0.0.1:18775/manifest.json 2>/dev/null |
-    python3 -c "import json,sys;m=json.load(sys.stdin);assert m.get('id')=='com.afzengineering.releasecatalog.hpbackup' and m.get('version')=='0.6.243'" >/dev/null 2>&1
+    python3 -c "import json,sys;m=json.load(sys.stdin);v=sys.argv[1];assert m.get('id')=='com.afzengineering.releasecatalog.hpbackup' and (not v or m.get('version')==v)" "$EXPECTED_VERSION" >/dev/null 2>&1
 }
 check_bridge() {
   curl --connect-timeout 2 --max-time 6 -fsS http://127.0.0.1:18768/health 2>/dev/null |
@@ -49,13 +52,13 @@ if [ -n "$token" ] && printf '%s' "$serve" | grep -Fq "/$token" &&
   public_route_ok=true
 fi
 if curl --connect-timeout 2 --max-time 6 -fsS -H "Host: $PRIMARY_HOST" "$PRIMARY" 2>/dev/null |
-   python3 -c "import json,sys;m=json.load(sys.stdin);assert m.get('id')=='com.afzengineering.releasecatalog' and m.get('version')=='0.6.243'" >/dev/null 2>&1; then
+   python3 -c "import json,sys;m=json.load(sys.stdin);assert m.get('id')=='com.afzengineering.releasecatalog'" >/dev/null 2>&1; then
   primary_ok=true
 fi
 
-python3 - "$STATUS" "$local_ok" "$bridge_ok" "$route_ok" "$public_route_ok" "$primary_ok" "$actions" <<'PY'
+python3 - "$STATUS" "$local_ok" "$bridge_ok" "$route_ok" "$public_route_ok" "$primary_ok" "$actions" "$EXPECTED_VERSION" <<'PY'
 import json,sys,datetime
-p,local,bridge,route,pub,primary,actions=sys.argv[1:]
+p,local,bridge,route,pub,primary,actions,version=sys.argv[1:]
 json.dump({
   "status":"ok" if all(x=="true" for x in (local,bridge,route,pub)) else "degraded",
   "checkedUtc":datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -64,6 +67,7 @@ json.dump({
   "tailscale8445RouteOk":route=="true",
   "publicTokenRouteOk":pub=="true",
   "h3PrimaryOk":primary=="true",
+  "expectedVersion":version,
   "actions":[x for x in actions.split(",") if x],
 },open(p,"w",encoding="utf-8"),indent=2)
 PY

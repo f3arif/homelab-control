@@ -42,12 +42,8 @@ rsync -a --no-owner --no-group --partial --human-readable --stats   "$SRC/TV/" "
   }
 
 write_status running "copying-movies"
-python3 - "$SEL" <<'PY' | while IFS= read -r name; do
-import json,sys
-d=json.load(open(sys.argv[1],encoding="utf-8-sig"))
-for x in d.get("selectedMovies",[]):
-    print(x["name"])
-PY
+# Process substitution (not a pipe) so a failed rsync exits the script itself.
+while IFS= read -r name; do
   [ -d "$SRC/Movies/$name" ] || {
     echo "[$(now)] SKIP missing movie: $name" >>"$LOG"
     continue
@@ -58,7 +54,12 @@ PY
       write_status failed "movie-rsync:$name"
       exit 21
     }
-done
+done < <(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1],encoding="utf-8-sig"))
+for x in d.get("selectedMovies",[]):
+    print(x["name"])
+' "$SEL")
 
 python3 - "$SEL" "$BASE" "$STATUS" <<'PY'
 import json,sys,os,datetime
