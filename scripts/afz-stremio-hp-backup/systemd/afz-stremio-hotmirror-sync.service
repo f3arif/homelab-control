@@ -1,0 +1,13 @@
+[Unit]
+Description=AFZ Stremio independent HP media hot mirror sync
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecStart=/home/coolyo/afz-stremio-hotmirror/sync.sh
+TimeoutStartSec=infinity
+Restart=on-failure
+RestartSec=120
