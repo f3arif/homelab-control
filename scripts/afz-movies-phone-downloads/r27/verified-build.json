@@ -1,0 +1,21 @@
+{
+  "sourceCommit": "f4cbb226c8614b8283b773fdc29cba0d8fe3d55d",
+  "baseCommit": "0c3340c3364205de5be368a84f74293372f504b2",
+  "versionName": "0.5.1-afz-r27.1",
+  "versionCode": 135,
+  "tests": {
+    "tests": 222,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "pickerTests": 13,
+  "networkTests": 4,
+  "apkSha256": "03265c41b0376505cf3b5c6e795feba5d132458b30aa934a541c4159e6684b0d",
+  "apkBytes": 160161737,
+  "signerMatched": true,
+  "pixelInstalled": true,
+  "pixelPreferencesAndDownloadInventoryPreserved": true,
+  "onePlusApkDelivered": true,
+  "onePlusInstalled": false
+}
