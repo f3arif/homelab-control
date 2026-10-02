@@ -5,6 +5,7 @@ STATE="$BASE/state"
 STATUS="$STATE/hp-backup-health.json"
 PRIMARY=http://100.106.186.118:18777/manifest.json
 PRIMARY_HOST=desktop-h3r6cqn.tailc9bb62.ts.net:18777
+MIRROR_STATUS=/home/coolyo/afz-stremio-hotmirror/state/status.json
 mkdir -p "$STATE"
 # Expected version follows the deployed (H3-synced) source so H3 upgrades do not
 # turn into a restart loop here.
@@ -56,9 +57,31 @@ if curl --connect-timeout 2 --max-time 6 -fsS -H "Host: $PRIMARY_HOST" "$PRIMARY
   primary_ok=true
 fi
 
-python3 - "$STATUS" "$local_ok" "$bridge_ok" "$route_ok" "$public_route_ok" "$primary_ok" "$actions" "$EXPECTED_VERSION" <<'PY'
+python3 - "$STATUS" "$local_ok" "$bridge_ok" "$route_ok" "$public_route_ok" "$primary_ok" "$actions" "$EXPECTED_VERSION" "$MIRROR_STATUS" <<'PY'
 import json,sys,datetime
-p,local,bridge,route,pub,primary,actions,version=sys.argv[1:]
+p,local,bridge,route,pub,primary,actions,version,mirror_path=sys.argv[1:]
+now=datetime.datetime.now(datetime.timezone.utc)
+# Hot-mirror problems are reported as warnings; "status" stays about serving.
+warnings=[]
+mirror={"ok":False}
+try:
+  m=json.load(open(mirror_path,encoding="utf-8"))
+  age=(now-datetime.datetime.fromisoformat(m["updatedUtc"])).total_seconds()/3600
+  prune=str((m.get("prune") or {}).get("result") or "")
+  free=m.get("freeBytes")
+  mirror={"status":m.get("status"),"detail":m.get("detail"),"updatedUtc":m.get("updatedUtc"),
+          "ageHours":round(age,1),"prune":prune,"freeGiB":round(free/2**30,1) if free else None}
+  if m.get("status") not in ("completed","running"):
+    warnings.append("hotmirror:"+str(m.get("status"))+(":"+str(m.get("detail")) if m.get("detail") else ""))
+  if age>13:
+    warnings.append("hotmirror:stale:%.1fh"%age)
+  if prune.startswith(("aborted","error")):
+    warnings.append("hotmirror:prune:"+prune)
+  if free is not None and free<40*2**30:
+    warnings.append("hotmirror:below-reserve")
+  mirror["ok"]=not warnings
+except Exception as e:
+  warnings.append("hotmirror:status-unreadable:"+type(e).__name__)
 json.dump({
   "status":"ok" if all(x=="true" for x in (local,bridge,route,pub)) else "degraded",
   "checkedUtc":datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -69,5 +92,7 @@ json.dump({
   "h3PrimaryOk":primary=="true",
   "expectedVersion":version,
   "actions":[x for x in actions.split(",") if x],
+  "hotMirror":mirror,
+  "warnings":warnings,
 },open(p,"w",encoding="utf-8"),indent=2)
 PY

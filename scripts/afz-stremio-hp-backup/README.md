@@ -55,7 +55,7 @@ When H3 is unavailable:
 ## Synchronization and health
 
 - `sync-from-h3.sh`: source/add-on sync from H3 every 15 minutes.
-- `health-backup.sh`: HP backend/provider/route health every 2 minutes.
+- `health-backup.sh`: HP backend/provider/route health every 2 minutes. Its `status` covers serving only; the hot mirror is reported separately as `hotMirror` (status, age, prune result, free space) and `warnings` (`hotmirror:<status>`, `hotmirror:stale:<h>` after 13h without a run, `hotmirror:prune:aborted…`, `hotmirror:below-reserve`, `hotmirror:status-unreadable`) in `state/hp-backup-health.json`.
 - `sync-hotmirror.sh`: independent media mirror refresh every 6 hours.
 - All user services/timers run with user linger enabled.
 
