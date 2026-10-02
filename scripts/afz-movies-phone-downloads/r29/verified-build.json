@@ -1,0 +1,23 @@
+{
+  "sourceCommit": "10be7a7b0dfb650117c872705efaf9a1cc272f47",
+  "baseCommit": "2df1fd2d25c318be4d8214bc5f27685dc18af39b",
+  "branch": "afz/phone-streaming-recommendation-r29-20261002",
+  "status": "build_verified",
+  "tests": {
+    "tests": 246,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "pickerTests": 13,
+  "networkTests": 4,
+  "apk": "/mnt/c/AFZ/Nuvio-Setup-20260923/R29-streaming-phone-candidate/AFZ-Movies-R29-phone-streaming.apk",
+  "apkBytes": 160494392,
+  "apkSha256": "e273e16e8a694c5074192e460856aa97ec073aa3f201040b54116b96e60615be",
+  "signerMatched": true,
+  "versionCode": 137,
+  "versionName": "0.5.1-afz-r29",
+  "restoreBase": "0c3340c3364205de5be368a84f74293372f504b2",
+  "restoreApplyCheck": "pass",
+  "newPhoneStreamingTests": 11
+}
