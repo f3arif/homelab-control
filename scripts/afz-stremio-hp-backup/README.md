@@ -89,6 +89,7 @@ When H3 is unavailable:
 - Hot-mirror movie rsync failures now fail the sync (exit 21, `movie-rsync:<name>`) instead of being swallowed inside a pipe subshell.
 - `sync-from-h3.sh` waits up to 45s for a restarted backend before probing it, instead of failing the unit after a fixed 2s.
 - The mirror selection is rebuilt each run instead of being frozen at its 2026-10-01 snapshot, and verification is per file instead of against frozen byte totals (which would have failed every run after H3 gained any TV episode).
+- Health no longer fights restarts: the backend takes ~10-30s to start, but the health check restarted it after 4s, so every H3 source change (sync restart) triggered further restarts until the sync's own wait ran out (seen 2026-10-02 00:12Z). A start within the last 120s is now waited for (up to ~60s) instead of restarted, and a restart is followed by the same wait. `sync-from-h3.sh` waits up to 90s.
 - Deployed 2026-10-01 21:50Z. HP patched source SHA-256 is now `fbfdced81f8402f4572fff34546f24cd24ce3dd66a54fe60f68642c83a6745ab` (same H3 raw source). Healthy gate returned 0 streams; isolated canary returned `AFZ Local` with a `206` 1 MiB range read.
 
 ## Recovery

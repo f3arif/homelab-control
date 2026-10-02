@@ -54,7 +54,7 @@ if [ "$SRC_CHANGED" -eq 1 ]; then
 fi
 
 # A restarted backend needs several seconds to import; wait for it before probing.
-for _ in $(seq 1 45); do
+for _ in $(seq 1 90); do
   curl -fsS --max-time 2 http://127.0.0.1:18775/manifest.json >/dev/null 2>&1 && break
   sleep 1
 done

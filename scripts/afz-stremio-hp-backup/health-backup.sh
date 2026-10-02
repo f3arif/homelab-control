@@ -33,13 +33,23 @@ else
   sleep 2
   check_bridge && bridge_ok=true
 fi
+add_action(){ if [ -n "$actions" ]; then actions="$actions,$1"; else actions="$1"; fi; }
+wait_local(){ for _ in $(seq 1 30); do check_local && return 0; sleep 2; done; return 1; }
+# The backend needs ~10-30s to start. A start in the last 120s (by sync-from-h3,
+# a deploy or a previous check) is waited for, not restarted again.
 if check_local; then
   local_ok=true
 else
-  systemctl --user restart afz-stremio-backup.service >/dev/null 2>&1 || true
-  if [ -n "$actions" ]; then actions="$actions,restart-backup"; else actions="restart-backup"; fi
-  sleep 4
-  check_local && local_ok=true
+  started="$(systemctl --user show afz-stremio-backup.service -p ActiveEnterTimestamp --value 2>/dev/null)"
+  started_s="$(date -d "$started" +%s 2>/dev/null || echo 0)"
+  state="$(systemctl --user is-active afz-stremio-backup.service 2>/dev/null)"
+  if { [ "$state" = active ] || [ "$state" = activating ]; } && [ $(( $(date +%s) - started_s )) -lt 120 ]; then
+    add_action "wait-backup-startup"
+  else
+    systemctl --user restart afz-stremio-backup.service >/dev/null 2>&1 || true
+    add_action "restart-backup"
+  fi
+  wait_local && local_ok=true
 fi
 
 serve="$(tailscale serve status 2>/dev/null || true)"
