@@ -207,10 +207,10 @@ index bf90e42..ac36ea4 100644
  }
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt
 new file mode 100644
-index 0000000..a7e01e2
+index 0000000..3fbcf4a
 --- /dev/null
 +++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +package com.nuvio.app.features.streams
 +
 +import com.nuvio.app.features.downloads.isDynamicDownloadUrl
@@ -232,6 +232,7 @@ index 0000000..a7e01e2
 +    data class Candidate(val stream: StreamItem, val size: Double)
 +    val candidates = streams.mapNotNull { stream ->
 +        if (stream.afzStreamActionOrNull() != null || stream.shouldOpenExternally ||
++            (stream.playableDirectUrl == null && !(debridEnabled && stream.isAddonDebridCandidate)) ||
 +            !stream.isSelectableForPlayback(debridEnabled) ||
 +            !stream.isDeviceVideoCandidate(isEpisode) ||
 +            stream.downloadResolution() != 1080 || stream.downloadIsRemux()) return@mapNotNull null
@@ -726,10 +727,10 @@ index 0000000..0e981a6
 +}
 diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt
 new file mode 100644
-index 0000000..3f60813
+index 0000000..27447d6
 --- /dev/null
 +++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,104 @@
 +package com.nuvio.app.features.streams
 +
 +import kotlin.test.*
@@ -814,6 +815,12 @@ index 0000000..3f60813
 +    @Test fun seasonPacksCameraCopiesAndUnavailableTorrentsAreExcluded() {
 +        assertNull(recommend(source("1080p complete season", 4.0), source("1080p HDCAM", 4.0),
 +            source("1080p", 4.0).copy(url = null, infoHash = "a".repeat(40))))
++    }
++
++    @Test fun cachedTorrentNeedsConfiguredDebridBeforeItCanBeFeatured() {
++        val torrent = source("1080p cached", 4.0).copy(url = null, infoHash = "a".repeat(40))
++        assertNull(recommendPhonePlayback(listOf(torrent), false, false))
++        assertSame(torrent, recommendPhonePlayback(listOf(torrent), false, true)!!.stream)
 +    }
 +
 +    @Test fun otherDevicesAndDownloadModeKeepTheirExistingPresentation() {
