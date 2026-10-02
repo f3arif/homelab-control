@@ -1,0 +1,31 @@
+{
+  "sourceCommit": "2df1fd2d25c318be4d8214bc5f27685dc18af39b",
+  "baseCommit": "f4cbb226c8614b8283b773fdc29cba0d8fe3d55d",
+  "branch": "afz/download-picker-r28-20261002",
+  "status": "build_verified_not_installed",
+  "tests": {
+    "tests": 235,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "pickerTests": 13,
+  "networkTests": 4,
+  "apk": "/mnt/c/AFZ/Nuvio-Setup-20260923/R28-download-picker-candidate/AFZ-Movies-R28-phone-download-ranking.apk",
+  "apkBytes": 160164081,
+  "apkSha256": "ba975f712405dbb1503ab6f890575cf171944c0051ea2adcb5a9d7074b8e94e4",
+  "signerMatched": true,
+  "versionCode": 136,
+  "versionName": "0.5.1-afz-r28",
+  "rollout": {
+    "pixel10ProXL": {
+      "installed": true,
+      "dataPreserved": true
+    },
+    "onePlus13R": {
+      "delivered": true,
+      "installed": false,
+      "lastVerifiedVersion": "0.5.1-afz-r27.1"
+    }
+  }
+}
