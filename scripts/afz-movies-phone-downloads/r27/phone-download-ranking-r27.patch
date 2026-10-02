@@ -157,7 +157,7 @@ index bf90e42..1a8b46d 100644
          "$resolution · $size$warning · Target: 1080p, ${target.label}${if (isEpisode) " per episode" else ""}")
  }
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
-index a3030a1..9c0f28b 100644
+index a3030a1..a0552e6 100644
 --- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
 +++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
 @@ -784,15 +784,12 @@ internal fun StreamList(
@@ -181,19 +181,33 @@ index a3030a1..9c0f28b 100644
      val hasGroups = filteredGroups.isNotEmpty()
      val hasAnyStreams = recommendation != null || filteredGroups.any { it.streams.isNotEmpty() }
      val anyLoading = filteredGroups.any { it.isLoading }
-@@ -820,6 +817,11 @@ internal fun StreamList(
+@@ -817,9 +814,17 @@ internal fun StreamList(
+     ) {
+         if (downloadOnly) item {
+             Text("Download to device", style = MaterialTheme.typography.titleMedium,
++                color = MaterialTheme.colorScheme.onBackground,
                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
              Text("Choose a source and size to save on this device", style = MaterialTheme.typography.bodySmall,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
 +            if (recommendation == null && hasAnyStreams) Text(
 +                "No download matches the ${device.label.lowercase()} target. Check the file size before choosing.",
 +                style = MaterialTheme.typography.bodySmall,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
 +                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
 +            )
          }
          recommendation?.let { recommended ->
              item(key = "device_download_recommendation") {
-@@ -867,10 +869,10 @@ internal fun StreamList(
+@@ -857,6 +862,7 @@ internal fun StreamList(
+             !hasAnyStreams && !uiState.isAnyLoading -> {
+                 item {
+                     if (downloadOnly) Text("No supported device downloads available. Try another add-on or refresh.",
++                        color = MaterialTheme.colorScheme.onBackground,
+                         modifier = Modifier.padding(16.dp))
+                     else EmptyStateBlock(reason = uiState.emptyStateReason)
+                 }
+@@ -867,10 +873,10 @@ internal fun StreamList(
                      streamSection(
                          sectionKey = streamSectionRenderKey(groupIndex = groupIndex, group = group),
                          group = group,
@@ -206,7 +220,7 @@ index a3030a1..9c0f28b 100644
                          showAddonLogo = streamBadgeSettings.showAddonLogo,
                          badgePlacement = streamBadgeSettings.badgePlacement,
                          torrentNotSupportedText = torrentNotSupportedText,
-@@ -927,14 +929,18 @@ private fun LazyListScope.streamSection(
+@@ -927,14 +933,18 @@ private fun LazyListScope.streamSection(
          }
      }
  
@@ -379,10 +393,10 @@ index 0000000..9deebac
 +    }
 +}
 diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
-index fce9ab3..700ff93 100644
+index fce9ab3..e572f72 100644
 --- a/iosApp/Configuration/Version.xcconfig
 +++ b/iosApp/Configuration/Version.xcconfig
 @@ -1,2 +1,2 @@
 -CURRENT_PROJECT_VERSION=133
-+CURRENT_PROJECT_VERSION=134
++CURRENT_PROJECT_VERSION=135
  MARKETING_VERSION=0.5.1
