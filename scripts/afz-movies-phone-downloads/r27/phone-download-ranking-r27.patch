@@ -1,0 +1,388 @@
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DeviceDownloadPicker.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DeviceDownloadPicker.kt
+new file mode 100644
+index 0000000..5d6c7e4
+--- /dev/null
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DeviceDownloadPicker.kt
+@@ -0,0 +1,69 @@
++package com.nuvio.app.features.streams
++
++import com.nuvio.app.features.downloads.isDynamicDownloadUrl
++import kotlin.math.abs
++
++internal data class StreamListPresentation(
++    val groups: List<AddonStreamGroup>,
++    val recommendation: DownloadRecommendation? = null,
++)
++
++/** Keep playback order intact; downloads rank concrete files across all selected add-ons. */
++internal fun streamListPresentation(
++    groups: List<AddonStreamGroup>,
++    device: DownloadDevice,
++    isEpisode: Boolean,
++    debridEnabled: Boolean,
++    downloadOnly: Boolean,
++): StreamListPresentation {
++    if (!downloadOnly) return StreamListPresentation(groups)
++    val streams = groups.flatMap { it.streams }.filter {
++        it.fixedDeviceDownloadStreamOrNull(debridEnabled) != null
++    }
++    val recommendation = recommendDeviceDownload(streams, device, isEpisode, debridEnabled)
++    val target = downloadTarget(device, isEpisode)
++    val mobileMaximum = if (isEpisode) target.maxGb * 2 else maxOf(8.0, target.maxGb)
++    val saverMaximum = if (isEpisode) target.minGb else 1.5
++    data class Candidate(val stream: StreamItem, val section: DownloadSection, val size: Double?)
++    val candidates = streams.filter { it != recommendation?.stream }.map { stream ->
++        val size = stream.downloadSizeGb()
++        val resolution = stream.downloadResolution()
++        val section = when {
++            stream.downloadIsRemux() || (size != null && size > mobileMaximum) -> DownloadSection.Large
++            resolution == 2160 -> DownloadSection.UltraHd
++            resolution == 1080 && size != null && size in saverMaximum..mobileMaximum -> DownloadSection.Mobile
++            (resolution == 1080 && size != null && size < saverMaximum) ||
++                resolution in listOf(720, 576, 480) -> DownloadSection.DataSaver
++            resolution == 1080 -> DownloadSection.FullHd
++            else -> DownloadSection.Other
++        }
++        Candidate(stream, section, size)
++    }.sortedWith(compareBy<Candidate> { it.section.ordinal }
++        .thenBy { if (it.size != null && it.size in target.minGb..target.maxGb) 0 else 1 }
++        .thenBy { if (it.stream.downloadIsCached()) 0 else 1 }
++        .thenBy { candidate -> candidate.size?.let { abs(it - (target.minGb + target.maxGb) / 2) } ?: Double.MAX_VALUE })
++    val sections = candidates.groupBy { it.section }.map { (section, rows) ->
++        AddonStreamGroup(
++            addonName = section.label,
++            addonId = "device-download:${section.name}",
++            streams = rows.map { it.stream },
++        )
++    }
++    // Preserve loading and error feedback after regrouping files by download suitability.
++    val pending = groups.filter { it.isLoading || it.error != null }.map { it.copy(streams = emptyList()) }
++    return StreamListPresentation(sections + pending, recommendation)
++}
++
++internal fun StreamItem.fixedDeviceDownloadStreamOrNull(debridEnabled: Boolean): StreamItem? =
++    deviceDownloadStreamOrNull(debridEnabled)?.takeUnless {
++        isDynamicDownloadUrl(it.playableDirectUrl.orEmpty())
++    }
++
++private enum class DownloadSection(val label: String) {
++    Mobile("Mobile · 1080p"),
++    DataSaver("Data Saver"),
++    FullHd("Other 1080p sources"),
++    Other("Other sources"),
++    UltraHd("4K sources"),
++    Large("Large / Original quality"),
++}
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DownloadRecommendation.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DownloadRecommendation.kt
+index bf90e42..1a8b46d 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DownloadRecommendation.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/DownloadRecommendation.kt
+@@ -1,7 +1,6 @@
+ package com.nuvio.app.features.streams
+ 
+ import androidx.compose.runtime.Composable
+-import com.nuvio.app.features.downloads.isDynamicDownloadUrl
+ import kotlin.math.abs
+ import kotlin.math.round
+ 
+@@ -28,7 +27,22 @@ private val poorSource = Regex("(?i)\\b(?:HDCAM|TELESYNC|HDTS|3D)\\b")
+ private val packSource = Regex("(?i)\\b(?:complete[ ._-]*(?:season|series)|(?:season|series)[ ._-]*(?:pack|complete)|S[0-9]{1,2}[ ._-]*(?:pack|complete))\\b")
+ 
+ private fun StreamItem.downloadText() = listOfNotNull(name, title, description, behaviorHints.filename,
+-    clientResolve?.stream?.raw?.filename, clientResolve?.stream?.raw?.torrentName).joinToString(" ")
++    clientResolve?.stream?.raw?.filename, clientResolve?.stream?.raw?.torrentName,
++    clientResolve?.stream?.raw?.parsed?.quality).joinToString(" ")
++
++internal fun StreamItem.downloadIsRemux(): Boolean = downloadText().contains("remux", true)
++
++internal fun StreamItem.downloadIsCached(): Boolean {
++    when (debridCacheStatus?.state) {
++        StreamDebridCacheState.CACHED -> return true
++        StreamDebridCacheState.NOT_CACHED -> return false
++        else -> Unit
++    }
++    clientResolve?.isCached?.let { return it }
++    val text = downloadText()
++    return Regex("\\bcached\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) &&
++        !Regex("\\bnot[ ._-]+cached\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
++}
+ 
+ internal fun StreamItem.downloadResolution(): Int? {
+     val raw = clientResolve?.stream?.raw
+@@ -61,9 +75,8 @@ internal fun recommendDeviceDownload(
+     streams: List<StreamItem>, device: DownloadDevice, isEpisode: Boolean, debridEnabled: Boolean,
+ ): DownloadRecommendation? {
+     val target = downloadTarget(device, isEpisode)
+-    data class Candidate(val stream: StreamItem, val resolution: Int?, val size: Double?, val remux: Boolean) {
++    data class Candidate(val stream: StreamItem, val resolution: Int?, val size: Double?) {
+         fun tier(): Int = when {
+-            remux -> 8
+             resolution == 1080 && size != null && size in target.minGb..target.maxGb -> 0
+             resolution == 1080 && size != null && size <= target.maxGb -> 1
+             resolution == 720 && size != null && size <= target.maxGb -> 2
+@@ -75,27 +88,29 @@ internal fun recommendDeviceDownload(
+         }
+     }
+     val candidates = streams.mapNotNull { stream ->
+-        if (stream.deviceDownloadStreamOrNull(debridEnabled) == null) return@mapNotNull null
+-        if (isDynamicDownloadUrl(stream.deviceDownloadStreamOrNull(debridEnabled)?.url.orEmpty())) return@mapNotNull null
++        if (stream.fixedDeviceDownloadStreamOrNull(debridEnabled) == null) return@mapNotNull null
+         val size = stream.downloadSizeGb()
+         if (size != null && size > target.maxGb) return@mapNotNull null
+         val text = stream.downloadText()
+         if (poorSource.containsMatchIn(text) || packSource.containsMatchIn(text) ||
+             (isEpisode && (stream.clientResolve?.stream?.raw?.parsed?.episodes?.size ?: 0) > 1)) return@mapNotNull null
+-        Candidate(stream, stream.downloadResolution(), stream.downloadSizeGb(), text.contains("remux", true))
++        val resolution = stream.downloadResolution()
++        // UHD and REMUX remain explicit alternatives; never promote them as a phone download.
++        if (stream.downloadIsRemux() || resolution == 2160) return@mapNotNull null
++        Candidate(stream, resolution, size)
+     }
+     val best = candidates.minWithOrNull(compareBy<Candidate> { it.tier() }
++        .thenBy { if (it.stream.downloadIsCached()) 0 else 1 }
+         .thenBy { candidate -> candidate.size?.let { abs(it - (target.minGb + target.maxGb) / 2) } ?: Double.MAX_VALUE }) ?: return null
+     val matched = best.tier() == 0
+     val resolution = best.resolution?.let { "${it}p" } ?: "Resolution unknown"
+     val size = best.size?.let { "${number(round(it * 10) / 10)} GB" } ?: "Size unknown"
+     val warning = when {
+-        best.remux -> " · Large original-quality file"
+-        best.size != null && best.size > target.maxGb -> " · Above target size"
+         best.resolution == 720 -> " · Smaller 720p fallback"
+         else -> ""
+     }
+     return DownloadRecommendation(best.stream,
+-        if (matched) "Recommended download · ${device.label}" else "Closest available download · ${device.label}",
++        if (matched && device == DownloadDevice.Phone) "Recommended for this phone"
++        else if (matched) "Recommended download · ${device.label}" else "Closest available download · ${device.label}",
+         "$resolution · $size$warning · Target: 1080p, ${target.label}${if (isEpisode) " per episode" else ""}")
+ }
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
+index a3030a1..9c0f28b 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
+@@ -784,15 +784,12 @@ internal fun StreamList(
+     modifier: Modifier = Modifier,
+ ) {
+     val device = currentDownloadDevice()
+-    val recommendation = recommendDeviceDownload(
+-        streams = uiState.filteredGroups.flatMap { it.streams }, device = device,
+-        isEpisode = isEpisode, debridEnabled = debridEnabled,
++    val presentation = streamListPresentation(
++        groups = uiState.filteredGroups, device = device,
++        isEpisode = isEpisode, debridEnabled = debridEnabled, downloadOnly = downloadOnly,
+     )
+-    val filteredGroups = uiState.filteredGroups.map { group ->
+-        group.copy(streams = group.streams.filter { stream ->
+-            stream != recommendation?.stream && (!downloadOnly || stream.deviceDownloadStreamOrNull(debridEnabled) != null)
+-        })
+-    }
++    val recommendation = presentation.recommendation
++    val filteredGroups = presentation.groups
+     val hasGroups = filteredGroups.isNotEmpty()
+     val hasAnyStreams = recommendation != null || filteredGroups.any { it.streams.isNotEmpty() }
+     val anyLoading = filteredGroups.any { it.isLoading }
+@@ -820,6 +817,11 @@ internal fun StreamList(
+                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
+             Text("Choose a source and size to save on this device", style = MaterialTheme.typography.bodySmall,
+                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
++            if (recommendation == null && hasAnyStreams) Text(
++                "No download matches the ${device.label.lowercase()} target. Check the file size before choosing.",
++                style = MaterialTheme.typography.bodySmall,
++                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
++            )
+         }
+         recommendation?.let { recommended ->
+             item(key = "device_download_recommendation") {
+@@ -867,10 +869,10 @@ internal fun StreamList(
+                     streamSection(
+                         sectionKey = streamSectionRenderKey(groupIndex = groupIndex, group = group),
+                         group = group,
+-                        showHeader = uiState.selectedFilter == null,
++                        showHeader = downloadOnly || uiState.selectedFilter == null,
+                         debridEnabled = debridEnabled,
+                         appendInstantServiceToDefaultName = appendInstantServiceToDefaultName,
+-                        showFileSizeBadges = streamBadgeSettings.showFileSizeBadges,
++                        showFileSizeBadges = downloadOnly || streamBadgeSettings.showFileSizeBadges,
+                         showAddonLogo = streamBadgeSettings.showAddonLogo,
+                         badgePlacement = streamBadgeSettings.badgePlacement,
+                         torrentNotSupportedText = torrentNotSupportedText,
+@@ -927,14 +929,18 @@ private fun LazyListScope.streamSection(
+         }
+     }
+ 
+-    val streamsBySource = group.streams.groupBy { stream ->
++    val streamsBySource = if (downloadOnly) linkedMapOf(group.addonName to group.streams)
++    else group.streams.groupBy { stream ->
+         stream.sourceName?.takeIf { it.isNotBlank() } ?: stream.addonName
+     }
+-    val sortedSources = streamsBySource.keys.sortedBy { it.lowercase() }
++    val sortedSources = if (downloadOnly) streamsBySource.keys.toList()
++    else streamsBySource.keys.sortedBy { it.lowercase() }
+     val showSourceHeaders = sortedSources.size > 1
+ 
+     sortedSources.forEachIndexed { sourceIndex, sourceName ->
+-        val sourceStreams = streamsBySource[sourceName].orEmpty().withAfzQuickActionsNearTop()
++        val sourceStreams = streamsBySource[sourceName].orEmpty().let {
++            if (downloadOnly) it else it.withAfzQuickActionsNearTop()
++        }
+         if (showSourceHeaders) {
+             item(key = "source_${sectionKey}_$sourceIndex") {
+                 StreamSourceHeader(sourceName = sourceName)
+diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/DeviceDownloadPickerTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/DeviceDownloadPickerTest.kt
+new file mode 100644
+index 0000000..9deebac
+--- /dev/null
++++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/DeviceDownloadPickerTest.kt
+@@ -0,0 +1,144 @@
++package com.nuvio.app.features.streams
++
++import kotlin.test.*
++
++class DeviceDownloadPickerTest {
++    private fun source(label: String, gb: Double? = null, addon: String = "AFZ") = StreamItem(
++        name = label, url = "https://example.test/${label.hashCode()}.mkv",
++        addonName = addon, addonId = "addon:$addon",
++        behaviorHints = StreamBehaviorHints(videoSize = gb?.let { (it * 1073741824).toLong() }),
++    )
++    private fun group(vararg streams: StreamItem, name: String = "AFZ") =
++        AddonStreamGroup(name, "addon:$name", streams.toList())
++    private fun picker(vararg groups: AddonStreamGroup, episode: Boolean = false, downloadOnly: Boolean = true) =
++        streamListPresentation(groups.toList(), DownloadDevice.Phone, episode, false, downloadOnly)
++    private fun StreamListPresentation.files() = groups.flatMap { it.streams }
++
++    @Test fun phonePickerDoesNotInheritPlaybackFirstHugeSourceOrder() {
++        val good = source("1080p WEB-DL", 4.0)
++        val mobile = source("1080p WEB-DL alternate", 5.5)
++        val saver = source("720p WEB-DL", 0.8)
++        val remux = source("2160p REMUX", 37.4)
++        val huge = source("2160p WEB-DL", 73.2)
++        val auto = source("AFZ Play Best 2160p", 37.4).copy(url = "https://example.test/auto-stream/tt123/best")
++        val result = picker(group(auto, remux, huge, saver, mobile, good))
++        assertEquals(good, result.recommendation?.stream)
++        assertEquals(listOf(mobile, saver, remux, huge), result.files())
++        assertEquals("Large / Original quality", result.groups.last().addonName)
++        assertFalse(auto in result.files())
++    }
++
++    @Test fun categoriesRankAcrossAddonsAndRetainFilesInsteadOfProviderAlphabeticalOrder() {
++        val best = source("1080p preferred", 4.0, "Z")
++        val mobile = source("1080p alternate", 5.0, "Z").copy(sourceName = "Z provider")
++        val saver = source("1080p compact", 1.0, "A").copy(sourceName = "A provider")
++        val unknown = source("1080p unknown", addon = "A")
++        val fourK = source("2160p compact", 6.0, "A")
++        val large = source("1080p original", 12.0, "A")
++        val result = picker(group(large, fourK, unknown, saver, name = "A"), group(mobile, best, name = "Z"))
++        assertEquals(best, result.recommendation?.stream)
++        assertEquals(listOf(mobile, saver, unknown, fourK, large), result.files())
++        assertEquals(listOf("Mobile · 1080p", "Data Saver", "Other 1080p sources", "4K sources", "Large / Original quality"),
++            result.groups.map { it.addonName })
++    }
++
++    @Test fun playbackKeepsItsOriginalGroupsAndDoesNotPromoteDownloadRecommendation() {
++        val best = source("AFZ Play Best 2160p", 37.4)
++        val groups = listOf(group(best, source("1080p phone", 4.0)), group(source("720p", 0.9), name = "Second"))
++        val result = streamListPresentation(groups, DownloadDevice.Phone, false, false, false)
++        assertSame(groups, result.groups)
++        assertNull(result.recommendation)
++        assertEquals(best, result.files().first())
++    }
++
++    @Test fun fixedMobileSizedFilesReplaceDynamicAutoChoicesInDownloadSheet() {
++        val fixed = source("1080p fixed", 4.0)
++        val auto = listOf("mobile", "saver", "1080p", "4k", "best").map {
++            source("AFZ Auto $it 1080p", 4.0).copy(url = "https://example.test/auto-stream/tt123/$it")
++        }
++        val result = picker(group(*(auto + fixed).toTypedArray()))
++        assertEquals(fixed, result.recommendation?.stream)
++        assertTrue(result.files().isEmpty())
++        assertNull(picker(group(*auto.toTypedArray())).recommendation)
++    }
++
++    @Test fun hugeSourcesCannotBecomePhoneRecommendationWhenTheyAreTheOnlyChoices() {
++        val remux = source("AFZ Auto Mobile 1080p REMUX", 37.4)
++        val huge = source("2160p", 73.2)
++        val result = picker(group(remux, huge))
++        assertNull(result.recommendation)
++        assertEquals(listOf(remux, huge), result.files())
++        assertEquals("Large / Original quality", result.groups.single().addonName)
++    }
++
++    @Test fun fourKAndRemuxAreExplicitAlternativesEvenWhenSmallEnough() {
++        val fourK = source("2160p", 4.0)
++        val remux = source("1080p REMUX", 4.0)
++        val result = picker(group(remux, fourK))
++        assertNull(result.recommendation)
++        assertEquals(listOf(fourK, remux), result.files())
++    }
++
++    @Test fun cached1080pWithinTargetIsPreferredToUncachedNearestSize() {
++        val uncached = source("1080p uncached", 4.0)
++        val cached = source("1080p ready", 3.5).copy(
++            debridCacheStatus = StreamDebridCacheStatus("p", "Provider", StreamDebridCacheState.CACHED))
++        val result = picker(group(uncached, cached))
++        assertEquals(cached, result.recommendation?.stream)
++    }
++
++    @Test fun misleadingNotCachedLabelsDoNotReceiveCachedPreference() {
++        val notCached = source("1080p not cached", 4.0)
++        val cached = source("1080p cached", 3.6)
++        assertEquals(cached, picker(group(notCached, cached)).recommendation?.stream)
++        val structured = notCached.copy(name = "1080p cached", debridCacheStatus =
++            StreamDebridCacheStatus("p", "Provider", StreamDebridCacheState.NOT_CACHED))
++        assertFalse(structured.downloadIsCached())
++    }
++
++    @Test fun episodesUseTheirOwnBudgetAndMoveMovieSizedFilesToLargeSection() {
++        val episode = source("1080p S01E01", 0.9)
++        val big = source("1080p S01E01 large", 4.0)
++        val result = picker(group(big, episode), episode = true)
++        assertEquals(episode, result.recommendation?.stream)
++        assertEquals("Large / Original quality", result.groups.single().addonName)
++        assertTrue(result.recommendation!!.detail.contains("per episode"))
++    }
++
++    @Test fun loadingAndErrorsSurviveRegroupingAndEmptySourcesDoNotBecomeOffers() {
++        val loading = group().copy(isLoading = true)
++        val failure = group(name = "Other").copy(error = "Provider unavailable")
++        val result = picker(loading, failure)
++        assertEquals(listOf(loading, failure), result.groups)
++        assertTrue(result.files().isEmpty())
++    }
++
++    @Test fun supportedConcreteDownloadsAreFilteredWithoutChangingTheirIdentity() {
++        val good = source("1080p WEB-DL", 4.0)
++        val playlist = good.copy(url = "https://example.test/movie.m3u8")
++        val control = good.copy(name = "AFZ Request", addonName = "AFZ Movies & TV",
++            url = "https://example.test/request-play/tt123")
++        val torrent = good.copy(url = null, infoHash = "a".repeat(40))
++        val result = picker(group(playlist, control, torrent, good))
++        assertSame(good, result.recommendation?.stream)
++        assertTrue(result.files().isEmpty())
++    }
++
++    @Test fun structuredRemuxQualityIsKeptAtBottom() {
++        val remux = source("1080p", 4.0).copy(clientResolve = StreamClientResolve(
++            stream = StreamClientResolveStream(raw = StreamClientResolveRaw(parsed = StreamClientResolveParsed(quality = "REMUX")))))
++        val saver = source("720p", 0.8)
++        val result = picker(group(remux, saver))
++        assertEquals(saver, result.recommendation?.stream)
++        assertEquals("Large / Original quality", result.groups.single().addonName)
++    }
++
++    @Test fun tiesPreserveSourceOrderAndUnknownBytesAreNotPresentedAsRecommended() {
++        val first = source("1080p first")
++        val second = source("1080p second")
++        val result = picker(group(first, second))
++        assertEquals(first, result.recommendation?.stream)
++        assertTrue(result.recommendation!!.heading.startsWith("Closest available"))
++        assertEquals(listOf(second), result.files())
++    }
++}
+diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
+index fce9ab3..700ff93 100644
+--- a/iosApp/Configuration/Version.xcconfig
++++ b/iosApp/Configuration/Version.xcconfig
+@@ -1,2 +1,2 @@
+-CURRENT_PROJECT_VERSION=133
++CURRENT_PROJECT_VERSION=134
+ MARKETING_VERSION=0.5.1
