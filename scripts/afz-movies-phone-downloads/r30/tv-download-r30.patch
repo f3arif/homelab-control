@@ -1,0 +1,213 @@
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/details/components/DetailActionButtons.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/details/components/DetailActionButtons.kt
+index 1ca93c8..3ac8b20 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/details/components/DetailActionButtons.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/details/components/DetailActionButtons.kt
+@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
+ import androidx.compose.foundation.ExperimentalFoundationApi
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.combinedClickable
++import androidx.compose.foundation.focusable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Row
+@@ -28,6 +29,7 @@ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
++import androidx.compose.ui.focus.onFocusChanged
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.graphicsLayer
+@@ -40,6 +42,8 @@ import androidx.compose.ui.unit.Dp
+ import androidx.compose.ui.unit.dp
+ import com.nuvio.app.core.ui.AppIconResource
+ import com.nuvio.app.core.ui.appIconPainter
++import com.nuvio.app.features.streams.DownloadDevice
++import com.nuvio.app.features.streams.currentDownloadDevice
+ import nuvio.composeapp.generated.resources.Res
+ import nuvio.composeapp.generated.resources.action_play
+ import nuvio.composeapp.generated.resources.details_actions_menu_label
+@@ -77,7 +81,15 @@ fun DetailActionButtons(
+         animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+         label = "detail_action_menu_progress",
+     )
+-    val hasSecondaryActions = secondaryActions.isNotEmpty()
++    val actionPresentation = detailActionPresentation(
++        device = currentDownloadDevice(),
++        secondaryActions = secondaryActions,
++        deviceDownloadAction = deviceDownloadAction,
++    )
++    val compactDownloadAction = actionPresentation.compactDownloadAction
++    val tvDownloadAction = actionPresentation.tvDownloadAction
++    val presentedSecondaryActions = actionPresentation.secondaryActions
++    val hasSecondaryActions = presentedSecondaryActions.isNotEmpty()
+ 
+     Box(
+         modifier = modifier
+@@ -134,21 +146,26 @@ fun DetailActionButtons(
+                 }
+             }
+ 
+-            if (deviceDownloadAction != null && !actionsExpanded) {
++            if (compactDownloadAction != null && !actionsExpanded) {
+                 Spacer(modifier = Modifier.width(8.dp))
+                 DetailIconAction(
+-                    label = deviceDownloadAction.label,
+-                    icon = deviceDownloadAction.icon,
+-                    active = deviceDownloadAction.isActive,
++                    label = compactDownloadAction.label,
++                    icon = compactDownloadAction.icon,
++                    active = compactDownloadAction.isActive,
+                     progress = 1f,
+                     size = iconButtonSize,
+-                    onClick = deviceDownloadAction.onClick,
++                    onClick = compactDownloadAction.onClick,
+                 )
+             }
+ 
++            if (tvDownloadAction != null) {
++                Spacer(modifier = Modifier.width(8.dp))
++                TvDownloadAction(action = tvDownloadAction, height = buttonHeight)
++            }
++
+             if (hasSecondaryActions) {
+                 Spacer(modifier = Modifier.width(12.dp))
+-                secondaryActions.forEachIndexed { index, action ->
++                presentedSecondaryActions.forEachIndexed { index, action ->
+                     Box(
+                         modifier = Modifier
+                             .width(iconButtonSize * menuProgress)
+@@ -179,7 +196,7 @@ fun DetailActionButtons(
+                         }
+                     }
+ 
+-                    if (index != secondaryActions.lastIndex) {
++                    if (index != presentedSecondaryActions.lastIndex) {
+                         Spacer(modifier = Modifier.width(12.dp * menuProgress))
+                     }
+                 }
+@@ -226,6 +243,49 @@ fun DetailActionButtons(
+     }
+ }
+ 
++internal data class DetailActionPresentation(
++    val compactDownloadAction: DetailSecondaryAction?,
++    val tvDownloadAction: DetailSecondaryAction?,
++    val secondaryActions: List<DetailSecondaryAction>,
++)
++
++internal fun detailActionPresentation(
++    device: DownloadDevice,
++    secondaryActions: List<DetailSecondaryAction>,
++    deviceDownloadAction: DetailSecondaryAction?,
++): DetailActionPresentation = if (device == DownloadDevice.Television) {
++    DetailActionPresentation(null, deviceDownloadAction, secondaryActions)
++} else {
++    DetailActionPresentation(deviceDownloadAction, null, secondaryActions)
++}
++
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++private fun TvDownloadAction(action: DetailSecondaryAction, height: Dp) {
++    var focused by remember { mutableStateOf(false) }
++    Surface(
++        shape = RoundedCornerShape(40.dp),
++        color = if (focused || action.isActive) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surfaceVariant,
++        contentColor = if (focused || action.isActive) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface,
++        tonalElevation = if (focused) 8.dp else 4.dp,
++    ) {
++        Row(
++            modifier = Modifier
++                .height(height)
++                .widthIn(min = 176.dp)
++                .onFocusChanged { focused = it.isFocused }
++                .focusable()
++                .combinedClickable(onClick = action.onClick, onLongClick = action.onLongClick, role = Role.Button),
++            horizontalArrangement = Arrangement.Center,
++            verticalAlignment = Alignment.CenterVertically,
++        ) {
++            Icon(imageVector = action.icon, contentDescription = null, modifier = Modifier.size(21.dp))
++            Spacer(modifier = Modifier.width(8.dp))
++            Text(text = action.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
++        }
++    }
++}
++
+ @OptIn(ExperimentalFoundationApi::class)
+ @Composable
+ private fun DetailIconAction(
+diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/details/components/DetailActionPresentationTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/details/components/DetailActionPresentationTest.kt
+new file mode 100644
+index 0000000..08b383d
+--- /dev/null
++++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/details/components/DetailActionPresentationTest.kt
+@@ -0,0 +1,61 @@
++package com.nuvio.app.features.details.components
++
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.rounded.Download
++import com.nuvio.app.features.streams.DownloadDevice
++import kotlin.test.Test
++import kotlin.test.assertEquals
++import kotlin.test.assertNull
++import kotlin.test.assertSame
++
++class DetailActionPresentationTest {
++    private fun downloadAction(onClick: () -> Unit = {}) = DetailSecondaryAction(
++        label = "Download to device",
++        icon = Icons.Rounded.Download,
++        onClick = onClick,
++    )
++
++    @Test
++    fun televisionGetsVisibleRemoteFriendlyDownloadActionWithoutDuplicatingIt() {
++        var clicks = 0
++        val download = downloadAction { clicks++ }
++        val secondary = listOf(downloadAction())
++
++        val presentation = detailActionPresentation(
++            device = DownloadDevice.Television,
++            secondaryActions = secondary,
++            deviceDownloadAction = download,
++        )
++
++        assertNull(presentation.compactDownloadAction)
++        assertSame(download, presentation.tvDownloadAction)
++        assertSame(secondary, presentation.secondaryActions)
++        presentation.tvDownloadAction?.onClick?.invoke()
++        assertEquals(1, clicks)
++    }
++
++    @Test
++    fun phoneTabletAndComputerKeepExistingCompactDownloadPresentation() {
++        val download = downloadAction()
++        val secondary = listOf(downloadAction())
++
++        for (device in listOf(DownloadDevice.Phone, DownloadDevice.Tablet, DownloadDevice.Computer)) {
++            val presentation = detailActionPresentation(device, secondary, download)
++            assertSame(download, presentation.compactDownloadAction)
++            assertNull(presentation.tvDownloadAction)
++            assertSame(secondary, presentation.secondaryActions)
++        }
++    }
++
++    @Test
++    fun televisionWithoutDownloadCapabilityDoesNotInventAnAction() {
++        val presentation = detailActionPresentation(
++            device = DownloadDevice.Television,
++            secondaryActions = emptyList(),
++            deviceDownloadAction = null,
++        )
++        assertNull(presentation.compactDownloadAction)
++        assertNull(presentation.tvDownloadAction)
++        assertEquals(emptyList(), presentation.secondaryActions)
++    }
++}
+diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
+index 6b3fa36..8d5bd6b 100644
+--- a/iosApp/Configuration/Version.xcconfig
++++ b/iosApp/Configuration/Version.xcconfig
+@@ -1,2 +1,2 @@
+-CURRENT_PROJECT_VERSION=137
++CURRENT_PROJECT_VERSION=138
+ MARKETING_VERSION=0.5.1
