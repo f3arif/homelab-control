@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "release": "R30",
+  "purpose": "Android TV / Onn 4K remote-friendly Download to device entry using existing R29 picker",
+  "sourceBase": "10be7a7b0dfb650117c872705efaf9a1cc272f47",
+  "sourceCommit": "cb10a54da74d10647e8b157e5343057ee06bd120",
+  "sourceBranch": "afz/tv-download-r30-20261005",
+  "restorePatch": "tv-download-r30.patch",
+  "restoreGuard": "exact R29 HEAD plus clean worktree",
+  "restoreApplyCheck": "pass",
+  "focusedRegressions": {
+    "televisionPresentation": "pass",
+    "phonePlaybackRecommendation": "pass",
+    "deviceDownloadPicker": "pass",
+    "downloadRecommendation": "pass"
+  },
+  "fullAndroidHostSuite": {
+    "completed": 1473,
+    "failed": 2,
+    "skipped": 6,
+    "failureClassification": "host environment",
+    "failures": [
+      "AndroidDownloadLifecycleTest.classMethod -> DefaultSdkProvider UnsupportedOperationException",
+      "AndroidDownloadNetworkTest.classMethod -> DefaultSdkProvider UnsupportedOperationException"
+    ]
+  },
+  "build": {
+    "task": ":androidApp:assembleFullDebug",
+    "versionName": "0.5.1-afz-r30",
+    "versionCode": 138,
+    "applicationId": "com.afz.nuvio.preview",
+    "apkBytes": 160176173,
+    "apkSha256": "148083a75243fcb126a64bcc72c5e728141e5ca6c84246728a4956ae5b16537b",
+    "signerSha256": "2ead05d67ceb35e59a5f703af7fb17bc93c22e04370ad51ba754bb38e06b2b09",
+    "signer": "Android Debug candidate key",
+    "status": "pass"
+  }
+}
