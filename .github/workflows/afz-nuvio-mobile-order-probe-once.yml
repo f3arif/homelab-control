@@ -18,11 +18,23 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+
+      - name: Record probe start
+        shell: bash
+        run: |
+          set -euo pipefail
+          out='.github/afz-nuvio-mobile-order-probe-result.txt'
+          printf 'STATE=STARTED\nTIME=%s\n' "$(date -u +%FT%TZ)" > "$out"
+          git config user.name "AFZ Nuvio Probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add "$out"
+          git commit -m "Mark Nuvio mobile ordering probe started" || true
+          git push origin HEAD:main
 
       - name: Join AFZ tailnet
         uses: tailscale/github-action@v4
@@ -38,6 +50,7 @@ jobs:
           host='100.106.186.118'
           out='.github/afz-nuvio-mobile-order-probe-result.txt'
           {
+            echo "STATE=COMPLETED"
             echo "TIME=$(date -u +%FT%TZ)"
             echo "===HOST==="
             tailscale ssh "Faiz@${host}" 'hostname'
@@ -53,6 +66,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
           git config user.name "AFZ Nuvio Probe"
           git config user.email "actions@users.noreply.github.com"
           git add .github/afz-nuvio-mobile-order-probe-result.txt
