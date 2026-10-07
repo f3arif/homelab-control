@@ -1,0 +1,21 @@
+TIME=2026-10-07T13:57:51Z
+===HP===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
+
+Connection closed by UNKNOWN port 65535
+HP_RC=255
+===H3===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
+
+Connection closed by UNKNOWN port 65535
+H3_RC=255
+===SOURCE===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
+
+Connection closed by UNKNOWN port 65535
+SOURCE_RC=255
+===ADB===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
+
+Connection closed by UNKNOWN port 65535
+ADB_RC=255
