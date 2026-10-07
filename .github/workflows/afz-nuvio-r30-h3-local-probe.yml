@@ -1,0 +1,88 @@
+name: AFZ Nuvio R30 H3 Local Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-nuvio-r30-h3-local-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: afz-nuvio-r30-h3-local-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Inspect live H3 Nuvio source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          $out='.github\afz-nuvio-r30-h3-local-probe-result.txt'
+          $root='C:\AFZ\Nuvio-Setup-20260923\R31-universal-row-fix-source'
+          $streams=Join-Path $root 'composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\StreamsScreen.kt'
+          $phone=Join-Path $root 'composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendation.kt'
+          $test=Join-Path $root 'composeApp\src\commonTest\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendationTest.kt'
+          $adb='C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+          $lines=New-Object System.Collections.Generic.List[string]
+          $lines.Add('TIME='+(Get-Date).ToUniversalTime().ToString('o'))
+          $lines.Add('HOST='+$env:COMPUTERNAME)
+          $lines.Add('RUNNER='+$env:RUNNER_NAME)
+          $lines.Add('ROOT_EXISTS='+(Test-Path -LiteralPath $root))
+          foreach($p in @($streams,$phone,$test)){
+            $lines.Add('FILE='+$p)
+            $lines.Add('EXISTS='+(Test-Path -LiteralPath $p))
+            if(Test-Path -LiteralPath $p){
+              $lines.Add('SHA256='+(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)
+              $lines.Add('---MATCHES---')
+              $hits=Select-String -LiteralPath $p -Pattern 'phonePlaybackPlacement|recommendPhonePlayback|withoutFeaturedPhoneStream|withAfzQuickActionsNearTop|RecommendedPlaybackStreamCard|recommendedForRow|AFZ Play Best|afzStreamActionOrNull' -Context 5,10
+              foreach($h in $hits){$lines.Add($h.ToString())}
+              $lines.Add('---END_MATCHES---')
+            }
+          }
+          $lines.Add('===ADB===')
+          if(Test-Path -LiteralPath $adb){$lines.AddRange([string[]](& $adb devices -l 2>&1))}else{$lines.Add('ADB_MISSING')}
+          $lines.Add('===RECENT_APKS===')
+          if(Test-Path -LiteralPath 'C:\AFZ\Nuvio-Setup-20260923'){
+            foreach($f in (Get-ChildItem 'C:\AFZ\Nuvio-Setup-20260923' -Filter '*.apk' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 12)){
+              $lines.Add(($f.FullName+' | '+$f.Length+' | '+$f.LastWriteTime.ToString('o')))
+            }
+          }
+          $lines.Add('===GIT===')
+          if(Test-Path -LiteralPath (Join-Path $root '.git')){
+            Push-Location $root
+            try{
+              $lines.AddRange([string[]](& git status --short --branch 2>&1))
+              $lines.Add('HEAD='+(& git rev-parse HEAD))
+              $lines.Add('BRANCH='+(& git branch --show-current))
+            }finally{Pop-Location}
+          }
+          [IO.File]::WriteAllLines($out,$lines,(New-Object Text.UTF8Encoding($false)))
+
+      - name: Commit probe result
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name "AFZ Nuvio H3 Probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/afz-nuvio-r30-h3-local-probe-result.txt
+          git commit -m "Record Nuvio R30 H3 local probe" 2>$null
+          if($LASTEXITCODE -eq 0){
+            git pull --rebase origin main
+            git push origin HEAD:main
+          } else {
+            Write-Output 'NO_RESULT_CHANGE'
+            exit 0
+          }
