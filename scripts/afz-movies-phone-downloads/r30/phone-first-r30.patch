@@ -65,9 +65,20 @@ diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/Pho
          ?: rows.firstOrNull { it.second.afzStreamActionOrNull() == null &&
              it.second.isSelectableForPlayback(debridEnabled) }
          ?: return null
+@@
+ /** Feature the original stream once, retaining its identity and the first playback source. */
+ internal fun List<StreamItem>.withoutFeaturedPhoneStream(
+     featured: StreamItem?, anchor: StreamItem?,
+-): List<StreamItem> = if (featured == null) this else filter { it != featured || it == anchor }
++): List<StreamItem> = if (featured == null) this else filter { it != featured }
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
 --- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
 +++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
+@@
+     val visibleStreams = group.streams.withoutFeaturedPhoneStream(featuredPhoneStream, phoneRecommendation?.anchor)
+-    if (visibleStreams.isEmpty() && !group.isLoading) return
++    if (visibleStreams.isEmpty() && !group.isLoading && phoneRecommendation == null) return
+ 
 @@
      val sortedSources = if (downloadOnly) streamsBySource.keys.toList()
      else streamsBySource.keys.sortedBy { it.lowercase() }
@@ -143,8 +154,8 @@ diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/Pho
 +        assertSame(phone, placement.anchor)
          assertSame(phone, placement.recommendation.stream)
          assertEquals("Recommended for this phone", placement.recommendation.heading)
--        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone, placement.anchor))
-+        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone, best))
+-        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone, best))
++        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone, placement.anchor))
      }
 +
 +    @Test fun explicitAfzPhoneSourceIsEligibleEvenWhenAfzPrefixLooksLikeAQuickAction() {
@@ -179,7 +190,14 @@ diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/Pho
 +            rows.withPhoneMobileSourcesFirst().map { it.streamLabel },
 +        )
 +    }
-+
+++
++    @Test fun featuredPhoneSourceIsRemovedFromNormalRowsEvenWhenItWasTheAnchor() {
++        val phone = source("AFZ Phone 1080p TorBox", 3.2)
++        val placement = phonePlaybackPlacement(listOf(group(phone)), false, false)!!
++        assertSame(phone, placement.anchor)
++        assertTrue(listOf(phone).withoutFeaturedPhoneStream(phone, placement.anchor).isEmpty())
++    }
+
 +    @Test fun seriesMobileSourceGetsTheSamePhoneFirstTreatment() {
 +        val series = source("AFZ TV Mobile 1080p · Comet", 1.4)
 +        assertTrue(series.isExplicitAfzPhoneSource())
