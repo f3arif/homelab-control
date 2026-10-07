@@ -43,6 +43,11 @@ and the final target-volume guard passes. Each run retains its own receipt;
 `latest-success.json` is replaced only on success. Failed stages remain for
 review. No new pruning or remote retention deletion is implemented.
 
+If an earlier HP backup still holds the writer lock, a scheduled backup returns
+`status: skipped_busy` and leaves that writer running. This scheduling no-op
+does not create a success receipt or change the last verified snapshot.
+Initialization still fails on lock contention.
+
 The existing HP Nextcloud backup created local database exports but could not
 reach its H3 SFTP destination from Docker's bridge network. A read-only test
 using the same credentials and image succeeded with host networking.

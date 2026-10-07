@@ -1,4 +1,5 @@
 import json
+import fcntl
 import os
 from pathlib import Path
 import sqlite3
@@ -191,6 +192,45 @@ class BackupTests(unittest.TestCase):
             with self.assertRaisesRegex(backup.BackupError, "explicit_new_repository"):
                 backup.perform(self.p, init=True)
             restic.assert_not_called()
+
+    def test_busy_backup_is_clean_noop_and_preserves_existing_writer(self):
+        work = Path(self.p["work_dir"])
+        work.mkdir(mode=0o700)
+        runs = work / "runs"
+        runs.mkdir(mode=0o700)
+        first = runs / "first-running"
+        first.mkdir(mode=0o700)
+        exports = first / "exports"
+        exports.mkdir(mode=0o700)
+        original_export = exports / "database.sql"
+        original_export.write_bytes(b"first-writer-private-output")
+        latest = work / "latest-success.json"
+        latest.write_text('{"snapshot_id":"previous-success"}')
+        before_latest = latest.read_bytes()
+        with open(work / "runner.lock", "w") as first_lock:
+            fcntl.flock(first_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(backup, "guarded") as guard, \
+                    patch.object(backup, "restic") as restic, \
+                    patch.object(backup, "source_plan") as scan, \
+                    patch.object(backup, "database_exports") as dumps:
+                result = backup.perform(self.p, verify_restore=True)
+                self.assertEqual(result, {"ok": True, "status": "skipped_busy", "operation": "backup"})
+                guard.assert_not_called()
+                restic.assert_not_called()
+                scan.assert_not_called()
+                dumps.assert_not_called()
+                with self.assertRaisesRegex(backup.BackupError, "backup_already_running"):
+                    backup.perform(self.p, init=True)
+            # Closing the skipped invocation's descriptor must not release the
+            # original writer's separate flock/open-file description.
+            with open(work / "runner.lock", "r+") as contender:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(list(runs.iterdir()), [first])
+            self.assertFalse(list(runs.glob("*/SUCCESS.json")))
+            self.assertFalse(list(runs.glob("*/FAILED.json")))
+            self.assertEqual(latest.read_bytes(), before_latest)
+            self.assertEqual(original_export.read_bytes(), b"first-writer-private-output")
 
     def test_backup_uses_approved_files_and_publishes_marker_verified_success(self):
         (self.source / "config.txt").write_text("included configuration")

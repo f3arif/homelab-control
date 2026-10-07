@@ -502,6 +502,10 @@ def perform(p, init=False, verify_restore=False, check_data=False):
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            if not init:
+                # A scheduled invocation overlapping an existing writer is a
+                # clean no-op, never evidence that a new backup completed.
+                return {"ok": True, "status": "skipped_busy", "operation": "backup"}
             raise BackupError("backup_already_running") from None
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:12]
         stage = private_directory(work / "runs" / run_id)
