@@ -1,0 +1,52 @@
+name: AFZ H3 Direct Gateway API Probe Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-h3-direct-gateway-api-probe-once.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe APIs read only
+        shell: bash
+        run: |
+          set +e
+          out=.github/afz-h3-direct-gateway-api-probe-result.txt
+          {
+            echo "TIME=$(date -u +%FT%TZ)"
+            for port in 8789 8797; do
+              for path in /health / /openapi.json /docs; do
+                echo "=== http://100.71.26.69:${port}${path} ==="
+                curl -sS --connect-timeout 3 --max-time 8 -D - "http://100.71.26.69:${port}${path}" | head -c 30000
+                echo
+                echo "RC=$?"
+              done
+            done
+          } > "$out"
+      - name: Commit result
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "AFZ API Probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/afz-h3-direct-gateway-api-probe-result.txt
+          git commit -m "Record H3 direct gateway API probe" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
