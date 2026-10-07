@@ -139,6 +139,25 @@ class BackupTests(unittest.TestCase):
         self.assertNotIn("nonsecret-test-only-password", " ".join(argv))
         self.assertIn("StrictHostKeyChecking=yes", " ".join(argv))
         self.assertIn("UserKnownHostsFile=", " ".join(argv))
+        self.assertIn("type=bind,src=" + self.p["work_dir"] + "/container-passwd,dst=/etc/passwd,readonly", mounts)
+        self.assertIn("type=bind,src=" + self.p["work_dir"] + "/container-group,dst=/etc/group,readonly", mounts)
+        self.assertFalse(any("src=/etc/passwd," in item or "src=/etc/group," in item for item in mounts))
+
+    def test_generated_container_identity_is_minimal_private_and_idempotent(self):
+        work = self.base / "identity-work"
+        work.mkdir(mode=0o700)
+        backup.ensure_container_identity(work)
+        backup.ensure_container_identity(work)
+        passwd = work / "container-passwd"
+        group = work / "container-group"
+        self.assertEqual(passwd.read_bytes(), backup.CONTAINER_IDENTITY["container-passwd"])
+        self.assertIn(b"backup:x:1000:1000:", passwd.read_bytes())
+        self.assertEqual(group.read_bytes(), b"root:x:0:\nbackup:x:1000:\n")
+        self.assertEqual(stat.S_IMODE(passwd.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(group.stat().st_mode), 0o600)
+        passwd.write_text("unexpected-account-record")
+        with self.assertRaisesRegex(backup.BackupError, "generated_container_identity_invalid"):
+            backup.ensure_container_identity(work)
 
     def test_failed_or_empty_native_dump_is_never_accepted(self):
         exports, logs = self.base / "exports", self.base / "logs"
@@ -205,6 +224,8 @@ class BackupTests(unittest.TestCase):
         self.assertFalse((work / "latest-success.json").exists())
         self.assertEqual(len(list((work / "runs").glob("*/FAILED.json"))), 1)
         self.assertEqual(len(list((work / "runs").glob("*/SUCCESS.json"))), 0)
+        failed = json.loads(next((work / "runs").glob("*/FAILED.json")).read_text())
+        self.assertIs(failed["ok"], False)
 
     def test_timeout_cleans_up_only_runner_owned_container(self):
         stage = self.base / "stage"

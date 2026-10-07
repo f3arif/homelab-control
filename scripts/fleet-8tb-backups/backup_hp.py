@@ -42,6 +42,10 @@ REMOTE_TYPES = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "9p", "ceph", "glusterfs
 PRIVATE_KEY_GLOBS = ["*/.ssh", "*/.ssh/*", "*/id_rsa", "*/id_dsa", "*/id_ecdsa", "*/id_ed25519",
                      "*/id_ecdsa_sk", "*/id_ed25519_sk", "*.pem", "*.key", "*.ppk"]
 PRIVATE_KEY_HEADER = re.compile(br"-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----")
+CONTAINER_IDENTITY = {
+    "container-passwd": b"root:x:0:0:root:/root:/sbin/nologin\nbackup:x:1000:1000:Application backup:/work:/bin/sh\n",
+    "container-group": b"root:x:0:\nbackup:x:1000:\n",
+}
 
 
 class BackupError(RuntimeError):
@@ -152,6 +156,30 @@ def validate_password_file(path):
             raise BackupError("password_file_must_be_owned_nonempty_0600")
     except OSError:
         raise BackupError("password_file_unavailable") from None
+
+
+def ensure_container_identity(work):
+    """Provide getpwuid(1000) without copying host accounts or changing UID/GID.
+
+    The pinned Alpine image was observed to lack this passwd entry; OpenSSH
+    refused to start with 'No user exists for uid 1000'. These fixed, nonsecret
+    generated files are the only account database files mounted into the image.
+    """
+    for name, content in CONTAINER_IDENTITY.items():
+        path = Path(work) / name
+        no_symlink_parents(path)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            pass
+        st = path.stat()
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != EXPECTED_UID or
+                stat.S_IMODE(st.st_mode) != 0o600 or path.read_bytes() != content):
+            raise BackupError("generated_container_identity_invalid", {"file": name})
 
 
 def mount_table():
@@ -365,7 +393,9 @@ def docker_restic_argv(p, args, include_sources=True, container_name=None):
     if not within(p["known_hosts"], ssh_dir):
         raise BackupError("known_hosts_must_share_existing_ssh_directory")
     mounts = [(p["work_dir"], "/work", False), (ssh_dir, ssh_dir, True),
-              (p["password_file"], "/run/secrets/restic-password", True)]
+              (p["password_file"], "/run/secrets/restic-password", True),
+              (str(Path(p["work_dir"]) / "container-passwd"), "/etc/passwd", True),
+              (str(Path(p["work_dir"]) / "container-group"), "/etc/group", True)]
     if include_sources:
         mounts += [(root, root, True) for root in p["source_roots"]]
     argv = ["docker", "run", "--rm", "--network", "host", "--user", "1000:1000",
@@ -466,6 +496,7 @@ def perform(p, init=False, verify_restore=False, check_data=False):
     work = private_directory(p["work_dir"])
     for name in ("cache", "tmp", "runs"):
         private_directory(work / name)
+    ensure_container_identity(work)
     lock_fd = os.open(work / "runner.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         try:
@@ -561,7 +592,7 @@ def perform(p, init=False, verify_restore=False, check_data=False):
             write_json(stage / "SUCCESS.json", summary)
             return summary
         except (BackupError, GuardError) as exc:
-            summary.update(error=str(exc))
+            summary.update(ok=False, error=str(exc))
             if isinstance(exc, BackupError):
                 summary["details"] = exc.details
             write_json(stage / "FAILED.json", summary)
