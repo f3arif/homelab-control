@@ -37,6 +37,8 @@ jobs:
           git push origin HEAD:main
 
       - name: Join AFZ tailnet
+        id: tailnet
+        continue-on-error: true
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -44,32 +46,47 @@ jobs:
           tags: tag:afz-deploy
 
       - name: Probe H3 Nuvio source read only
+        id: h3probe
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           host='100.106.186.118'
           out='.github/afz-nuvio-mobile-order-probe-result.txt'
           {
-            echo "STATE=COMPLETED"
+            echo "STATE=PROBING"
             echo "TIME=$(date -u +%FT%TZ)"
+            echo "TAILSCALE_STATUS="
+            tailscale status 2>&1
             echo "===HOST==="
-            tailscale ssh "Faiz@${host}" 'hostname'
+            tailscale ssh "Faiz@${host}" 'hostname' 2>&1
+            echo "HOST_EXIT=$?"
             echo "===SOURCE_FILES==="
-            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$r=''C:\AFZ\Nuvio-Setup-20260923\R31-universal-row-fix-source''; Write-Output (''ROOT_EXISTS='' + (Test-Path -LiteralPath $r)); $f=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\StreamsScreen.kt''; $p=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendation.kt''; Write-Output (''STREAMS_EXISTS='' + (Test-Path -LiteralPath $f)); Write-Output (''PHONE_EXISTS='' + (Test-Path -LiteralPath $p)); if(Test-Path $f){Get-FileHash -Algorithm SHA256 $f | ForEach-Object {''STREAMS_SHA256='' + $_.Hash}; Select-String -LiteralPath $f -Pattern ''RecommendedPlaybackStreamCard|recommendedForRow|phoneRecommendation'' -Context 3,5 | ForEach-Object {$_.ToString()}}; if(Test-Path $p){Get-FileHash -Algorithm SHA256 $p | ForEach-Object {''PHONE_SHA256='' + $_.Hash}; Select-String -LiteralPath $p -Pattern ''phonePlaybackPlacement|AFZ Play Best|Recommended for this phone'' -Context 3,7 | ForEach-Object {$_.ToString()}}"'
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$r=''C:\AFZ\Nuvio-Setup-20260923\R31-universal-row-fix-source''; Write-Output (''ROOT_EXISTS='' + (Test-Path -LiteralPath $r)); $f=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\StreamsScreen.kt''; $p=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendation.kt''; Write-Output (''STREAMS_EXISTS='' + (Test-Path -LiteralPath $f)); Write-Output (''PHONE_EXISTS='' + (Test-Path -LiteralPath $p)); if(Test-Path $f){Get-FileHash -Algorithm SHA256 $f | ForEach-Object {''STREAMS_SHA256='' + $_.Hash}; Select-String -LiteralPath $f -Pattern ''RecommendedPlaybackStreamCard|recommendedForRow|phoneRecommendation'' -Context 3,5 | ForEach-Object {$_.ToString()}}; if(Test-Path $p){Get-FileHash -Algorithm SHA256 $p | ForEach-Object {''PHONE_SHA256='' + $_.Hash}; Select-String -LiteralPath $p -Pattern ''phonePlaybackPlacement|AFZ Play Best|Recommended for this phone'' -Context 3,7 | ForEach-Object {$_.ToString()}}"' 2>&1
+            echo "SOURCE_EXIT=$?"
             echo "===ADB==="
-            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$adb=''C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe''; if(Test-Path $adb){& $adb devices -l}else{''ADB_MISSING''}"'
-            echo "===RECENT_APKS==="
-            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "Get-ChildItem ''C:\AFZ\Nuvio-Setup-20260923'' -Filter ''*.apk'' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName,Length,LastWriteTime | Format-List"'
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$adb=''C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe''; if(Test-Path $adb){& $adb devices -l}else{''ADB_MISSING''}"' 2>&1
+            echo "ADB_EXIT=$?"
           } > "$out"
+          exit 0
 
       - name: Commit probe result
+        if: always()
         shell: bash
+        env:
+          TAILSCALE_OUTCOME: ${{ steps.tailnet.outcome }}
+          H3PROBE_OUTCOME: ${{ steps.h3probe.outcome }}
         run: |
           set -euo pipefail
           git fetch origin main
           git reset --hard origin/main
+          out='.github/afz-nuvio-mobile-order-probe-result.txt'
+          if [ ! -f "$out" ]; then
+            printf 'STATE=NO_PROBE_FILE\nTIME=%s\n' "$(date -u +%FT%TZ)" > "$out"
+          fi
+          printf '\nTAILSCALE_OUTCOME=%s\nH3PROBE_OUTCOME=%s\nSTATE=FINISHED\n' "$TAILSCALE_OUTCOME" "$H3PROBE_OUTCOME" >> "$out"
           git config user.name "AFZ Nuvio Probe"
           git config user.email "actions@users.noreply.github.com"
-          git add .github/afz-nuvio-mobile-order-probe-result.txt
-          git commit -m "Record one-time Nuvio mobile ordering probe" || exit 0
+          git add "$out"
+          git commit -m "Record one-time Nuvio mobile ordering probe result" || exit 0
           git push origin HEAD:main
