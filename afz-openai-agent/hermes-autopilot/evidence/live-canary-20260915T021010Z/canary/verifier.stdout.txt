@@ -1,0 +1,1 @@
+{"ok": true, "receipt": "C:\\AFZ\\Development\\AFZ-Hermes-Autopilot-Integration-20260914\\work\\homelab-control\\afz-openai-agent\\hermes-autopilot\\evidence\\live-canary-20260915T021010Z\\canary\\verifier-process-output.json", "verifier_pid": 43332}

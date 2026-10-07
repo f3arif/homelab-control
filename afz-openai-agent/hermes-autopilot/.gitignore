@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+*fixtures*/
+red-*.xml
+green-*.xml
+trust-red.xml
+evidence/full-suite.xml
+evidence/latest-live-evidence-path.txt
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+precheck-response.bin
