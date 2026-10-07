@@ -1,32 +1,28 @@
 STATE=PROBING
-TIME=2026-10-07T13:52:13Z
-TAILSCALE_STATUS=
-100.102.6.106    github-runnervmmprz5  github-runnervmmprz5.tailc9bb62.ts.net  linux    -                           
-100.70.25.8      desktop-10skf0m       f6arif@                                 windows  offline, last seen 20d ago  
-100.106.186.118  desktop-h3r6cqn       f6arif@                                 windows  -                           
-100.99.242.89    faiz-laptop           f6arif@                                 windows  offline, last seen 12h ago  
-100.71.26.69     hpenvy                f6arif@                                 linux    -                           
-100.91.50.9      raspi-1               f6arif@                                 linux    -                           
-===HOST===
-Dial("desktop-h3r6cqn.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.106.186.118:22: i/o timeout
+TIME=2026-10-07T13:55:31Z
+===HP===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
 
 Connection closed by UNKNOWN port 65535
-HOST_EXIT=255
+HP_EXIT=255
+===H3_VIA_HP===
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
+
+Connection closed by UNKNOWN port 65535
+H3_EXIT=255
 ===SOURCE_FILES===
-Dial("desktop-h3r6cqn.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.106.186.118:22: i/o timeout
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
 
 Connection closed by UNKNOWN port 65535
 SOURCE_EXIT=255
 ===ADB===
-Dial("desktop-h3r6cqn.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.106.186.118:22: i/o timeout
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
 
 Connection closed by UNKNOWN port 65535
 ADB_EXIT=255
 ===RECENT_APKS===
-Dial("desktop-h3r6cqn.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.106.186.118:22: i/o timeout
+Dial("hpenvy.tailc9bb62.ts.net.", 22): unexpected HTTP response: 502 Bad Gateway, dial failure: dial tcp 100.71.26.69:22: i/o timeout
 
 Connection closed by UNKNOWN port 65535
 
-TAILSCALE_OUTCOME=success
-H3PROBE_OUTCOME=success
 STATE=FINISHED
