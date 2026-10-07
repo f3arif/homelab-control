@@ -1,0 +1,57 @@
+name: AFZ Nuvio HP Relay Probe R2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-nuvio-hp-relay-probe-r2.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Probe through HP
+        shell: bash
+        run: |
+          set +e
+          out=/tmp/result.txt
+          {
+            echo "TIME=$(date -u +%FT%TZ)"
+            echo "===HP==="
+            tailscale ssh coolyo@100.71.26.69 'hostname; id' 2>&1
+            echo "HP_RC=$?"
+            echo "===H3==="
+            tailscale ssh coolyo@100.71.26.69 'ssh -i /home/coolyo/.ssh/afz-nextcloud-h3 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 Faiz@100.106.186.118 hostname' 2>&1
+            echo "H3_RC=$?"
+            echo "===SOURCE==="
+            tailscale ssh coolyo@100.71.26.69 'ssh -i /home/coolyo/.ssh/afz-nextcloud-h3 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 Faiz@100.106.186.118 powershell.exe -NoProfile -NonInteractive -Command "$r=''C:\AFZ\Nuvio-Setup-20260923\R31-universal-row-fix-source''; $f=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\StreamsScreen.kt''; $p=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendation.kt''; Write-Output (''ROOT='' + (Test-Path $r)); Write-Output (''STREAMS='' + (Test-Path $f)); Write-Output (''PHONE='' + (Test-Path $p)); if(Test-Path $f){Select-String $f -Pattern ''recommendedForRow|RecommendedPlaybackStreamCard|phoneRecommendation'' -Context 2,4 | %% {$_.ToString()}}; if(Test-Path $p){Select-String $p -Pattern ''AFZ Play Best|afzStreamActionOrNull|Recommended for this phone'' -Context 2,5 | %% {$_.ToString()}}"' 2>&1
+            echo "SOURCE_RC=$?"
+            echo "===ADB==="
+            tailscale ssh coolyo@100.71.26.69 'ssh -i /home/coolyo/.ssh/afz-nextcloud-h3 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 Faiz@100.106.186.118 powershell.exe -NoProfile -NonInteractive -Command "$adb=''C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe''; if(Test-Path $adb){& $adb devices -l}else{''ADB_MISSING''}"' 2>&1
+            echo "ADB_RC=$?"
+          } > "$out"
+          cp "$out" .github/afz-nuvio-hp-relay-probe-r2-result.txt
+      - name: Commit
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name "AFZ Nuvio Probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/afz-nuvio-hp-relay-probe-r2-result.txt
+          git commit -m "Record Nuvio HP relay probe R2" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
