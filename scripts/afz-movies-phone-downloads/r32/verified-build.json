@@ -1,0 +1,37 @@
+{
+  "baseCommit": "10be7a7b0dfb650117c872705efaf9a1cc272f47",
+  "sourceCommit": "1922ff0108e8b99c1f0be74c0592d251c5fb63a9",
+  "branch": "afz/phone-first-r32-20261007",
+  "versionCode": 140,
+  "versionName": "0.5.1-afz-r32",
+  "patchSha256": "e2059cd79b55466431d56ae0c79b6310b5c38367aa7c19df1d1979529bbfca91",
+  "patchReverseApplyCheck": true,
+  "phoneOnly": true,
+  "status": "build_verified_not_installed",
+  "tests": {
+    "tests": 253,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "phoneTests": {
+    "tests": 18,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "pickerTests": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "apk": "/mnt/c/AFZ/Nuvio-Setup-20260923/R32-phone-first-candidate/AFZ-Movies-R32-phone-first.apk",
+  "apkBytes": 160173697,
+  "apkSha256": "6595a1962651cda9c87ce8bec83ecf81d088a0eae85e3091df3a98774f66b6e4",
+  "signerMatched": true,
+  "buildOutputRoot": "/home/faiz/.local/share/afz-build-output/r32-phone-first-20261007",
+  "deviceInstalled": false,
+  "devicePlaybackVerified": false,
+  "finishedAt": "2026-10-07T18:40:29Z"
+}

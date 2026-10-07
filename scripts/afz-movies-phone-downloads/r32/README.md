@@ -20,7 +20,9 @@ The helper verifies the exact base, clean checkout and patch checksum before app
 
 ## Build and validation
 
-Use the established Android SDK, Java 21 and original signing key:
+Verified on 7 October 2026: 253 tests passed with no failures, errors or skips, including 18 phone recommendation/order tests, 13 download-picker tests and 4 Android download-network tests. The 0.5.1-afz-r32 / 140 APK signature matches R29. Installation and OnePlus UI acceptance remain pending.
+
+Use the established Android SDK, Java 21 and original signing key. On a Windows/WSL checkout, direct build outputs and the project cache to native Linux storage to avoid slow file copying:
 
 ```bash
 ./gradlew :androidApp:assembleFullDebug :composeApp:testAndroidHostTest \
@@ -28,7 +30,10 @@ Use the established Android SDK, Java 21 and original signing key:
   --tests 'com.nuvio.app.features.streams.*' \
   --tests 'com.nuvio.app.features.jellyfin.*' \
   --tests 'com.nuvio.app.features.player.PlayerScreenRuntimeStateTest' \
-  --no-daemon --max-workers=1 \
+  --no-daemon --max-workers=1 --no-configuration-cache \
+  --project-cache-dir /home/faiz/.local/share/afz-build-output/r32-phone-first-20261007/project-cache \
+  -I /path/to/r32/native-output.init.gradle \
+  -Dafz.nuvio.buildOutputRoot=/home/faiz/.local/share/afz-build-output/r32-phone-first-20261007 \
   -Pkotlin.compiler.execution.strategy=in-process \
   '-Dorg.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8' \
   -Pnuvio.app.versionName=0.5.1-afz-r32
