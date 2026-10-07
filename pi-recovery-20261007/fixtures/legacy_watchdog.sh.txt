@@ -1,0 +1,50 @@
+#!/bin/sh
+set -u
+HP='http://192.0.2.1:8791/api/hp-health'
+REC_STATUS='http://192.0.2.2:8793/api/status'
+REC_WAKE='http://192.0.2.2:8793/api/wake-hp'
+STATE='/state/status.json'
+FAILS='/state/docker_failures'
+LAST='/state/docker_last_wake_epoch'
+LOG='/state/docker-watchdog.log'
+INTERVAL=15
+THRESHOLD=3
+COOLDOWN=900
+GRACE=120
+[ -f "$FAILS" ] || echo 0 >"$FAILS"
+[ -f "$LAST" ] || echo 0 >"$LAST"
+log(){ printf '%s %s\n' "$(date -Iseconds)" "$*" >>"$LOG"; tail -n 300 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true; }
+state(){
+  tmp="$STATE.tmp"
+  printf '{"version":"1.1-docker","time":"%s","state":"%s","hp_health_reachable":%s,"hp_recovery_reports_online":%s,"consecutive_host_failures":%s,"threshold":%s,"interval_seconds":%s,"wake_cooldown_seconds":%s,"last_action":"%s","persistence":"docker-unless-stopped","execution_enabled":false,"routing_authority":false}\n' \
+    "$(date -Iseconds)" "$1" "$2" "$3" "$4" "$THRESHOLD" "$INTERVAL" "$COOLDOWN" "$5" >"$tmp"
+  mv "$tmp" "$STATE"
+}
+once(){
+  if wget -q -O /dev/null -T 2 "$HP" 2>/dev/null; then
+    echo 0 >"$FAILS"; state HEALTHY true true 0 none; return 0
+  fi
+  rs="$(wget -q -O - -T 3 "$REC_STATUS" 2>/dev/null || true)"
+  if printf '%s' "$rs" | grep -Eq '"hp"[[:space:]]*:[[:space:]]*\{[^}]*"online"[[:space:]]*:[[:space:]]*true'; then
+    echo 0 >"$FAILS"; state SERVICE_DEGRADED false true 0 none
+    log "service_degraded host_online=true no_wake"; return 0
+  fi
+  f="$(cat "$FAILS" 2>/dev/null || echo 0)"; case "$f" in *[!0-9]*|'')f=0;;esac
+  f=$((f+1)); echo "$f" >"$FAILS"
+  if [ "$f" -ge "$THRESHOLD" ]; then
+    now="$(date +%s)"; last="$(cat "$LAST" 2>/dev/null || echo 0)"; case "$last" in *[!0-9]*|'')last=0;;esac
+    if [ $((now-last)) -ge "$COOLDOWN" ]; then
+      resp="$(wget -q -O - -T 4 --post-data='' "$REC_WAKE" 2>/dev/null || true)"
+      echo "$now" >"$LAST"; echo 0 >"$FAILS"
+      state RECOVERY_REQUESTED false false 0 wake_requested
+      log "recovery_requested response=$resp"
+      sleep "$GRACE"; return 0
+    fi
+    state HOST_DOWN_COOLDOWN false false "$f" none
+  else
+    state HOST_SUSPECT false false "$f" none
+  fi
+}
+if [ "${1:-}" = "--once" ]; then once; exit $?; fi
+log "docker_watchdog_started"
+while :; do once; sleep "$INTERVAL"; done
