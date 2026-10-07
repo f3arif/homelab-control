@@ -24,18 +24,6 @@ jobs:
         with:
           ref: main
 
-      - name: Record probe start
-        shell: bash
-        run: |
-          set -euo pipefail
-          out='.github/afz-nuvio-mobile-order-probe-result.txt'
-          printf 'STATE=STARTED\nTIME=%s\n' "$(date -u +%FT%TZ)" > "$out"
-          git config user.name "AFZ Nuvio Probe"
-          git config user.email "actions@users.noreply.github.com"
-          git add "$out"
-          git commit -m "Mark Nuvio mobile ordering probe started" || true
-          git push origin HEAD:main
-
       - name: Join AFZ tailnet
         id: tailnet
         continue-on-error: true
@@ -52,7 +40,7 @@ jobs:
         run: |
           set +e
           host='100.106.186.118'
-          out='.github/afz-nuvio-mobile-order-probe-result.txt'
+          out='/tmp/afz-nuvio-mobile-order-probe-result.txt'
           {
             echo "STATE=PROBING"
             echo "TIME=$(date -u +%FT%TZ)"
@@ -67,6 +55,8 @@ jobs:
             echo "===ADB==="
             tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$adb=''C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe''; if(Test-Path $adb){& $adb devices -l}else{''ADB_MISSING''}"' 2>&1
             echo "ADB_EXIT=$?"
+            echo "===RECENT_APKS==="
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "Get-ChildItem ''C:\AFZ\Nuvio-Setup-20260923'' -Filter ''*.apk'' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName,Length,LastWriteTime | Format-List"' 2>&1
           } > "$out"
           exit 0
 
@@ -78,12 +68,11 @@ jobs:
           H3PROBE_OUTCOME: ${{ steps.h3probe.outcome }}
         run: |
           set -euo pipefail
+          tmp='/tmp/afz-nuvio-mobile-order-probe-result.txt'
           git fetch origin main
           git reset --hard origin/main
           out='.github/afz-nuvio-mobile-order-probe-result.txt'
-          if [ ! -f "$out" ]; then
-            printf 'STATE=NO_PROBE_FILE\nTIME=%s\n' "$(date -u +%FT%TZ)" > "$out"
-          fi
+          if [ -f "$tmp" ]; then cp "$tmp" "$out"; else printf 'STATE=NO_PROBE_FILE\nTIME=%s\n' "$(date -u +%FT%TZ)" > "$out"; fi
           printf '\nTAILSCALE_OUTCOME=%s\nH3PROBE_OUTCOME=%s\nSTATE=FINISHED\n' "$TAILSCALE_OUTCOME" "$H3PROBE_OUTCOME" >> "$out"
           git config user.name "AFZ Nuvio Probe"
           git config user.email "actions@users.noreply.github.com"
