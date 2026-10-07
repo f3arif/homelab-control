@@ -1,25 +1,33 @@
-TIME=2026-10-07T13:59:38Z
+TIME=2026-10-07T14:00:42Z
 === http://100.71.26.69:8789/health ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8789 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8789/ ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8789 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8789/openapi.json ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8789 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8789/docs ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8789 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8797/health ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8797 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8797/ ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8797 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8797/openapi.json ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8797 after 3002 ms: Timeout was reached
 
-RC=0
 === http://100.71.26.69:8797/docs ===
+RC=28 HTTP_CODE=000
+curl: (28) Failed to connect to 100.71.26.69 port 8797 after 3002 ms: Timeout was reached
 
-RC=0
