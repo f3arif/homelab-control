@@ -60,11 +60,19 @@ $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 function AssertVolume {
   $v=Get-Volume -DriveLetter __LETTER__ -ErrorAction Stop
-  $guid=([string]$v.UniqueId).ToLowerInvariant()
-  if(!$guid.Contains(__GUID__) -or [string]$v.FileSystemLabel -cne __LABEL__ -or [int64]$v.SizeRemaining -lt __RESERVE__){throw 'volume_guard_failed'}
+  $matched=([string]$v.UniqueId) -match '\{([0-9a-fA-F-]{36})\}'
+  if(!$matched -or ([guid]$Matches[1]).ToString() -cne __GUID__ -or [string]$v.FileSystemLabel -cne __LABEL__ -or [int64]$v.SizeRemaining -lt __RESERVE__){throw 'volume_guard_failed'}
 }
 AssertVolume
 $path=__PATH__
+$candidate=$path
+while($candidate){
+  if(Test-Path -LiteralPath $candidate){
+    $item=Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+    if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'reparse_path_rejected'}
+  }
+  $candidate=[IO.Path]::GetDirectoryName($candidate)
+}
 $plain=[Console]::In.ReadToEnd().TrimEnd([char[]]@([char]10,[char]13))
 if($plain.Length -lt 32 -or $plain.Length -gt 4096){throw 'password_length'}
 if(!(Test-Path -LiteralPath $path)){
