@@ -169,15 +169,28 @@ class CommandTests(unittest.TestCase):
             backup.remote(PROFILE, "publish", generation=GEN, expected=receipt)
         self.assertLess(len(captured["argv"][-1]), 2000)
         self.assertGreater(len(captured["kwargs"]["input"]), 60000)
-        payload = json.loads(captured["kwargs"]["input"])
+        frame = captured["kwargs"]["input"]
+        self.assertTrue(frame.endswith("\n"))
+        self.assertEqual(frame.count("\n"), 1)
+        payload = json.loads(frame[:-1])
         self.assertEqual(payload["cfg"]["repository_base_windows"], PROFILE["repository_base_windows"])
         self.assertEqual(payload["cfg"]["expected"], receipt)
         self.assertNotIn("shell", captured["kwargs"])
         bootstrap = base64.b64decode(captured["argv"][-1].split()[-1]).decode("utf-16le")
-        self.assertIn("[Console]::In.ReadToEnd()", bootstrap)
+        self.assertIn("[Console]::In.ReadLine()", bootstrap)
+        self.assertNotIn("ReadToEnd", bootstrap)
+        self.assertIn("missing_input_payload", bootstrap)
         self.assertNotIn(PROFILE["repository_base_windows"], bootstrap)
         self.assertIn("StrictHostKeyChecking=yes", captured["argv"])
         self.assertIn("UserKnownHostsFile=" + PROFILE["known_hosts"], captured["argv"])
+
+    def test_newlines_inside_payload_do_not_split_the_frame(self):
+        note = "first line\nsecond line\r\nUnicode: \u96ea"
+        frame = backup.remote_payload(PROFILE, "status", expected={"note": note})
+        self.assertEqual(frame.count("\n"), 1)
+        self.assertTrue(frame.endswith("\n"))
+        self.assertNotIn("\r", frame)
+        self.assertEqual(json.loads(frame[:-1])["cfg"]["expected"]["note"], note)
 
     def test_upload_uses_pinned_image_readonly_mounts_and_copy(self):
         cmd = backup.upload_command(PROFILE, Path("/private/stage's dir"), GEN)

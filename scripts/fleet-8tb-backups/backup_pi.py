@@ -73,14 +73,17 @@ def remote_payload(p, action, **request):
     payload = {key: p[key] for key in fields}
     payload.update(request, action=action)
     script = Path(__file__).with_name("backup_pi_verify.ps1").read_bytes()
-    return json.dumps({"cfg": payload, "script_base64": base64.b64encode(script).decode("ascii")})
+    # Frame one JSON document explicitly: Windows SSH need not forward EOF promptly.
+    return json.dumps({"cfg": payload, "script_base64": base64.b64encode(script).decode("ascii")}) + "\n"
 
 
 def remote_command(p):
     bootstrap = (
         "$ErrorActionPreference='Stop';"
         "[Console]::InputEncoding=[Text.UTF8Encoding]::new($false);"
-        "$payload=[Console]::In.ReadToEnd()|ConvertFrom-Json;"
+        "$line=[Console]::In.ReadLine();"
+        "if([string]::IsNullOrWhiteSpace($line)){throw 'missing_input_payload'};"
+        "$payload=$line|ConvertFrom-Json;"
         "$cfg=$payload.cfg;"
         "$script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$payload.script_base64));"
         "& ([ScriptBlock]::Create($script))"
