@@ -1,0 +1,60 @@
+name: AFZ Nuvio Mobile Order Probe Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/afz-nuvio-mobile-order-probe-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: afz-nuvio-mobile-order-probe-once
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Join AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Probe H3 Nuvio source read only
+        shell: bash
+        run: |
+          set -euo pipefail
+          host='100.106.186.118'
+          out='.github/afz-nuvio-mobile-order-probe-result.txt'
+          {
+            echo "TIME=$(date -u +%FT%TZ)"
+            echo "===HOST==="
+            tailscale ssh "Faiz@${host}" 'hostname'
+            echo "===SOURCE_FILES==="
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$r=''C:\AFZ\Nuvio-Setup-20260923\R31-universal-row-fix-source''; Write-Output (''ROOT_EXISTS='' + (Test-Path -LiteralPath $r)); $f=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\StreamsScreen.kt''; $p=Join-Path $r ''composeApp\src\commonMain\kotlin\com\nuvio\app\features\streams\PhonePlaybackRecommendation.kt''; Write-Output (''STREAMS_EXISTS='' + (Test-Path -LiteralPath $f)); Write-Output (''PHONE_EXISTS='' + (Test-Path -LiteralPath $p)); if(Test-Path $f){Get-FileHash -Algorithm SHA256 $f | ForEach-Object {''STREAMS_SHA256='' + $_.Hash}; Select-String -LiteralPath $f -Pattern ''RecommendedPlaybackStreamCard|recommendedForRow|phoneRecommendation'' -Context 3,5 | ForEach-Object {$_.ToString()}}; if(Test-Path $p){Get-FileHash -Algorithm SHA256 $p | ForEach-Object {''PHONE_SHA256='' + $_.Hash}; Select-String -LiteralPath $p -Pattern ''phonePlaybackPlacement|AFZ Play Best|Recommended for this phone'' -Context 3,7 | ForEach-Object {$_.ToString()}}"'
+            echo "===ADB==="
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "$adb=''C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe''; if(Test-Path $adb){& $adb devices -l}else{''ADB_MISSING''}"'
+            echo "===RECENT_APKS==="
+            tailscale ssh "Faiz@${host}" 'powershell.exe -NoProfile -NonInteractive -Command "Get-ChildItem ''C:\AFZ\Nuvio-Setup-20260923'' -Filter ''*.apk'' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName,Length,LastWriteTime | Format-List"'
+          } > "$out"
+
+      - name: Commit probe result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "AFZ Nuvio Probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/afz-nuvio-mobile-order-probe-result.txt
+          git commit -m "Record one-time Nuvio mobile ordering probe" || exit 0
+          git push origin HEAD:main
