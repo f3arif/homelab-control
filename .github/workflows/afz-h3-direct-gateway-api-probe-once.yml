@@ -33,9 +33,15 @@ jobs:
             for port in 8789 8797; do
               for path in /health / /openapi.json /docs; do
                 echo "=== http://100.71.26.69:${port}${path} ==="
-                curl -sS --connect-timeout 3 --max-time 8 -D - "http://100.71.26.69:${port}${path}" | head -c 30000
+                body=$(mktemp)
+                err=$(mktemp)
+                code=$(curl -sS --connect-timeout 3 --max-time 8 -o "$body" -w '%{http_code}' "http://100.71.26.69:${port}${path}" 2>"$err")
+                rc=$?
+                echo "RC=$rc HTTP_CODE=$code"
+                cat "$err"
+                head -c 30000 "$body"
                 echo
-                echo "RC=$?"
+                rm -f "$body" "$err"
               done
             done
           } > "$out"
