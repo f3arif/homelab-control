@@ -1,0 +1,170 @@
+--- a/stremio_catalog.py
++++ b/stremio_catalog.py
+@@ -9588,6 +9588,79 @@
+     matched=sum(1 for t in want if t in have)
+     return matched/len(want)>=0.60
+ 
++
++def _series_release_identity(imdb):
++    # Cinemeta is keyed by IMDb, not a broad title search. Retain known identity
++    # during a metadata outage, but do not accept anonymous provider releases.
++    meta=_failover_series_meta(imdb) or {}
++    if not meta:
++        with _failover_series_meta_lock:
++            meta=dict(_failover_series_meta_cache.get(str(imdb)) or {})
++    title=str(meta.get('name') or meta.get('title') or '').strip()
++    year=str(meta.get('releaseInfo') or meta.get('year') or '')[:4]
++    return title,year if re.fullmatch(r'(?:19|20)\d{2}',year) else ''
++
++def _series_release_matches(identity,season,episode,row):
++    import unicodedata
++    title,year=identity
++    if not title or not isinstance(row,dict):
++        return False
++    # Filename is authoritative: a generic provider title must not override it.
++    text=str(row.get('filename') or row.get('title') or '').strip()
++    pattern=r'(?i)(?<![a-z0-9])(?:s(\d{1,2})[ ._-]*e(\d{1,3})|(\d{1,2})x(\d{1,3})|season[ ._-]*(\d{1,2})[ ._-]*episode[ ._-]*(\d{1,3}))(?!\d)'
++    markers=list(re.finditer(pattern,text))
++    if not markers:
++        return False
++    prefix=text[:markers[0].start()].strip(' ._-')
++    # Scene/group tags may precede the title. Compare the whole title prefix,
++    # never a substring or bag of words (Friends != Your Friends and Neighbors).
++    variants={prefix,re.sub(r'^(?:\[[^\[\]]+\][ ._-]*)+','',prefix)}
++    def key(value):
++        value=unicodedata.normalize('NFKD',value.casefold())
++        return ''.join(c for c in value if c.isalnum() and not unicodedata.combining(c))
++    title_matches=False
++    for candidate in variants:
++        # A numeric series title (for example 1923) is not a release year.
++        if key(candidate)==key(title):
++            title_matches=True
++            break
++        dated=re.search(r'(?<!\d)((?:19|20)\d{2})[ ._\-\[\]()]*$',candidate)
++        if dated:
++            if not year or dated.group(1)!=year:
++                continue
++            candidate=candidate[:dated.start()].rstrip(' ._-([')
++        if key(candidate)==key(title):
++            title_matches=True
++            break
++    if not title_matches:
++        return False
++    for marker in markers:
++        ss=int(marker.group(1) or marker.group(3) or marker.group(5))
++        ee=int(marker.group(2) or marker.group(4) or marker.group(6))
++        if ss!=int(season):
++            continue
++        if ee==int(episode):
++            return True
++        # Paired/cartoon episodes: S01E01-E02 and S01E01E02. A hyphen
++        # represents a range; concatenated E markers represent explicit episodes.
++        tail=text[marker.end():]
++        previous=ee
++        while True:
++            extra=re.match(r'(?i)^[ ._]*(?:(-)[ ._]*e?|e)(\d{1,3})(?!\d)',tail)
++            if not extra:
++                break
++            number=int(extra.group(2))
++            if number==int(episode) or (extra.group(1) and previous<=int(episode)<=number):
++                return True
++            previous=number
++            tail=tail[extra.end():]
++    return False
++
++def _filter_series_release_rows(rows,identity,season,episode,expected_title=''):
++    return [x for x in (rows or [])
++            if _series_release_matches(identity,season,episode,x)
++            and (not expected_title or _episode_title_matches_release(expected_title,x))]
++
+ def series_external_source_rows(video_id,force=False):
+     video_id=str(video_id or '')
+     parsed=parse_series_video_id(video_id)
+@@ -9600,13 +9673,16 @@
+         expected_title=_series_episode_title(imdb,season,episode)
+         if int(episode)==38:
+             provider_video_id=f'{imdb}:1:20'
++    identity=_series_release_identity(imdb)
++    _,match_season,match_episode=parse_series_video_id(provider_video_id)
++    def safe_rows(rows):
++        return _filter_series_release_rows(rows,identity,match_season,match_episode,expected_title)
+     now=time.time()
+     with external_source_lock:
+         ts=float((external_source_cache.get('ts') or {}).get(video_id) or 0)
+         cached_rows=[dict(x) for x in ((external_source_cache.get('rows') or {}).get(video_id) or [])]
+         ttl=EXTERNAL_SOURCE_TTL if cached_rows else EXTERNAL_SOURCE_EMPTY_TTL
+-        if expected_title:
+-            cached_rows=[x for x in cached_rows if _episode_title_matches_release(expected_title,x)]
++        cached_rows=safe_rows(cached_rows)
+         if not force and now-ts<ttl:
+             return cached_rows
+     try:
+@@ -9625,7 +9701,7 @@
+             with external_source_lock:
+                 if FAILOVER_MODE:
+                     external_source_cache.setdefault('ts',{})[video_id]=time.time()
+-                return [dict(x) for x in ((external_source_cache.get('rows') or {}).get(video_id) or [])]
++                return safe_rows([dict(x) for x in ((external_source_cache.get('rows') or {}).get(video_id) or [])])
+         rows=data.get('streams') or []
+         if not rows and int(data.get('sourceCount') or 0)>0 and not FAILOVER_MODE:
+             time.sleep(0.5)
+@@ -9641,7 +9717,7 @@
+                 continue
+             if _external_source_is_nonfeature(x) or _external_source_is_prerelease(x):
+                 continue
+-            if expected_title and not _episode_title_matches_release(expected_title,x):
++            if not safe_rows([x]):
+                 continue
+             try: res=int(x.get('resolution') or 0)
+             except Exception: res=0
+@@ -9678,9 +9754,7 @@
+     except Exception:
+         with external_source_lock:
+             fallback=[dict(x) for x in ((external_source_cache.get('rows') or {}).get(video_id) or [])]
+-        if expected_title:
+-            fallback=[x for x in fallback if _episode_title_matches_release(expected_title,x)]
+-        return fallback
++        return safe_rows(fallback)
+ 
+ def _series_quality_label(row):
+     res=int((row or {}).get('resolution') or 0)
+@@ -9767,7 +9841,7 @@
+         title=f'{quality} | {size} | {provider} / {source} | {cached}'
+         if release:
+             title+=f' | {release}'
+-        resolver_vid=str(x.get('resolverVideoId') or video_id)
++        resolver_vid=video_id
+         is_mobile=str(x.get('token') or '') in mobile_ids
+         out.append({
+             'name':(f'AFZ TV Mobile 1080p · {source}' if is_mobile else f'AFZ TV {quality} · {source}'),
+@@ -9792,7 +9866,7 @@
+         best_title=f'{best_quality} | {best_size} | {best_provider} / {best_source} | {best_cached}'
+         if best_release:
+             best_title+=f' | {best_release}'
+-        resolver_vid=str(best_row.get('resolverVideoId') or video_id)
++        resolver_vid=video_id
+         best={
+             'name':'AFZ TV Auto',
+             'title':'Best available episode source | '+best_title,
+@@ -12187,6 +12261,12 @@
+         raise HTTPException(404,'Unknown video')
+     if not re.fullmatch(r'[a-f0-9]{20,64}',str(token or '')):
+         raise HTTPException(404,'Unknown external stream')
++    resolver_video_id=vid
++    if parse_series_video_id(vid):
++        row=next((x for x in series_external_source_rows(vid) if str(x.get('token') or '')==str(token)),None)
++        if row is None:
++            raise HTTPException(404,'Episode source does not match; refresh the stream list')
++        resolver_video_id=str(row.get('resolverVideoId') or vid)
+     key=str(vid)+'|'+str(token)
+     now=time.time()
+     with resolved_stream_lock:
+@@ -12194,7 +12274,7 @@
+     if hit and now-float(hit.get('ts') or 0)<RESOLVED_STREAM_TTL and re.match(r'^https?://',str(hit.get('url') or ''),re.I):
+         return str(hit['url'])
+     qtok=requests.utils.quote(str(token),safe='')
+-    qimdb=requests.utils.quote(str(vid),safe='')
++    qimdb=requests.utils.quote(str(resolver_video_id),safe='')
+     timeout=4 if FAILOVER_MODE else 20
+     data=h3_order_call('GET',f'/external-resolve?token={qtok}&imdb={qimdb}',timeout)
+     url=str(data.get('url') or '') if isinstance(data,dict) and data.get('ok') else ''

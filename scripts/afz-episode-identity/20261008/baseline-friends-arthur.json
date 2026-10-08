@@ -1,0 +1,217 @@
+{
+  "atUtc": "2026-10-08T21:32:57.561791+00:00",
+  "cases": [
+    {
+      "videoId": "tt0108778:1:1",
+      "canonicalTitle": "Friends",
+      "year": "1994\u20132004",
+      "metadataKeys": [
+        "awards",
+        "background",
+        "behaviorHints",
+        "cast",
+        "country",
+        "description",
+        "director",
+        "dvdRelease",
+        "genre",
+        "genres",
+        "id",
+        "imdbRating",
+        "imdb_id",
+        "links",
+        "logo",
+        "moviedb_id",
+        "name",
+        "popularities",
+        "popularity",
+        "poster",
+        "releaseInfo",
+        "released",
+        "runtime",
+        "slug",
+        "status",
+        "trailerStreams",
+        "trailers",
+        "tvdb_id",
+        "type",
+        "videos",
+        "writer",
+        "year"
+      ],
+      "status": 200,
+      "streams": [
+        {
+          "name": "AFZ TV Mobile 1080p \u00b7 Comet",
+          "title": "1080p | 2.1 GB | TorBox / Comet | cached | Conversations.With.Friends.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-SMURF[eztv.re].mkv",
+          "filename": "Conversations.With.Friends.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-SMURF[eztv.re].mkv"
+        },
+        {
+          "name": "AFZ TV Mobile 1080p \u00b7 Comet",
+          "title": "1080p | 1.7 GB | TorBox / Comet | cached | Friends S01E01 1080p AMZN WEB-DL DDP2.0 H.264-TURG.mkv",
+          "filename": "Friends S01E01 1080p AMZN WEB-DL DDP2.0 H.264-TURG.mkv"
+        },
+        {
+          "name": "AFZ TV Auto",
+          "title": "Best available episode source | 2160p | 10.6 GB | TorBox / Comet | cached | Your.Friends.and.Neighbors.S01E01.2160p.DV.HDR.mkv",
+          "filename": "Your.Friends.and.Neighbors.S01E01.2160p.DV.HDR.mkv"
+        },
+        {
+          "name": "AFZ TV 1080p \u00b7 Comet",
+          "title": "1080p | 6.4 GB | TorBox / Comet | cached | Hyakkano.S01E01.1080p.BluRay.Remux.DUAL.FLAC.2.0.AVC-DemiHuman.mkv",
+          "filename": "Hyakkano.S01E01.1080p.BluRay.Remux.DUAL.FLAC.2.0.AVC-DemiHuman.mkv"
+        },
+        {
+          "name": "AFZ TV 2160p \u00b7 Comet",
+          "title": "2160p | 10.6 GB | TorBox / Comet | cached | Your.Friends.and.Neighbors.S01E01.2160p.DV.HDR.mkv",
+          "filename": "Your.Friends.and.Neighbors.S01E01.2160p.DV.HDR.mkv"
+        },
+        {
+          "name": "AFZ TV 1080p \u00b7 Comet",
+          "title": "1080p | 6.3 GB | TorBox / Comet | cached | Song of the Samurai S01E01 The Soul of Baragaki Burning with Friends 1080p AMZN WEB-DL DDP5 1 H 264-RAWR.mkv",
+          "filename": "Song of the Samurai S01E01 The Soul of Baragaki Burning with Friends 1080p AMZN WEB-DL DDP5 1 H 264-RAWR.mkv"
+        },
+        {
+          "name": "AFZ TV 2160p \u00b7 Comet",
+          "title": "2160p | 10.3 GB | TorBox / Comet | cached | Your.Friends.And.Neighbors.S01E01.2160p.WEB-DL.DV.HDR10+[Ben The Men].mp4",
+          "filename": "Your.Friends.And.Neighbors.S01E01.2160p.WEB-DL.DV.HDR10+[Ben The Men].mp4"
+        },
+        {
+          "name": "AFZ TV 1080p \u00b7 Comet",
+          "title": "1080p | 4.5 GB | TorBox / Comet | cached | Your.Friends.and.Neighbors.S01E01.This.Is.What.Happens.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-G66.mkv",
+          "filename": "Your.Friends.and.Neighbors.S01E01.This.Is.What.Happens.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-G66.mkv"
+        },
+        {
+          "name": "AFZ TV 2160p \u00b7 Comet",
+          "title": "2160p | 10.2 GB | TorBox / Comet | cached | Your.Friends.and.Neighbors.S01E01.This.Is.What.Happens.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-G66.mkv",
+          "filename": "Your.Friends.and.Neighbors.S01E01.This.Is.What.Happens.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-G66.mkv"
+        },
+        {
+          "name": "AFZ TV 1080p \u00b7 Comet",
+          "title": "1080p | 4.2 GB | TorBox / Comet | cached | Your Friends and Neighbours S01E01 This Is What Happens 1080p ATVP WEB-DL DDP5 1 Atmos H 264-STC.mkv",
+          "filename": "Your Friends and Neighbours S01E01 This Is What Happens 1080p ATVP WEB-DL DDP5 1 Atmos H 264-STC.mkv"
+        },
+        {
+          "name": "AFZ TV 2160p \u00b7 Comet",
+          "title": "2160p | 9.9 GB | TorBox / Comet | cached | Your Friends and Neighbors S01E01 This Is What Happens 2160p ATVP WEB-DL DDP5 1 Atmos DV H 265-FLUX.mkv",
+          "filename": "Your Friends and Neighbors S01E01 This Is What Happens 2160p ATVP WEB-DL DDP5 1 Atmos DV H 265-FLUX.mkv"
+        },
+        {
+          "name": "AFZ Auto Download \u2713",
+          "title": "Automatic downloads allowed \u00b7 tap to change",
+          "filename": null
+        }
+      ]
+    },
+    {
+      "videoId": "tt0169414:1:1",
+      "canonicalTitle": "Arthur",
+      "year": "1996\u20132022",
+      "metadataKeys": [
+        "awards",
+        "background",
+        "behaviorHints",
+        "cast",
+        "country",
+        "description",
+        "director",
+        "dvdRelease",
+        "genre",
+        "genres",
+        "id",
+        "imdbRating",
+        "imdb_id",
+        "links",
+        "logo",
+        "moviedb_id",
+        "name",
+        "popularities",
+        "popularity",
+        "poster",
+        "releaseInfo",
+        "released",
+        "runtime",
+        "slug",
+        "status",
+        "tvdb_id",
+        "type",
+        "videos",
+        "writer",
+        "year"
+      ],
+      "status": 200,
+      "streams": [
+        {
+          "name": "AFZ TV Downloaded",
+          "title": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day.mkv \u00b7 174.0 MB",
+          "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day.mkv"
+        },
+        {
+          "name": "AFZ TV Save Offline",
+          "title": "Save Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day.mkv to this device",
+          "filename": null
+        },
+        {
+          "name": "AFZ TV Auto",
+          "title": "Best available episode source | Source | 233.1 MB | TorBox / Torrentio | cached | 01x01 - Arthur's Eyes; Francine's Bad Hair Day.avi",
+          "filename": "01x01 - Arthur's Eyes; Francine's Bad Hair Day.avi"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Torrentio",
+          "title": "Source | 233.1 MB | TorBox / Torrentio | cached | 01x01 - Arthur's Eyes; Francine's Bad Hair Day.avi",
+          "filename": "01x01 - Arthur's Eyes; Francine's Bad Hair Day.avi"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 174.0 MB | TorBox / Comet | cached | Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv",
+          "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Torrentio",
+          "title": "Source | 168.4 MB | TorBox / Torrentio | cached | Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv",
+          "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+        },
+        {
+          "name": "AFZ TV DVDRip \u00b7 Comet",
+          "title": "DVDRip | 253.1 MB | TorBox / Comet | available | Arthur.S01E01.TRUEFRENCH.DVDrip.x264-NOTAG.m4v",
+          "filename": "Arthur.S01E01.TRUEFRENCH.DVDrip.x264-NOTAG.m4v"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 191.0 MB | TorBox / Comet | available | Arthur - S01E01 - Arthur's Eyes SDTV.mkv",
+          "filename": "Arthur - S01E01 - Arthur's Eyes SDTV.mkv"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 174.0 MB | TorBox / Comet | available | Arthur - S01E01 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv",
+          "filename": "Arthur - S01E01 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 168.4 MB | TorBox / Comet | available | Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv",
+          "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 168.4 MB | TorBox / Comet | available | Arthur - S01E01 S01E02 - Arthur's Eyes - Francine's Bad Hair Day.mkv",
+          "filename": "Arthur - S01E01 S01E02 - Arthur's Eyes - Francine's Bad Hair Day.mkv"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 126.5 MB | TorBox / Comet | available | Arthur (2015) - s01e01 - About quitting -Smetto quando voglio.mp4",
+          "filename": "Arthur (2015) - s01e01 - About quitting -Smetto quando voglio.mp4"
+        },
+        {
+          "name": "AFZ TV Source \u00b7 Comet",
+          "title": "Source | 35.9 MB | TorBox / Comet | available | Arthur - Season 1 - Episode 1 - Full Episode - Arthur's Eyes 1-2.mp4",
+          "filename": "Arthur - Season 1 - Episode 1 - Full Episode - Arthur's Eyes 1-2.mp4"
+        },
+        {
+          "name": "AFZ Auto Download \u2713",
+          "title": "Automatic downloads allowed \u00b7 tap to change",
+          "filename": null
+        }
+      ]
+    }
+  ]
+}
