@@ -163,7 +163,8 @@ try {
     $stream.Flush($true)
 } finally { $stream.Dispose() }
 if (Test-Path -LiteralPath $latestPath) {
-    [IO.File]::Replace($temporary, $latestPath, $null)
+    # Windows PowerShell binds $null to an empty string for this string argument.
+    [IO.File]::Replace($temporary, $latestPath, [NullString]::Value)
 } else { [IO.File]::Move($temporary, $latestPath) }
 Guard-Volume
 @{ok=$true;generation=[string]$cfg.generation;manifest_sha256=[string]$record.manifest_sha256;

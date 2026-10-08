@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -159,6 +160,21 @@ class ReplicaTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt" and (shutil.which("powershell") or shutil.which("pwsh")),
+                         "requires Windows PowerShell filesystem semantics")
+    def test_receiver_first_repeat_and_failed_publication(self):
+        shell = shutil.which("powershell") or shutil.which("pwsh")
+        with tempfile.TemporaryDirectory() as folder:
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-File",
+                                     str(Path(__file__).with_name("test_backup_pi_publish.ps1")),
+                                     "-TestRoot", folder], capture_output=True, text=True,
+                                    timeout=30, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        record = json.loads(result.stdout)
+        self.assertTrue(record["first_publish"])
+        self.assertTrue(record["repeated_publish"])
+        self.assertTrue(record["locked_target_preserved"])
+
     def test_large_remote_payload_uses_stdin_and_bounded_command(self):
         receipt = {"snapshot_ids": [f"{n:064x}" for n in range(1000)]}
         captured = {}
