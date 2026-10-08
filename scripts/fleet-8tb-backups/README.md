@@ -18,6 +18,13 @@ points and checks the target volume before publishing the generation and
 atomically replacing `latest.json`. Previous remote generations are retained.
 Unchanged-source checks also verify the existing destination generation.
 
+Repeated publication uses `[IO.File]::Replace` with `[NullString]::Value` for
+the optional backup filename. Windows PowerShell can coerce an ordinary `$null`
+argument to an empty string here, causing replacement of an existing pointer
+to fail. The explicit null string preserves the intended .NET call. A failed
+replacement must leave the previous pointer unchanged; first publication and
+replacement of an existing pointer both need the Windows regression below.
+
 This is a **stable observed capture**, without an exclusive writer lock. It
 does not claim to cover unknown writers or to decrypt or restore the repository.
 Recovery still needs the existing restic password. Only generations with a
@@ -47,6 +54,38 @@ If an earlier HP backup still holds the writer lock, a scheduled backup returns
 `status: skipped_busy` and leaves that writer running. This scheduling no-op
 does not create a success receipt or change the last verified snapshot.
 Initialization still fails on lock contention.
+
+### Rotating local staging and incomplete snapshots
+
+An explicit file list can outlive a producer's local retention window during a
+large initial backup. If the producer deletes a selected archive before restic
+reads it, restic can save a snapshot and still return exit status 3. The runner
+treats that as failure: it does not publish success or skip the missing-source
+error. A saved snapshot ID alone is not a completed backup receipt.
+
+Resolve a demonstrated staging race through narrow, documented profile
+exclusions only after verifying the files' producer, retention policy, and
+alternate recovery coverage. In the inspected Nextcloud workflow, local
+non-latest staging files were removed by a `find -mtime +2` sweep. The
+destination was configured for thirty days of history, and the two missing
+files were verified there. The dated configuration export can also be
+affected because its file modification time may precede its export filename.
+
+The relevant filename families, relative to that verified staging directory,
+are `nextcloud-[0-9]*.sql.gz`, `state-[0-9]*.json`, and `config-[0-9]*.php`.
+Profiles use explicit absolute patterns scoped to the verified directory.
+Retain every `latest` file, current configuration, operational receipt, backup
+script, and the fresh native SQL export created for each HP run. Do not exclude
+an entire backup directory merely because it contains rotating archives; it
+may also contain unique configuration or recovery material.
+
+Record the alternate coverage and exclusion reason in the private profile.
+Preserve exit-status-3 failure for every other unreadable or vanished source.
+A snapshot created by the earlier failed run retains that qualification. A new
+run under the corrected scope must pass the normal snapshot, repository,
+final-volume, and requested restore-probe checks before success is published.
+
+### Existing Nextcloud transport
 
 The existing HP Nextcloud backup created local database exports but could not
 reach its H3 SFTP destination from Docker's bridge network. A read-only test
@@ -78,6 +117,17 @@ scoped cleanup after interrupted transfers, restore-marker comparison, private
 password recovery, and valid persistent schedules. The receiver also needs a
 read-only status preflight and an actual SFTP transfer on Windows.
 
+The actual receiver publication block also has a Windows filesystem regression:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -File .\test_backup_pi_publish.ps1 -TestRoot APPROVED_TEST_DIRECTORY
+```
+
+It uses a fresh test subdirectory to exercise first publication, repeated
+publication, and a locked-target failure that must preserve the previous
+pointer. The Python suite invokes this regression only on Windows; a skipped
+test on Linux does not validate Windows PowerShell replacement semantics.
+
 ## Credentials and first HP backup
 
 `escrow_password.py --profile PRIVATE_PROFILE` creates a private random password
@@ -107,8 +157,13 @@ all repository data during the post-backup check when that validation is needed.
 
 The generator in `scheduling/make_user_units.py` renders four new user units;
 it does not install or enable them. Run it with absolute deployment, HP profile,
-Pi profile, and new output-directory paths. Enable the timers only after the
-initial backups and live verification pass.
+Pi profile, and new output-directory paths. Before enabling the timers, verify
+the target identity, credentials, source scope, explicit repository setup, and
+the live overlap behavior. Once those prerequisites pass, a timer may be
+enabled while the first manual backup is still running: its whole-run lock
+keeps that run as the sole writer, and an overlapping scheduled invocation
+returns `skipped_busy` without creating a success receipt. Confirm actual
+backup completion separately from timer activation or a successful busy skip.
 
 | Backup | Default calendar | Time basis | Service limit |
 | --- | --- | --- | --- |
