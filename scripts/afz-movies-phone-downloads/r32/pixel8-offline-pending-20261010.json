@@ -1,0 +1,50 @@
+{
+  "checkpoint": "AFZ-PIXEL8-OFFLINE-20261010",
+  "status": "BLOCKED retrieving phone-side offline evidence",
+  "device": {
+    "model": "Pixel 8",
+    "serial": "3B170DLJH000HA",
+    "connection": "wireless ADB"
+  },
+  "preflight": {
+    "airplaneMode": 0,
+    "wifi": 1,
+    "mobileData": 0,
+    "bluetooth": 1,
+    "completedDownloadPresent": true,
+    "detachedPhoneProcessProofPassed": true,
+    "sessionDate": "2026-10-10"
+  },
+  "attempt": {
+    "collectorStartedAtUtc": "2026-10-10T21:51:32.593617+00:00",
+    "phoneRestoreWatchdogSeconds": 70,
+    "guardLaunchedBeforeRunner": true,
+    "restoreCommands": "Disable airplane mode; keep mobile data disabled; enable Wi-Fi and Bluetooth; no server/provider change",
+    "runnerPlan": "Disable network connections, launch completed Friends S1E1 from Downloads, capture two video frames and positions, stop playback and restore original settings",
+    "collectorFinishedAtUtc": "2026-10-10T21:53:27.780210+00:00",
+    "collectorResult": "Could not reconnect within collection deadline"
+  },
+  "observations": {
+    "atUtc": "2026-10-10T21:53:50.6786055Z",
+    "targetIpRespondsToPing": true,
+    "normalDebuggingPortTcpReachable": false,
+    "freshMdnsReply": {
+      "source": "192.168.50.71",
+      "service": "adb-3B170DLJH000HA-Ebi4co._adb-tls-connect._tcp.local",
+      "port": 43735
+    },
+    "targetOnlyAdbReconnect": "Actively refused (10061)",
+    "advertisedEndpointDoesNotProveListeningSocket": true
+  },
+  "acceptance": {
+    "offlinePlaybackVerified": false,
+    "phoneRestoredSettingsVerified": false,
+    "phoneEvidenceRetrieved": false
+  },
+  "retainedEvidence": {
+    "phoneFolder": "/data/local/tmp/afz-offline-20261010-2148",
+    "h3Folder": "C:\\AFZ\\Nuvio-Setup-20260923\\pixel8-verification-20261010",
+    "existingCompletedFriendsDownload": "Previously verified 2,002,704,356 bytes; no new transfer requested"
+  },
+  "next": "On Pixel 8 confirm airplane mode off; toggle Wireless debugging off/on and provide fresh main-screen IP:port. Reconnect using existing pairing, verify model/serial, retrieve retained captures/logs and restoration state before claiming offline acceptance. Do not repeat the network-disconnection probe first."
+}

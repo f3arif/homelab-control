@@ -1,0 +1,111 @@
+{
+  "checkpoint": "AFZ-PIXEL8-MEDIA-20261010",
+  "verifiedAtUtc": "2026-10-10T21:22:43.9286023Z",
+  "device": {
+    "model": "Pixel 8",
+    "androidApi": 36,
+    "connection": "wireless ADB; endpoint refresh required for future sessions"
+  },
+  "app": {
+    "package": "com.afz.nuvio.preview",
+    "versionName": "0.5.1-afz-r32",
+    "versionCode": 140,
+    "apkSha256": "6595a1962651cda9c87ce8bec83ecf81d088a0eae85e3091df3a98774f66b6e4",
+    "installation": "Reviewed APK installed successfully; no previous AFZ preview existed",
+    "profile": "New local guest profile Pixel8",
+    "addons": {
+      "activeCount": 1,
+      "catalogCount": 19,
+      "manifestVersion": "0.6.243",
+      "route": "Existing protected public transport; credential omitted"
+    }
+  },
+  "backend": {
+    "sourceSha256": "d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f",
+    "codeChanged": false,
+    "review": "https://github.com/f3arif/homelab-control/pull/264"
+  },
+  "source": {
+    "series": "Friends",
+    "canonicalId": "tt0108778",
+    "season": 1,
+    "episode": 1,
+    "episodeTitle": "The One Where Monica Gets A Roommate",
+    "fileName": "Friends.S01E01.The.One.Where.Monica.Gets.a.Roommate.mkv",
+    "resolution": "1080p",
+    "provider": "Debridio",
+    "displayedSize": "1.9 GB",
+    "mobileTarget": "0.35–1.5 GB",
+    "overTarget": true,
+    "featuredBeforeAddonGroup": true,
+    "featuredDuplicateRemoved": true,
+    "otherVisiblePhoneFiles": "Matching Friends 2.2 GB LTN/HDMAN/TENEIGHTY alternatives",
+    "tvAuto": "Matching Friends 7 GB 2160p remux below phone files"
+  },
+  "playback": {
+    "result": "PASS bounded playback",
+    "videoRendered": true,
+    "playerObserved": "00:18 / 22:44 with Pause control",
+    "resumeAfterStop": "0:21",
+    "automaticStopUtc": "2026-10-10T21:15:27.6178646Z",
+    "fullEpisodeVerified": false,
+    "audioListeningVerified": false
+  },
+  "download": {
+    "result": "PASS transfer progress and final paused state; full completion unverified",
+    "largerFileConfirmationSeen": true,
+    "progressObserved": "Downloading 741.3 MB / 1.8 GB",
+    "downloadedBytes": 1070766614,
+    "totalBytes": 2002704356,
+    "finalUi": "Paused 1021.1 MB / 1.8 GB; Resume available",
+    "finalStoreStatus": "Paused",
+    "stableByteChecksUtc": [
+      "2026-10-10T21:22:32.1860374Z",
+      "2026-10-10T21:22:43.9286023Z"
+    ],
+    "jobCancellation": "Job 1 absent from nuvio-downloads namespace",
+    "partialPreserved": true,
+    "guard": {
+      "maxSeconds": 40,
+      "armedAtUtc": "2026-10-10T21:17:05.858358+00:00",
+      "forceStopSucceeded": true,
+      "completedAtUtc": "2026-10-10T21:17:46.032896+00:00"
+    },
+    "pauseMethod": "Existing native PAUSE notification action invoked as app UID after timed guard; no transfer JSON edited"
+  },
+  "evidence": {
+    "privateH3Folder": "C:\\AFZ\\Nuvio-Setup-20260923\\pixel8-verification-20261010",
+    "validCaptures": [
+      "addon-one-final",
+      "friends-sources-loaded",
+      "playback-first",
+      "playback-second",
+      "after-playback",
+      "download-start-dialog",
+      "download-progress",
+      "download-paused-confirmed"
+    ],
+    "excludedCapture": "download-paused.xml was stale after uiautomator idle failure; not acceptance evidence",
+    "captureHelperCorrected": "Remove remote XML before each dump and require successful fresh dump output",
+    "rawEvidenceCommitted": false
+  },
+  "boundedCrashCheck": {
+    "currentProcessContentLines": 0
+  },
+  "setupIssues": [
+    {
+      "issue": "Manually entered uppercase HTTPS URL failed normalization",
+      "workaround": "Entered protected host/path without scheme; app supplied HTTPS"
+    },
+    {
+      "issue": "stremio VIEW installation created duplicate add-on entries",
+      "workaround": "Removed new duplicate entries and installed once through Add-ons; final active count 1"
+    }
+  ],
+  "limits": [
+    "Pixel 8 Friends S1E1 only in this session; previous Pixel 10 UI cases remain separate",
+    "No full download, offline playback or audio listening acceptance",
+    "OnePlus acceptance and intermittent Pixel 10 Tailscale fault remain outstanding",
+    "No app/backend source, server/provider, DNS/VPN or rotation settings changed"
+  ]
+}

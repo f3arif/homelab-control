@@ -1,0 +1,295 @@
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt
+index 3fbcf4a..5a879f5 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendation.kt
+@@ -10,6 +10,40 @@ internal data class PhonePlaybackPlacement(
+     val anchor: StreamItem,
+ )
+ 
++/** Explicit file rows are kept ahead of broad quality/TV auto choices on phones. */
++internal fun StreamItem.isExplicitAfzPhoneSource(): Boolean {
++    val label = streamLabel.trim().lowercase()
++    return label.startsWith("afz phone 1080p") || label.startsWith("afz tv mobile 1080p")
++}
++
++private fun StreamItem.phoneSourcePriority(): Int {
++    val label = streamLabel.trim().lowercase()
++    return when {
++        isExplicitAfzPhoneSource() -> 0
++        label.startsWith("afz auto mobile") -> 1
++        label.startsWith("afz auto data saver") -> 2
++        label.startsWith("afz auto 1080p") -> 3
++        label.startsWith("afz play best") -> 5
++        label.startsWith("auto-save") || afzStreamActionOrNull() != null -> 6
++        label.startsWith("afz auto tv") -> 8
++        label.startsWith("afz auto 4k") -> 9
++        downloadResolution() == 1080 && !downloadIsRemux() && isDeviceVideoCandidate(false) -> 4
++        else -> 7
++    }
++}
++
++/** This applies even when no source meets the phone recommendation budget. */
++internal fun List<StreamItem>.withPhoneMobileSourcesFirst(): List<StreamItem> =
++    sortedBy { it.phoneSourcePriority() }
++
++internal fun List<StreamItem>.orderedPlaybackSources(
++    device: DownloadDevice, downloadOnly: Boolean,
++): List<StreamItem> = when {
++    downloadOnly -> this
++    device == DownloadDevice.Phone -> withPhoneMobileSourcesFirst()
++    else -> withAfzQuickActionsNearTop()
++}
++
+ /** A phone playback choice can be a playlist or a mobile auto link; downloads stay concrete. */
+ internal fun recommendPhonePlayback(
+     streams: List<StreamItem>, isEpisode: Boolean, debridEnabled: Boolean,
+@@ -55,14 +89,11 @@ internal fun phonePlaybackPlacement(
+             sources[source].orEmpty().withAfzQuickActionsNearTop().map { groupIndex to it }
+         }
+     }
+-    val anchor = rows.firstOrNull { it.second.streamLabel.equals("AFZ Play Best", ignoreCase = true) }
+-        ?: rows.firstOrNull { it.second.afzStreamActionOrNull() == null &&
+-            it.second.isSelectableForPlayback(debridEnabled) }
+-        ?: return null
++    val anchor = rows.firstOrNull { it.second == recommendation.stream } ?: return null
+     return PhonePlaybackPlacement(recommendation, anchor.first, anchor.second)
+ }
+ 
+-/** Feature the original stream once, retaining its identity and the first playback source. */
++/** The global recommendation owns this original stream; regular sections omit its duplicate. */
+ internal fun List<StreamItem>.withoutFeaturedPhoneStream(
+-    featured: StreamItem?, anchor: StreamItem?,
+-): List<StreamItem> = if (featured == null) this else filter { it != featured || it == anchor }
++    featured: StreamItem?,
++): List<StreamItem> = if (featured == null) this else filter { it != featured }
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
+index 41bb366..9924a4c 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/streams/StreamsScreen.kt
+@@ -852,6 +852,21 @@ internal fun StreamList(
+                 Spacer(modifier = Modifier.height(10.dp))
+             }
+         }
++        phonePlacement?.let { placement ->
++            item(key = "phone_playback_recommendation") {
++                RecommendedPlaybackStreamCard(
++                    recommendation = placement.recommendation,
++                    onClick = { onStreamSelected(placement.recommendation.stream, resumePositionMs, resumeProgressFraction) },
++                    onLongClick = { onStreamLongPress(placement.recommendation.stream) },
++                    onDownloadClick = placement.recommendation.stream.fixedDeviceDownloadStreamOrNull(debridEnabled)?.let {
++                        { onDownloadStream(placement.recommendation.stream) }
++                    },
++                    appendInstantServiceToDefaultName = appendInstantServiceToDefaultName,
++                    showAddonLogo = streamBadgeSettings.showAddonLogo,
++                    badgePlacement = streamBadgeSettings.badgePlacement,
++                )
++            }
++        }
+         when {
+             (anyLoading || uiState.isAnyLoading) && !hasAnyStreams -> {
+                 item {
+@@ -886,7 +901,7 @@ internal fun StreamList(
+                         onStreamLongPress = onStreamLongPress,
+                         onDownloadStream = onDownloadStream,
+                         downloadOnly = downloadOnly,
+-                        phoneRecommendation = phonePlacement?.takeIf { it.groupIndex == groupIndex },
++                        device = device,
+                         featuredPhoneStream = phonePlacement?.recommendation?.stream,
+                         resumePositionMs = resumePositionMs,
+                         resumeProgressFraction = resumeProgressFraction,
+@@ -921,12 +936,12 @@ private fun LazyListScope.streamSection(
+     onStreamLongPress: (StreamItem) -> Unit,
+     onDownloadStream: (StreamItem) -> Unit,
+     downloadOnly: Boolean,
+-    phoneRecommendation: PhonePlaybackPlacement?,
++    device: DownloadDevice,
+     featuredPhoneStream: StreamItem?,
+     resumePositionMs: Long?,
+     resumeProgressFraction: Float?,
+ ) {
+-    val visibleStreams = group.streams.withoutFeaturedPhoneStream(featuredPhoneStream, phoneRecommendation?.anchor)
++    val visibleStreams = group.streams.withoutFeaturedPhoneStream(featuredPhoneStream)
+     if (visibleStreams.isEmpty() && !group.isLoading) return
+ 
+     if (showHeader) {
+@@ -948,10 +963,7 @@ private fun LazyListScope.streamSection(
+     val showSourceHeaders = sortedSources.size > 1
+ 
+     sortedSources.forEachIndexed { sourceIndex, sourceName ->
+-        val sourceStreams = streamsBySource[sourceName].orEmpty().let {
+-            if (downloadOnly) it else it.withAfzQuickActionsNearTop()
+-        }
+-        val anchorIndex = phoneRecommendation?.anchor?.let(sourceStreams::indexOf) ?: -1
++        val sourceStreams = streamsBySource[sourceName].orEmpty().orderedPlaybackSources(device, downloadOnly)
+         if (showSourceHeaders) {
+             item(key = "source_${sectionKey}_$sourceIndex") {
+                 StreamSourceHeader(sourceName = sourceName)
+@@ -968,9 +980,7 @@ private fun LazyListScope.streamSection(
+                     stream = stream,
+                 )
+             },
+-        ) { index, stream ->
+-            val recommendedForRow = if (index == anchorIndex) phoneRecommendation?.recommendation else null
+-            if (recommendedForRow != null && recommendedForRow.stream == stream) RecommendationHeading(recommendedForRow)
++        ) { _, stream ->
+             val isSelectable = stream.isSelectableForPlayback(debridEnabled)
+             val isUnsupportedTorrentStream =
+                 stream.needsLocalDebridResolve &&
+@@ -984,7 +994,7 @@ private fun LazyListScope.streamSection(
+                     { onDownloadStream(stream) }
+                 },
+                 appendInstantServiceToDefaultName = appendInstantServiceToDefaultName,
+-                showFileSizeBadges = showFileSizeBadges || recommendedForRow?.stream == stream,
++                showFileSizeBadges = showFileSizeBadges,
+                 showAddonLogo = showAddonLogo,
+                 badgePlacement = badgePlacement,
+                 onClick = {
+@@ -1006,19 +1016,6 @@ private fun LazyListScope.streamSection(
+                 },
+             )
+             Spacer(modifier = Modifier.height(10.dp))
+-            if (recommendedForRow != null && recommendedForRow.stream != stream) {
+-                RecommendedPlaybackStreamCard(
+-                    recommendation = recommendedForRow,
+-                    onClick = { onStreamSelected(recommendedForRow.stream, resumePositionMs, resumeProgressFraction) },
+-                    onLongClick = { onStreamLongPress(recommendedForRow.stream) },
+-                    onDownloadClick = recommendedForRow.stream.fixedDeviceDownloadStreamOrNull(debridEnabled)?.let {
+-                        { onDownloadStream(recommendedForRow.stream) }
+-                    },
+-                    appendInstantServiceToDefaultName = appendInstantServiceToDefaultName,
+-                    showAddonLogo = showAddonLogo,
+-                    badgePlacement = badgePlacement,
+-                )
+-            }
+         }
+     }
+ }
+diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt
+index 27447d6..4131da4 100644
+--- a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt
++++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/streams/PhonePlaybackRecommendationTest.kt
+@@ -14,7 +14,7 @@ class PhonePlaybackRecommendationTest {
+     private fun recommend(vararg streams: StreamItem, episode: Boolean = false) =
+         recommendPhonePlayback(streams.toList(), episode, false)
+ 
+-    @Test fun concreteCached1080pIsFeaturedAfterPlayBestWithoutChangingGroups() {
++    @Test fun concreteCached1080pIsFeaturedBeforeAllGroupsWithoutChangingSourceIdentity() {
+         val best = source("AFZ Play Best", 42.3).copy(description = "2160p REMUX")
+         val mobile = source("AFZ Auto Mobile", 5.7).copy(description = "1080p WEB-DL",
+             url = "https://example.test/auto-stream/tt123/mobile")
+@@ -24,17 +24,17 @@ class PhonePlaybackRecommendationTest {
+         val placement = result.playbackRecommendation!!
+         assertSame(groups, result.groups)
+         assertNull(result.recommendation)
+-        assertSame(best, placement.anchor)
++        assertSame(phone, placement.anchor)
+         assertSame(phone, placement.recommendation.stream)
+         assertEquals("Recommended for this phone", placement.recommendation.heading)
+-        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone, best))
++        assertEquals(listOf(best, mobile), groups.single().streams.withoutFeaturedPhoneStream(phone))
+     }
+ 
+     @Test fun selectedAddonScopeAndSourceOrderChooseTheVisibleAnchor() {
+         val z = source("1080p Z", 4.1).copy(sourceName = "Z")
+         val a = source("1080p A", 4.2).copy(sourceName = "A")
+         val result = phonePlaybackPlacement(listOf(group(z, a)), false, false)!!
+-        assertSame(a, result.anchor)
++        assertSame(z, result.anchor)
+         assertSame(z, result.recommendation.stream)
+         assertSame(a, phonePlaybackPlacement(listOf(group(a)), false, false)!!.recommendation.stream)
+     }
+@@ -43,7 +43,7 @@ class PhonePlaybackRecommendationTest {
+         val phone = source("1080p", 4.0)
+         val placement = phonePlaybackPlacement(listOf(group(phone)), false, false)!!
+         assertSame(phone, placement.anchor)
+-        assertEquals(listOf(phone), listOf(phone).withoutFeaturedPhoneStream(phone, placement.anchor))
++        assertTrue(listOf(phone).withoutFeaturedPhoneStream(phone).isEmpty())
+     }
+ 
+     @Test fun cachedTargetBeatsUncachedCloserSize() {
+@@ -101,4 +101,77 @@ class PhonePlaybackRecommendationTest {
+         assertNull(download.playbackRecommendation)
+         assertNotNull(download.recommendation)
+     }
++
++
++    private fun afz(label: String, gb: Double? = null) = source(label, gb).copy(
++        addonName = "AFZ Movies & TV", addonId = "addon:com.afzengineering.releasecatalog",
++    )
++
++    @Test fun actualAfzPhoneAndEpisodeFileRowsAreEligibleAndDownloadable() {
++        for (row in listOf(afz("AFZ Phone 1080p TorBox", 3.2),
++            afz("AFZ TV Mobile 1080p · Comet", 1.4))) {
++            assertTrue(row.isExplicitAfzPhoneSource())
++            assertNull(row.afzStreamActionOrNull())
++            assertNotNull(row.fixedDeviceDownloadStreamOrNull(false))
++            assertSame(row, recommend(row, episode = row.streamLabel.contains("TV"))!!.stream)
++        }
++    }
++
++    @Test fun screenshotMovieRowsPutPhoneAndMobileAheadOf4kAndControls() {
++        val rows = listOf(afz("AFZ Play Best", 18.4).copy(description = "2160p"),
++            afz("Auto-save to home library").copy(url = null,
++                externalUrl = "https://example.test/auto-media/manage"),
++            afz("AFZ Auto 4K", 18.4).copy(description = "2160p"),
++            afz("AFZ Auto 1080p", 6.1), afz("AFZ Auto TV", 18.4).copy(description = "2160p"),
++            afz("AFZ Auto Mobile", 6.1), afz("AFZ Auto Data Saver", 1.7),
++            afz("AFZ Phone 1080p TorBox", 3.2))
++        assertEquals(listOf("AFZ Phone 1080p TorBox", "AFZ Auto Mobile", "AFZ Auto Data Saver",
++            "AFZ Auto 1080p", "AFZ Play Best", "Auto-save to home library", "AFZ Auto TV", "AFZ Auto 4K"),
++            rows.orderedPlaybackSources(DownloadDevice.Phone, false).map { it.streamLabel })
++        val placement = phonePlaybackPlacement(listOf(group(*rows.toTypedArray())), false, false)!!
++        assertSame(rows.last(), placement.recommendation.stream)
++    }
++
++    @Test fun noRecommendationStillKeepsMobileActionsFirst() {
++        val rows = listOf(afz("AFZ Auto 4K"), afz("AFZ Play Best"),
++            afz("AFZ Auto TV"), afz("AFZ Auto Mobile"), afz("AFZ Auto Data Saver"))
++        assertNull(recommend(*rows.toTypedArray()))
++        assertEquals(listOf("AFZ Auto Mobile", "AFZ Auto Data Saver", "AFZ Play Best",
++            "AFZ Auto TV", "AFZ Auto 4K"),
++            rows.orderedPlaybackSources(DownloadDevice.Phone, false).map { it.streamLabel })
++    }
++
++    @Test fun explicitTvActionsDoNotBecomeGeneric1080pRows() {
++        val generic = source("1080p file", 4.0)
++        val best = afz("AFZ Play Best", 4.0).copy(description = "1080p")
++        val tv = afz("AFZ Auto TV", 4.0).copy(description = "1080p")
++        assertEquals(listOf(generic, best, tv),
++            listOf(tv, best, generic).withPhoneMobileSourcesFirst())
++    }
++
++    @Test fun samePrioritySourcesKeepTheirProviderOrder() {
++        val first = afz("AFZ Phone 1080p TorBox", 3.2)
++        val second = afz("AFZ Phone 1080p TorBox", 4.2)
++        assertEquals(listOf(first, second),
++            listOf(first, afz("AFZ Auto 4K"), second).withPhoneMobileSourcesFirst().take(2))
++    }
++
++    @Test fun selectedPhoneRowIsRemovedAcrossGroupsAndSingletonRemainsFeatured() {
++        val phone = afz("AFZ Phone 1080p TorBox", 3.2)
++        val placement = phonePlaybackPlacement(listOf(group(afz("AFZ Play Best", 18.4)), group(phone)), false, false)!!
++        assertEquals(1, placement.groupIndex)
++        assertSame(phone, placement.recommendation.stream)
++        assertSame(phone, placement.anchor)
++        assertTrue(listOf(phone).withoutFeaturedPhoneStream(placement.recommendation.stream).isEmpty())
++        assertNotNull(streamListPresentation(listOf(group(phone)), DownloadDevice.Phone, false, false, false).playbackRecommendation)
++    }
++
++    @Test fun otherDevicesRetainQuickActionsAndDownloadRowsKeepPickerOrder() {
++        val rows = listOf(afz("AFZ Play Best", 18.4), afz("AFZ Auto 4K", 18.4),
++            afz("AFZ Auto Mobile", 4.0), afz("AFZ Phone 1080p TorBox", 3.2))
++        for (device in listOf(DownloadDevice.Television, DownloadDevice.Tablet, DownloadDevice.Computer)) {
++            assertEquals(rows.withAfzQuickActionsNearTop(), rows.orderedPlaybackSources(device, false))
++        }
++        assertSame(rows, rows.orderedPlaybackSources(DownloadDevice.Phone, true))
++    }
+ }
+diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
+index 6b3fa36..bab11e0 100644
+--- a/iosApp/Configuration/Version.xcconfig
++++ b/iosApp/Configuration/Version.xcconfig
+@@ -1,2 +1,2 @@
+-CURRENT_PROJECT_VERSION=137
++CURRENT_PROJECT_VERSION=140
+ MARKETING_VERSION=0.5.1

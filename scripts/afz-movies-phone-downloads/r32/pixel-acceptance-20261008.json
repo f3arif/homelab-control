@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "device": {
+    "model": "Pixel 10 Pro XL",
+    "manufacturer": "Google",
+    "physical": true
+  },
+  "scope": "R32 physical UI source-ordering acceptance; not end-to-end media playback or download acceptance",
+  "candidate": {
+    "packageName": "com.afz.nuvio.preview",
+    "versionName": "0.5.1-afz-r32",
+    "versionCode": 140,
+    "apkBytes": 160173697,
+    "apkSha256": "6595a1962651cda9c87ce8bec83ecf81d088a0eae85e3091df3a98774f66b6e4",
+    "sourceCommit": "1922ff0108e8b99c1f0be74c0592d251c5fb63a9"
+  },
+  "installation": {
+    "method": "adb install -r",
+    "previousVersionName": "0.5.1-afz-r29",
+    "previousVersionCode": 137,
+    "startedAtUtc": "2026-10-08T19:58:30.2411152Z",
+    "completedAtUtc": "2026-10-08T20:00:01.8528358Z",
+    "status": "installed_identity_verified",
+    "installedBaseApkHashMatched": true,
+    "signingCertificateMatchesPrevious": true,
+    "rollbackApkPreserved": true,
+    "rollbackApkBytes": 160494392,
+    "rollbackApkSha256": "e273e16e8a694c5074192e460856aa97ec073aa3f201040b54116b96e60615be",
+    "appDataPreserved": true
+  },
+  "checks": [
+    {
+      "id": "movie_phone_order",
+      "title": "Insidious: Out of the Further (2026)",
+      "result": "passed",
+      "featuredResolution": "1080p",
+      "featuredSizeGb": 4.1,
+      "featuredFilename": "Insidious.Out.Of.The.Further.2026.MULTi.1080p.AMZN.WEB-DL.x264.AC3-KiT.mkv",
+      "observedOrder": [
+        "Featured concrete phone file",
+        "Other AFZ Phone 1080p file (3.6 GB)",
+        "AFZ Auto Mobile",
+        "AFZ Auto Data Saver",
+        "AFZ Auto 1080p",
+        "1080p HQ",
+        "AFZ Play Best",
+        "Controls / 4K files",
+        "AFZ Auto TV",
+        "AFZ Auto 4K"
+      ],
+      "featuredBeforeSourceGroup": true,
+      "sameFeaturedFileAbsentFromOrdinaryRows": true,
+      "evidence": [
+        "insidious-sources-top",
+        "insidious-sources-lower",
+        "insidious-sources-bottom"
+      ]
+    },
+    {
+      "id": "movie_device_picker",
+      "result": "passed_for_visible_choices",
+      "featuredResolution": "1080p",
+      "featuredSizeGb": 4.1,
+      "observedOrder": [
+        "Recommended concrete file (4.1 GB)",
+        "Mobile 1080p concrete files (3.6 and 6.8 GB)",
+        "Large / Original quality files (10.6 and 18.9 GB)"
+      ],
+      "noAutoOrHlsInVisibleDownloadChoices": true,
+      "downloadStarted": false,
+      "evidence": [
+        "insidious-download-picker"
+      ]
+    },
+    {
+      "id": "episode_phone_order",
+      "title": "Friends",
+      "season": 1,
+      "episode": 1,
+      "result": "passed_for_presentation",
+      "featuredResolution": "1080p",
+      "featuredSizeGb": 1.7,
+      "featuredFilename": "Friends S01E01 1080p AMZN WEB-DL DDP2.0 H.264-TURG.mkv",
+      "heading": "Mobile streaming option",
+      "targetGb": "0.35-1.5",
+      "featuredWithinTarget": false,
+      "featuredBeforeSourceGroup": true,
+      "sameFeaturedFileAbsentFromOrdinaryRows": true,
+      "mobileRowsBeforeTvAutoAnd2160p": true,
+      "evidence": [
+        "friends-s1e1-sources-loaded",
+        "friends-s1e1-sources-lower",
+        "friends-s1e1-sources-bottom"
+      ]
+    },
+    {
+      "id": "sd_episode_without_recommendation",
+      "title": "Arthur",
+      "season": 1,
+      "episode": 1,
+      "result": "passed",
+      "noInvented1080pRecommendation": true,
+      "observedExistingFileMb": 174,
+      "evidence": [
+        "arthur-s1e1-sources-loaded"
+      ]
+    }
+  ],
+  "knownIssue": {
+    "id": "episode_provider_title_mismatch",
+    "status": "observed_unresolved",
+    "requestedTitle": "Friends",
+    "season": 1,
+    "episode": 1,
+    "providerShown": "Comet",
+    "observedUnrelatedTitles": [
+      "Conversations With Friends",
+      "Song of the Samurai",
+      "Your Friends and Neighbors",
+      "Hyakkano"
+    ],
+    "tvAutoFilename": "Your.Friends.and.Neighbors.S01E01.2160p.DV.HDR.mkv",
+    "tvAutoSizeGb": 10.6,
+    "impact": "Unrelated episode files remain in results; TV Auto points to an unrelated title. The featured 1.7 GB file matches Friends S01E01. Broad episode-source correctness is not accepted.",
+    "providerConfigurationChanged": false
+  },
+  "connectivity": {
+    "debuggingEndpointChangedDuringSession": true,
+    "rediscoveredViaMdnsAndReconnected": true,
+    "atEndpointLossTailscaleTsmpAndIcmpPassed": true,
+    "tailscaleBatteryExemptionAlreadyPresent": true,
+    "intermittentTailscaleFailureReproduced": false,
+    "intermittentTailscaleIssueResolved": false,
+    "networkSettingsChanged": false
+  },
+  "finalStatus": {
+    "checkedAtUtc": "2026-10-08T20:29:06.0345092Z",
+    "temporaryPortraitLockRestored": true,
+    "restoredAccelerometerRotation": 1,
+    "restoredUserRotation": 0,
+    "currentAppProcessCrashBufferLines": 0
+  },
+  "limitations": [
+    "No media playback source selected",
+    "No media download queued",
+    "Visible download choices verified; full picker, transfer and large-download confirmation not physically exercised",
+    "OnePlus physical acceptance remains pending",
+    "Provider title mismatch remains unresolved",
+    "No sustained Tailscale stability claim"
+  ],
+  "regressions": {
+    "buildRecordedAtUtc": "2026-10-07T18:40:29Z",
+    "passed": 253,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "phoneOrdering": 18,
+    "devicePicker": 13,
+    "androidDownloadNetwork": 4
+  },
+  "acceptance": "Pixel installation and phone UI ordering verified with separate unresolved episode-provider correctness issue",
+  "uiEvidenceValidation": {
+    "status": "passed",
+    "checkedAtUtc": "2026-10-08T20:30:37.4433561Z",
+    "scope": "UI presentation only; provider title mismatch remains unresolved"
+  }
+}

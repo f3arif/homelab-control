@@ -1,0 +1,9 @@
+{
+  "baseCommit": "10be7a7b0dfb650117c872705efaf9a1cc272f47",
+  "sourceCommit": "1922ff0108e8b99c1f0be74c0592d251c5fb63a9",
+  "branch": "afz/phone-first-r32-20261007",
+  "versionCode": 140,
+  "versionName": "0.5.1-afz-r32",
+  "patchSha256": "e2059cd79b55466431d56ae0c79b6310b5c38367aa7c19df1d1979529bbfca91",
+  "phoneOnly": true
+}
