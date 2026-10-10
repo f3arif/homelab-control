@@ -82,13 +82,17 @@ This accepts full device-download completion and bounded local-file playback. Wi
 
 See pixel8-completion-acceptance-20261010.json. This supersedes the earlier paused-partial limitation for Pixel 8; prior reports remain historical. OnePlus acceptance and the intermittent Pixel 10 connection fault remain separate.
 
-## Pixel 8 network-isolated probe awaiting evidence — 10 October 2026
+## Pixel 8 airplane-mode playback verified — 10 October 2026
 
-A subsequent offline probe staged scripts on Pixel 8, verified a detached phone process survived closing its initiating shell, and armed an independent 70-second phone-side restoration watchdog before disconnecting the network. The runner was intended to open the completed Friends S1E1 file without network connections, capture two positions/frames, stop playback and restore airplane/Wi-Fi/mobile-data/Bluetooth settings.
+The saved phone-side evidence was retrieved after the user supplied the new wireless-debugging endpoint. Existing pairing was reused; the offline test and media download were not repeated.
 
-H3 could not reconnect to retrieve results. The target IP later responded to ping, and a fresh mDNS reply from the phone advertised the original service and port, but TCP/ADB at that port actively refused connections. This establishes renewed LAN response, not verification of every restored setting or successful offline playback.
+Both network snapshots confirm airplane mode on, Wi-Fi off, mobile data off and **Active default network: none**. The completed Friends S1E1 file was opened from Downloads after disconnecting. Two successful XML dumps show **00:55 / 22:44** then **01:05 / 22:44**, with Pause controls. Both inspected PNGs show different actual Friends frames.
 
-Offline acceptance remains **unverified**. Keep the prior full-download and local-playback reports intact. Phone-side evidence is retained at /data/local/tmp/afz-offline-20261010-2148; retrieve it after cycling Wireless debugging and obtaining a fresh main-screen endpoint. Do not repeat the disconnection test before inspecting the saved captures, runner/restore logs and settings. See pixel8-offline-pending-20261010.json.
+The phone runner automatically restored every original setting at **21:52:07 UTC**: airplane mode off, Wi-Fi on, mobile data off (its original state), Bluetooth on. Those exact values were confirmed after reconnecting. The independent 70-second watchdog finished without firing its fallback. The old debugging socket refused connections despite its advertised service; cycling Wireless debugging produced the new working endpoint. This does not diagnose the separate Pixel 10 connectivity fault.
+
+After recovery the AFZ preview was stopped, absence of its process was verified, and no native transfer job remained. The complete 2,002,704,356-byte file is retained. This accepts bounded airplane-mode video playback, not full-episode viewing or audio listening.
+
+See **pixel8-offline-acceptance-20261010.json**. The earlier pending report is historical and superseded. Raw screenshots/XML remain private on H3.
 
 ## OnePlus acceptance pending
 

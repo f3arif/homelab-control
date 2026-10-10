@@ -1,0 +1,97 @@
+{
+  "checkpoint": "AFZ-PIXEL8-OFFLINE-PASSED-20261010",
+  "result": "PASS bounded airplane-mode playback",
+  "device": {
+    "model": "Pixel 8",
+    "serial": "3B170DLJH000HA",
+    "androidApi": 36,
+    "recoveredWirelessEndpoint": "192.168.50.71:36309"
+  },
+  "app": {
+    "package": "com.afz.nuvio.preview",
+    "versionName": "0.5.1-afz-r32",
+    "versionCode": 140
+  },
+  "content": {
+    "series": "Friends",
+    "season": 1,
+    "episode": 1,
+    "title": "The One Where Monica Gets A Roommate",
+    "completedFileBytes": 2002704356,
+    "completedFileRetained": true
+  },
+  "test": {
+    "guardArmedAtUtc": "2026-10-10T21:51:35Z",
+    "runnerStartedAtUtc": "2026-10-10T21:51:36Z",
+    "offlineStateBeforePlay": {
+      "airplaneMode": 1,
+      "wifi": 0,
+      "mobileData": 0,
+      "wifiStatus": "disabled",
+      "activeDefaultNetwork": "none"
+    },
+    "offlineStateAfterCaptures": {
+      "airplaneMode": 1,
+      "wifi": 0,
+      "mobileData": 0,
+      "activeDefaultNetwork": "none"
+    },
+    "firstPosition": "00:55 / 22:44",
+    "secondPosition": "01:05 / 22:44",
+    "progressSeconds": 10,
+    "pauseControlPresentInBoth": true,
+    "bothFramesVisuallyVerified": true,
+    "firstFrame": "Friends coffee shop scene",
+    "secondFrame": "Different Friends coffee shop scene",
+    "bothXmlDumpsSucceeded": true,
+    "playedAndCapturedMarkerPresent": true
+  },
+  "restoration": {
+    "automaticRestoredAtUtc": "2026-10-10T21:52:07Z",
+    "originalSettings": {
+      "airplaneMode": 0,
+      "wifi": 1,
+      "mobileData": 0,
+      "bluetooth": 1
+    },
+    "recordedRestoredSettings": {
+      "airplaneMode": 0,
+      "wifi": 1,
+      "mobileData": 0,
+      "bluetooth": 1
+    },
+    "currentSettingsAfterReconnect": {
+      "airplaneMode": 0,
+      "wifi": 1,
+      "mobileData": 0,
+      "bluetooth": 1
+    },
+    "allMatch": true,
+    "watchdogSeconds": 70,
+    "watchdogFinishedAtUtc": "2026-10-10T21:52:45Z",
+    "watchdogFallbackFired": false
+  },
+  "recovery": {
+    "oldDebuggingPortActivelyRefused": true,
+    "userProvidedNewEndpoint": true,
+    "existingPairingReused": true,
+    "evidenceRecoveredWithoutRepeatingTest": true
+  },
+  "cleanup": {
+    "appForceStopped": true,
+    "verifiedNoAppProcessAtUtc": "2026-10-10T21:59:45.0395525Z",
+    "downloadJobAbsent": true,
+    "noNewMediaTransfer": true
+  },
+  "evidence": {
+    "phoneFolder": "/data/local/tmp/afz-offline-20261010-2148",
+    "h3RecoveredFolder": "C:\\AFZ\\Nuvio-Setup-20260923\\pixel8-verification-20261010\\offline-evidence-recovered",
+    "privateXmlPngCommitted": false
+  },
+  "limits": [
+    "Bounded rendered video and progress only; full episode and audio listening unverified",
+    "Guest profile Pixel8; authenticated account behavior not tested here",
+    "OnePlus acceptance and intermittent Pixel 10 connectivity fault remain separate",
+    "No app/backend/provider/DNS/VPN changes; phone network settings restored exactly"
+  ]
+}
