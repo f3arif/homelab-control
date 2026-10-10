@@ -1,0 +1,6 @@
+{
+  "baseCommit": "10be7a7b0dfb650117c872705efaf9a1cc272f47",
+  "patchSha256": "e2059cd79b55466431d56ae0c79b6310b5c38367aa7c19df1d1979529bbfca91",
+  "exactBaseApplyCheck": true,
+  "reverseCandidateApplyCheck": true
+}

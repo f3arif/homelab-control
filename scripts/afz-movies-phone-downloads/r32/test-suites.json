@@ -1,0 +1,194 @@
+{
+  "com.nuvio.app.features.streams.DeviceDownloadActionsTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.DownloadSubtitlesTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.DownloadsTransferWorkerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamParserTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamLoadResultPolicyTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamBadgePresentationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.JellyfinDownloadTransferTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.jellyfin.JellyfinIntegrationTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamAutoPlayLoadingPolicyTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.DeviceDownloadPickerTest": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.AndroidDownloadNetworkTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.AfzStreamActionsTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.DownloadSafetyStoreTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.AndroidDownloadTransferTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.PhonePlaybackRecommendationTest": {
+    "tests": 18,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.PlaybackAvailabilityTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.DownloadSizePresentationTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamBackgroundSettingsTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.AfzAutoDownloadControlTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.jellyfin.JellyfinOfflineTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.DownloadSafetyTransferTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamResumeStateTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.DownloadRecommendationTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.AndroidDownloadLifecycleTest": {
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamAutoPlaySelectorTest": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.player.PlayerScreenRuntimeStateTest": {
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamLinkCacheRepositoryTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.TitleDownloadsTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.ProviderFilterRowTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.downloads.DownloadsRepositoryDuplicateTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.StreamModelsTest": {
+    "tests": 34,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.nuvio.app.features.streams.PlaybackUrlCredentialsTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

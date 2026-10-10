@@ -1,0 +1,8 @@
+def afzNativeRoot = System.getProperty("afz.nuvio.buildOutputRoot")
+if (!afzNativeRoot) {
+    throw new GradleException("Pass -Dafz.nuvio.buildOutputRoot=/absolute/native/build/directory")
+}
+gradle.beforeProject { project ->
+    def component = project.path == ":" ? "root" : project.path.substring(1).replace(":", "/")
+    project.layout.buildDirectory.set(new File(afzNativeRoot, component))
+}
