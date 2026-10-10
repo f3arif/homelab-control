@@ -82,6 +82,14 @@ This accepts full device-download completion and bounded local-file playback. Wi
 
 See pixel8-completion-acceptance-20261010.json. This supersedes the earlier paused-partial limitation for Pixel 8; prior reports remain historical. OnePlus acceptance and the intermittent Pixel 10 connection fault remain separate.
 
+## Pixel 8 network-isolated probe awaiting evidence — 10 October 2026
+
+A subsequent offline probe staged scripts on Pixel 8, verified a detached phone process survived closing its initiating shell, and armed an independent 70-second phone-side restoration watchdog before disconnecting the network. The runner was intended to open the completed Friends S1E1 file without network connections, capture two positions/frames, stop playback and restore airplane/Wi-Fi/mobile-data/Bluetooth settings.
+
+H3 could not reconnect to retrieve results. The target IP later responded to ping, and a fresh mDNS reply from the phone advertised the original service and port, but TCP/ADB at that port actively refused connections. This establishes renewed LAN response, not verification of every restored setting or successful offline playback.
+
+Offline acceptance remains **unverified**. Keep the prior full-download and local-playback reports intact. Phone-side evidence is retained at /data/local/tmp/afz-offline-20261010-2148; retrieve it after cycling Wireless debugging and obtaining a fresh main-screen endpoint. Do not repeat the disconnection test before inspecting the saved captures, runner/restore logs and settings. See pixel8-offline-pending-20261010.json.
+
 ## OnePlus acceptance pending
 
 Inspect and back up the currently installed OnePlus preview before installation. Confirm package/signature compatibility and avoid downgrading a newer build. Install in place, keeping app data.
