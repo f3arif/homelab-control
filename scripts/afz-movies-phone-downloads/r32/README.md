@@ -70,6 +70,18 @@ Two setup defects were observed: uppercase HTTPS was not normalized, and the str
 
 See pixel8-acceptance-20261010.json for the sanitized physical evidence. Private raw XML/PNG evidence remains on H3 and is excluded from Git. Pixel 8 success does not establish OnePlus acceptance or diagnose the intermittent Pixel 10 connection fault.
 
+## Pixel 8 full download and local playback — 10 October 2026
+
+The next authorized check resumed the saved Friends S1E1 partial. An independent H3 process enforced a 180-second transfer limit with native Pause and force-stop fallbacks. Completion was observed after about 41 seconds; no fallback was needed.
+
+Downloaded and total bytes both equal **2,002,704,356**. The actual local file has exactly that size and the Matroska header **1a45dfa3**. Downloads groups it under Friends / Season 1 and shows **Completed · 1.8 GB**, with Play available. The existing app filename uses .mp4 even though the media container is Matroska; the local player handled it successfully.
+
+Opening Play from Downloads launched a file URI. One descriptor for that local download was open in the app process. The inspected frame shows Friends video, and controls show **00:41 / 22:44** with Pause. Playback stopped automatically and returned to the completed episode list. The full file is retained; the native transfer job is absent and the bounded current-process crash buffer has zero content lines.
+
+This accepts full device-download completion and bounded local-file playback. Wi-Fi remained connected for wireless ADB, so it does not establish airplane-mode/network-isolation acceptance, audio listening or full-episode viewing. No app/backend/provider/network configuration changed.
+
+See pixel8-completion-acceptance-20261010.json. This supersedes the earlier paused-partial limitation for Pixel 8; prior reports remain historical. OnePlus acceptance and the intermittent Pixel 10 connection fault remain separate.
+
 ## OnePlus acceptance pending
 
 Inspect and back up the currently installed OnePlus preview before installation. Confirm package/signature compatibility and avoid downgrading a newer build. Install in place, keeping app data.

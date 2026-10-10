@@ -1,0 +1,93 @@
+{
+  "checkpoint": "AFZ-PIXEL8-DOWNLOAD-COMPLETE-20261010",
+  "device": {
+    "model": "Pixel 8",
+    "androidApi": 36,
+    "connection": "wireless ADB"
+  },
+  "app": {
+    "package": "com.afz.nuvio.preview",
+    "versionName": "0.5.1-afz-r32",
+    "versionCode": 140,
+    "apkSha256": "6595a1962651cda9c87ce8bec83ecf81d088a0eae85e3091df3a98774f66b6e4"
+  },
+  "content": {
+    "series": "Friends",
+    "canonicalId": "tt0108778",
+    "season": 1,
+    "episode": 1,
+    "title": "The One Where Monica Gets A Roommate",
+    "source": "1.9 GB displayed / 1080p / Debridio"
+  },
+  "download": {
+    "result": "PASS full completion after resuming saved partial",
+    "initialBytes": 1070766614,
+    "completedBytes": 2002704356,
+    "totalBytes": 2002704356,
+    "startedAtUtc": "2026-10-10T21:25:32.848964+00:00",
+    "completedObservedAtUtc": "2026-10-10T21:26:14.562742+00:00",
+    "independentH3GuardMaxSeconds": 180,
+    "pauseFallbackUsed": false,
+    "ui": "Completed · 1.8 GB; Play available",
+    "localUriScheme": "file",
+    "actualLocalFileSize": 2002704356,
+    "sizeMatchesTotal": true,
+    "headerHex": "1a45dfa3",
+    "mediaContainer": "Matroska header; existing app filename uses .mp4",
+    "fullFileRetained": true,
+    "transferJobAbsentAfterPlayback": true
+  },
+  "localPlayback": {
+    "startedAtUtc": "2026-10-10T21:27:04.362704+00:00",
+    "networkDisabled": false,
+    "localUriScheme": "file",
+    "localFileSize": 2002704356,
+    "expectedBytes": 2002704356,
+    "sizeMatchesTotal": true,
+    "headerHex": "1a45dfa3",
+    "firstPlayerUi": [],
+    "openLocalDownloadDescriptors": 1,
+    "secondPlayerUi": [
+      "Lock player controls",
+      "Close player",
+      "Seek backward 10 seconds",
+      "Pause",
+      "Seek forward 10 seconds",
+      "Friends",
+      "Playback position",
+      "Next Episode",
+      "Subtitles",
+      "Audio",
+      "Sources",
+      "Download to device",
+      "More controls",
+      "00:41 / 22:44"
+    ],
+    "stopSucceeded": true,
+    "finishedAtUtc": "2026-10-10T21:27:32.052696+00:00",
+    "videoFrameVisuallyVerified": true,
+    "result": "PASS bounded local-file playback",
+    "networkIsolationVerified": false
+  },
+  "evidence": {
+    "privateH3Folder": "C:\\AFZ\\Nuvio-Setup-20260923\\pixel8-verification-20261010",
+    "captures": [
+      "download-completed",
+      "downloaded-episode-list",
+      "downloaded-playback-first",
+      "downloaded-playback-second",
+      "after-downloaded-playback"
+    ],
+    "rawXmlPngCommitted": false
+  },
+  "limits": [
+    "Playback launched from Downloads using a file URI; one matching local download descriptor was open in the app process",
+    "Wi-Fi remained connected for wireless ADB; airplane-mode/network-isolation acceptance was not performed",
+    "Bounded playback only, not full-episode viewing or audio listening",
+    "OnePlus and intermittent Pixel 10 connection issue remain separate",
+    "App/backend/provider/network settings unchanged"
+  ],
+  "boundedCrashBufferCheck": {
+    "contentLines": 0
+  }
+}
