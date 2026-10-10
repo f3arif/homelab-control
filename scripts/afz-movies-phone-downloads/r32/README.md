@@ -56,6 +56,20 @@ Temporary portrait locking was restored to the original rotation settings. The f
 
 See pixel-acceptance-20261008.json for installation identity, UI cases, limitations and the separate provider issue. XML and PNG evidence is retained in the H3 candidate's pixel-verification-20261008 folder. The October 7 verified-build.json remains a historical pre-installation build record. No media playback was exercised. This PR remains draft and separate from TV PR #262.
 
+## Pixel 8 media verification — 10 October 2026
+
+The user switched the target to Pixel 8 over wireless ADB. The reviewed R32 APK was installed on that device after checksum verification. A new local guest profile and one AFZ add-on with 19 catalogs were configured through the existing protected public route.
+
+Friends S1E1 showed the matching 1.9 GB 1080p Debridio file once before the add-on group. The visible 0.35–1.5 GB phone target accurately classified it as over budget. Actual Friends video rendered and advanced to 00:18 / 22:44; the bounded playback test stopped automatically, leaving resume progress at 0:21.
+
+The larger-file confirmation appeared before starting a real device download. Progress reached 741.3 MB in the UI and ultimately 1,070,766,614 of 2,002,704,356 bytes. The 40-second independent guard force-stopped the app. A subsequent native PAUSE action persisted Paused, cancelled the transfer job and retained the partial file. After reopening, Downloads showed Paused · 1021.1 MB / 1.8 GB with Resume; two store checks 11.7 seconds apart had identical byte counts. Full download completion, offline playback and audio listening were not tested.
+
+An attempted pause capture contained stale XML after uiautomator failed to become idle. That capture is excluded. The capture helper now deletes previous remote XML and requires successful dump output before pulling it. The final download-paused-confirmed capture is fresh.
+
+Two setup defects were observed: uppercase HTTPS was not normalized, and the stremio VIEW installation path created duplicate add-on entries. Installing once through Add-ons with the scheme omitted produced one active add-on. These workarounds did not change app code. The earlier episode identity backend fix in PR #264 remains live; no backend/provider/network changes were made here.
+
+See pixel8-acceptance-20261010.json for the sanitized physical evidence. Private raw XML/PNG evidence remains on H3 and is excluded from Git. Pixel 8 success does not establish OnePlus acceptance or diagnose the intermittent Pixel 10 connection fault.
+
 ## OnePlus acceptance pending
 
 Inspect and back up the currently installed OnePlus preview before installation. Confirm package/signature compatibility and avoid downgrading a newer build. Install in place, keeping app data.
