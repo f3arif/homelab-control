@@ -1,0 +1,203 @@
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonInstallation.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonInstallation.kt
+new file mode 100644
+index 0000000000000000000000000000000000000000..a92a1f07b5d7143f032802d3cd2e737227066f95
+--- /dev/null
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonInstallation.kt
+@@ -0,0 +1,28 @@
++package com.nuvio.app.features.addons
++
++import kotlinx.coroutines.flow.MutableStateFlow
++
++/** Canonicalize only the transport scheme; provider paths and tokens remain case-sensitive. */
++internal fun normalizeAddonManifestUrl(rawUrl: String): String {
++    val trimmed = rawUrl.trim()
++    require(trimmed.isNotEmpty())
++    val transportUrl = when {
++        trimmed.startsWith("https://", ignoreCase = true) -> "https://" + trimmed.substring(8)
++        trimmed.startsWith("http://", ignoreCase = true) -> "http://" + trimmed.substring(7)
++        trimmed.startsWith("stremio://", ignoreCase = true) -> "https://" + trimmed.substring(10)
++        else -> "https://$trimmed"
++    }.substringBefore("#")
++    val query = transportUrl.substringAfter("?", "")
++    val path = transportUrl.substringBefore("?").trimEnd('/')
++    val manifestPath = if (path.endsWith("/manifest.json")) path else "$path/manifest.json"
++    return if (query.isEmpty()) manifestPath else "$manifestPath?$query"
++}
++
++/** Recheck after manifest fetch and commit atomically, including StateFlow update retries. */
++internal fun MutableStateFlow<AddonsUiState>.installAddonIfAbsent(addon: ManagedAddon): Boolean {
++    while (true) {
++        val current = value
++        if (current.addons.any { it.manifestUrl == addon.manifestUrl }) return false
++        if (compareAndSet(current, current.copy(addons = current.addons + addon))) return true
++    }
++}
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonRepository.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonRepository.kt
+index cd5a3df7fc48d0f558a99eace3f1fd85efd0fef3..8fcdec594ce7bd6a1903d4e6d0034f3faa15c24e 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonRepository.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/addons/AddonRepository.kt
+@@ -195,15 +195,16 @@ object AddonRepository {
+             return AddAddonResult.Error(error.message ?: getString(Res.string.addon_load_manifest_failed))
+         }
+ 
+-        _uiState.update { current ->
+-            current.copy(
+-                addons = current.addons + ManagedAddon(
+-                    manifestUrl = manifestUrl,
+-                    manifest = manifest,
+-                    isRefreshing = false,
+-                    errorMessage = null,
+-                ),
+-            )
++        val installed = _uiState.installAddonIfAbsent(
++            ManagedAddon(
++                manifestUrl = manifestUrl,
++                manifest = manifest,
++                isRefreshing = false,
++                errorMessage = null,
++            ),
++        )
++        if (!installed) {
++            return AddAddonResult.Error(getString(Res.string.addon_already_installed))
+         }
+         persist()
+         pushToServer()
+@@ -472,20 +473,5 @@ private fun normalizeManifestUrl(rawUrl: String): String {
+     val trimmed = rawUrl.trim()
+     require(trimmed.isNotEmpty()) { runBlocking { getString(Res.string.addons_error_enter_url) } }
+ 
+-    val normalizedScheme = when {
+-        trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+-        trimmed.startsWith("stremio://") -> "https://${trimmed.removePrefix("stremio://")}"
+-        else -> "https://$trimmed"
+-    }
+-
+-    val withoutFragment = normalizedScheme.substringBefore("#")
+-    val query = withoutFragment.substringAfter("?", "")
+-    val path = withoutFragment.substringBefore("?").trimEnd('/')
+-    val manifestPath = if (path.endsWith("/manifest.json")) {
+-        path
+-    } else {
+-        "$path/manifest.json"
+-    }
+-
+-    return if (query.isEmpty()) manifestPath else "$manifestPath?$query"
++    return normalizeAddonManifestUrl(trimmed)
+ }
+diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/features/addons/AddonInstallationTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/addons/AddonInstallationTest.kt
+new file mode 100644
+index 0000000000000000000000000000000000000000..8ab14436996825a23dc37d1c31d025216a3a40d4
+--- /dev/null
++++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/features/addons/AddonInstallationTest.kt
+@@ -0,0 +1,103 @@
++package com.nuvio.app.features.addons
++
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.runBlocking
++import kotlin.test.Test
++import kotlin.test.assertEquals
++import kotlin.test.assertFalse
++import kotlin.test.assertFailsWith
++import kotlin.test.assertTrue
++
++class AddonInstallationTest {
++    @Test fun uppercaseHttpsPreservesProviderPathAndToken() {
++        assertEquals("https://example.test/Config/AbC/manifest.json?token=XyZ%2F",
++            normalizeAddonManifestUrl(" HTTPS://example.test/Config/AbC/?token=XyZ%2F#section "))
++    }
++
++    @Test fun mixedCaseHttpRemainsHttp() {
++        assertEquals("http://localhost:18774/manifest.json", normalizeAddonManifestUrl("HtTp://localhost:18774"))
++    }
++
++    @Test fun mixedCaseStremioAndHttpsHaveTheSameIdentity() {
++        assertEquals(normalizeAddonManifestUrl("HTTPS://example.test/Config/AbC"),
++            normalizeAddonManifestUrl("StReMiO://example.test/Config/AbC/manifest.json"))
++    }
++
++    @Test fun schemelessAddressKeepsPort() {
++        assertEquals("https://example.test:8443/Config/AbC/manifest.json", normalizeAddonManifestUrl("example.test:8443/Config/AbC/"))
++    }
++
++    @Test fun existingManifestSuffixIsNotAddedAgain() {
++        assertEquals("https://example.test/manifest.json?A=B", normalizeAddonManifestUrl("https://example.test/manifest.json/?A=B"))
++    }
++
++    @Test fun fragmentCannotBecomePartOfTheManifestPath() {
++        assertEquals("https://example.test/Config/manifest.json", normalizeAddonManifestUrl("https://example.test/Config#Install"))
++    }
++
++    @Test fun tokenAndPathCaseStillDistinguishConfigurations() {
++        assertFalse(normalizeAddonManifestUrl("https://example.test/AbC?token=XyZ") ==
++            normalizeAddonManifestUrl("https://example.test/abc?token=xyz"))
++    }
++
++    @Test fun blankInputIsRejected() {
++        assertFailsWith<IllegalArgumentException> { normalizeAddonManifestUrl("  ") }
++    }
++
++    @Test fun duplicateDoesNotReplaceExistingDisabledAddon() {
++        val original = ManagedAddon("https://example.test/manifest.json", enabled = false, userSetName = "Keep me")
++        val state = MutableStateFlow(AddonsUiState(listOf(original)))
++        assertFalse(state.installAddonIfAbsent(original.copy(enabled = true, userSetName = null)))
++        assertEquals(listOf(original), state.value.addons)
++    }
++
++    @Test fun concurrentCompletedFetchesInstallExactlyOnce() = runBlocking {
++        repeat(20) {
++            val state = MutableStateFlow(AddonsUiState())
++            val ready = CompletableDeferred<Unit>()
++            val results = (1..64).map {
++                async(Dispatchers.Default) {
++                    ready.await()
++                    state.installAddonIfAbsent(ManagedAddon("https://example.test/manifest.json"))
++                }
++            }
++            ready.complete(Unit)
++            assertEquals(1, results.awaitAll().count { it })
++            assertEquals(1, state.value.addons.size)
++        }
++    }
++
++    @Test fun concurrentDifferentAddonsAreNotLost() = runBlocking {
++        val state = MutableStateFlow(AddonsUiState())
++        val ready = CompletableDeferred<Unit>()
++        val results = (1..64).map { index ->
++            async(Dispatchers.Default) {
++                ready.await()
++                state.installAddonIfAbsent(ManagedAddon("https://example.test/$index/manifest.json"))
++            }
++        }
++        ready.complete(Unit)
++        assertTrue(results.awaitAll().all { it })
++        assertEquals(64, state.value.addons.map { it.manifestUrl }.distinct().size)
++    }
++
++    @Test fun freshInstallAfterRemovalStillWorks() {
++        val state = MutableStateFlow(AddonsUiState())
++        val addon = ManagedAddon("https://example.test/manifest.json")
++        assertTrue(state.installAddonIfAbsent(addon))
++        state.value = AddonsUiState()
++        assertTrue(state.installAddonIfAbsent(addon))
++        assertEquals(listOf(addon), state.value.addons)
++    }
++
++    @Test fun differentSchemeInputsShareOneInstallSlot() {
++        val state = MutableStateFlow(AddonsUiState())
++        assertTrue(state.installAddonIfAbsent(ManagedAddon(normalizeAddonManifestUrl("HTTPS://example.test/Config/AbC"))))
++        assertFalse(state.installAddonIfAbsent(ManagedAddon(normalizeAddonManifestUrl("stremio://example.test/Config/AbC"))))
++        assertEquals(1, state.value.addons.size)
++    }
++}
+diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
+index bab11e0a724375b0d8d857fd56bc17aff697bc78..bde7d3258633668faff565c88accc2ba84553a04 100644
+--- a/iosApp/Configuration/Version.xcconfig
++++ b/iosApp/Configuration/Version.xcconfig
+@@ -1,2 +1,2 @@
+-CURRENT_PROJECT_VERSION=140
++CURRENT_PROJECT_VERSION=141
+ MARKETING_VERSION=0.5.1
