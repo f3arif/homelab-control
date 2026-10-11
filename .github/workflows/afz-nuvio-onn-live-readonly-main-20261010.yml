@@ -1,0 +1,48 @@
+name: AFZ Nuvio Onn TV Read-only Main Probe 2026-10-10
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/afz-nuvio-onn-live-readonly-main-20261010.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: afz-nuvio-onn-live-readonly-main-20261010
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Join preauthorized AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+
+      - name: Observe reachability only (no app, source, or account changes)
+        shell: bash
+        run: |
+          set +e
+          echo "PROBE_TIME_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo '=== TAILNET STATUS ==='
+          tailscale status --self 2>&1 | head -3
+          echo '=== HP TAILSCALE PING ==='
+          timeout 14 tailscale ping --c 1 --timeout 6s 100.71.26.69 2>&1 | tail -5
+          echo "HP_TS_PING_STATUS=${PIPESTATUS[0]}"
+          echo '=== H3 TAILSCALE PING ==='
+          timeout 14 tailscale ping --c 1 --timeout 6s 100.106.186.118 2>&1 | tail -5
+          echo "H3_TS_PING_STATUS=${PIPESTATUS[0]}"
+          echo '=== HP SSH READ-ONLY TV LAN PROBE ==='
+          timeout 25 tailscale ssh coolyo@100.71.26.69 'echo HP_SSH_OK; hostname; echo TV_PING; ping -c 1 -W 2 192.168.50.31 || true; echo TV_TCP5555; timeout 4 bash -c ">/dev/tcp/192.168.50.31/5555" && echo TV_ADB_TCP_OPEN || echo TV_ADB_TCP_CLOSED; echo HP_LAN_ROUTE; ip -4 route get 192.168.50.31 | head -1' 2>&1 | tail -18
+          echo "HP_SSH_STATUS=${PIPESTATUS[0]}"
+          echo '=== H3 SSH READ-ONLY TV LAN PROBE ==='
+          timeout 25 tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "Write-Output H3_SSH_OK; Write-Output TV_TCP5555; Test-NetConnection -ComputerName 192.168.50.31 -Port 5555 -InformationLevel Quiet -WarningAction SilentlyContinue"' 2>&1 | tail -14
+          echo "H3_SSH_STATUS=${PIPESTATUS[0]}"
+          echo "PROBE_DONE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
