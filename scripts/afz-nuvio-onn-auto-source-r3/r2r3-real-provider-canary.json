@@ -1,0 +1,72 @@
+{
+  "checked_utc": "2026-10-11T18:53:17.720080+00:00",
+  "status": "PASS",
+  "mode": "H3 real-bridge localhost-only HEAD canary",
+  "production_code_changed": false,
+  "full_media_downloaded": false,
+  "source_urls_written": false,
+  "cases": [
+    {
+      "check": "original-production-SHA",
+      "pass": true
+    },
+    {
+      "check": "combined-staged-SHA",
+      "pass": true
+    },
+    {
+      "check": "private-test-port-unused",
+      "pass": true
+    },
+    {
+      "check": "real-H3-bridge-healthy",
+      "pass": true
+    },
+    {
+      "check": "canary-original-addon-manifest",
+      "pass": true
+    },
+    {
+      "check": "live-provider-HEAD-tt22084616",
+      "pass": true,
+      "movie_id": "tt22084616",
+      "http_status": 200,
+      "source": "Comet",
+      "provider": "TorBox",
+      "seconds": 7.16,
+      "redirect_or_relay": true
+    },
+    {
+      "check": "auto-source-refresh-tt22084616",
+      "pass": true,
+      "fresh_row_count": 80,
+      "comet_row_count": 52
+    },
+    {
+      "check": "live-provider-HEAD-tt6723592",
+      "pass": true,
+      "movie_id": "tt6723592",
+      "http_status": 200,
+      "source": "Comet",
+      "provider": "TorBox",
+      "seconds": 6.14,
+      "redirect_or_relay": true
+    },
+    {
+      "check": "auto-source-refresh-tt6723592",
+      "pass": true,
+      "fresh_row_count": 3,
+      "comet_row_count": 2
+    },
+    {
+      "check": "production-source-still-unchanged",
+      "pass": true
+    },
+    {
+      "check": "production-manifest-still-200",
+      "pass": true
+    }
+  ],
+  "sidecar_closed": true,
+  "closed_utc": "2026-10-11T18:53:34.040940+00:00"
+}

@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "checked_utc": "2026-10-11T06:21:42.413708+00:00",
+  "original_production_sha": "d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f",
+  "r2_sha": "3dab113e23725a39401f8ba3c619b9eb0b6cd5eec47a0f677df2dc84404a74a5",
+  "combined_sha": "2b7a5b73392f21b99ee4b2234062b4d75c7118fd6f7fecc0d841f32691ae6572",
+  "sequential_patch_byte_exact": true,
+  "tests": {
+    "R2 regression": {
+      "passed": 23,
+      "expected": 23
+    },
+    "R3 regression": {
+      "passed": 43,
+      "expected": 43
+    },
+    "Real H3 bridge integration": {
+      "passed": 2,
+      "expected": 2
+    },
+    "R2 HTTP endpoint": {
+      "passed": 13,
+      "expected": 13
+    },
+    "R3 HTTP endpoint": {
+      "passed": 10,
+      "expected": 10
+    }
+  },
+  "total_passing_checks": 91,
+  "source_currently_live": false,
+  "production_unchanged": true,
+  "combined_staged_path": "C:\\AFZ\\Nuvio-Setup-20260923\\onn-r2-r3-combined-20261011\\stremio_catalog.r2-plus-r3.candidate.py",
+  "release_gate": "Do not deploy while protected HLS/media activity is running"
+}
