@@ -58,3 +58,14 @@ The bounded Windows Task Scheduler task **AFZ Nuvio R2 Safe Idle Deploy** is reg
 **Reproducibility:** Apply the Git patch with git -c core.autocrlf=false apply. Plain git apply with the Windows global core.autocrlf=true writes CRLF output, so its file hash differs from the tested LF-only candidate despite identical normalized source text. Verify-R2-Package.py checks original and candidate SHA, recreates the patched file with core.autocrlf=false and checks its exact bytes. Verified: byte-exact patch reproduction, 23/23 isolated tests and 2/2 H3 bridge integration tests.
 
 **Postdeployment evidence:** Verify local receipt status DEPLOYED_AND_SMOKE_VERIFIED, R2 candidate SHA 3dab113e23725a39401f8ba3c619b9eb0b6cd5eec47a0f677df2dc84404a74a5, local/LAN manifest HTTP 200 and TV nonlocal playback. An armed task or successful Task Scheduler invocation alone does not prove deployment.
+
+
+## Additional 2026-10-11 HTTP-route acceptance (13/13 PASS)
+
+The H3 R2 candidate was run **unchanged** through a localhost-only Uvicorn HTTP sidecar on port 18786, with its own isolated state directory and its application startup lifespan disabled. A deterministic mock resolver on another localhost-only port (18787) supplied a fixed replacement token. This isolates the HTTP handler and state persistence from the volatility and network latency of live media providers.
+
+All **13 checks PASS**: production baseline and candidate hashes, unused isolated ports, isolated manifest, stale token confirmed missing on the mock bridge, historical-only HEAD returning a redirect to the identical release, persisted history after refresh, rejection of a different release, rejection of expired history, rejection of unknown tokens, recovery after an actual sidecar process restart, original production SHA preserved, and production manifest HTTP 200. The mock bridge and sidecar shut down; no media files were fetched. The reusable test is `qualify_r2_mock_http.py` and the H3 receipt is `r2-mocked-http-acceptance.json`.
+
+Two earlier real H3 bridge integration tests remain separate evidence. Two initial sidecar experiments that relied on volatile live provider results were inconclusive: one HEAD waited on a provider, another returned 404 after the exact matching release disappeared. Such 404 is the expected fail-closed behavior if the same release cannot be rediscovered. These experiments were retained locally; they are **not** counted as passes.
+
+The previously disabled bounded H3 watcher was re-enabled **only after** 13/13 private HTTP acceptance passed and both production/candidate hashes were rechecked. It retains the **original 2026-10-11T13:10:22Z deadline** and its active-connection/rollback protections. This does **not** mean R2 has deployed; verify the actual postdeployment receipt and candidate SHA before claiming success.
