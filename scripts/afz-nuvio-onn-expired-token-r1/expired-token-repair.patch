@@ -1,0 +1,39 @@
+--- a/stremio_catalog.py
++++ b/stremio_catalog.py
+@@ -12279,6 +12279,36 @@
+     data=h3_order_call('GET',f'/external-resolve?token={qtok}&imdb={qimdb}',timeout)
+     url=str(data.get('url') or '') if isinstance(data,dict) and data.get('ok') else ''
+     if not re.match(r'^https?://',url,re.I):
++        # The catalog persists source tokens, but the desktop bridge keeps
++        # its token-to-link registry only in memory for 30 minutes. Resolve
++        # an expired selection by re-discovering the SAME release only.
++        old_row=None
++        with external_source_lock:
++            for candidate in (external_source_cache.get('rows') or {}).get(vid,[]):
++                if isinstance(candidate,dict) and str(candidate.get('token') or '')==str(token):
++                    old_row=dict(candidate)
++                    break
++        if old_row:
++            try:
++                refreshed=external_source_rows(vid,force=True)
++                identity=_external_candidate_identity(old_row)
++                fresh=next((
++                    row for row in refreshed
++                    if _external_candidate_identity(row)==identity
++                    and re.fullmatch(r'[a-f0-9]{20,64}',str(row.get('token') or ''))
++                ),None)
++                if fresh:
++                    fresh_token=requests.utils.quote(str(fresh['token']),safe='')
++                    fresh_data=h3_order_call(
++                        'GET',f'/external-resolve?token={fresh_token}&imdb={qimdb}',timeout
++                    )
++                    if isinstance(fresh_data,dict) and fresh_data.get('ok'):
++                        fresh_url=str(fresh_data.get('url') or '')
++                        if re.match(r'^https?://',fresh_url,re.I):
++                            url=fresh_url
++            except Exception:
++                pass
++    if not re.match(r'^https?://',url,re.I):
+         raise HTTPException(404,'External stream expired; refresh the Stremio stream list')
+     with resolved_stream_lock:
+         external_resolved_cache[key]={'ts':time.time(),'url':url}
