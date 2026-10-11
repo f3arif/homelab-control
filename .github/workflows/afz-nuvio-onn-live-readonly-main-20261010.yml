@@ -46,3 +46,5 @@ jobs:
           timeout 25 tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "Write-Output H3_SSH_OK; Write-Output TV_TCP5555; Test-NetConnection -ComputerName 192.168.50.31 -Port 5555 -InformationLevel Quiet -WarningAction SilentlyContinue"' 2>&1 | tail -14
           echo "H3_SSH_STATUS=${PIPESTATUS[0]}"
           echo "PROBE_DONE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Recheck after one AFZ H3 Worker Recover trigger; no privilege changes.
