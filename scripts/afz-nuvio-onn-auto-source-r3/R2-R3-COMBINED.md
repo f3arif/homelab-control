@@ -51,3 +51,19 @@ The earlier Spider-Man 404 token was already absent from the original cache, so 
 - No production change until a receipt, SHA and post-deployment playback tests prove it.
 
 Related: [Issue #265](https://github.com/f3arif/homelab-control/issues/265), [R2 draft PR #267](https://github.com/f3arif/homelab-control/pull/267), [R3 draft PR #268](https://github.com/f3arif/homelab-control/pull/268).
+
+
+## 2026-10-11 afternoon — private real-provider HTTP canary (11/11 PASS)
+
+The original R2 idle-watch deadline expired at 09:10 EDT without deployment (last successful watch run ~09:06 returned `WAITING_FOR_QUIET`). On H3 at ~14:49 EDT the scheduled task remained enabled but had no next run; it was explicitly **disabled** after confirming expiration. Production catalog still returned HTTP 200 with original SHA `d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f`. Do not restart this expired watcher or claim deployment.
+
+A new, isolated real-provider canary ran the **combined R2+R3 candidate** on H3 loopback-only port `127.0.0.1:18786`, with its own temporary state and *real* existing H3 Stremio bridge on `127.0.0.1:18768`. It used the existing health metrics and intentionally aged copied source rows to exercise the automatic fresh-source lookup. Only **HTTP HEAD** calls were sent to the `/auto-stream` media routes; no complete media files were downloaded. Known movie metadata/release permission was seeded **only in the temporary sidecar wrapper** to prevent unrelated Cinemeta date/caching behavior affecting the test.
+
+**11/11 checks passed:** source hashes, private port availability, live bridge health, isolated manifest, two successful real-provider HEAD requests, two automatic source-cache refresh verifications, unchanged production SHA, and production manifest HTTP 200.
+
+- Spider-Man `tt22084616`: TorBox/**Comet**, HTTP **200** in **7.16s**, refreshed to 80 source rows, 52 from Comet.
+- Tenet `tt6723592`: TorBox/**Comet**, HTTP **200** in **6.14s**, refreshed to 3 source rows, 2 from Comet.
+
+All source URLs and signed tokens were omitted from the report. The sidecar was stopped and private port 18786 was confirmed closed. Script `qualify_real_bridge_canary.py` and receipt `r2r3-real-provider-canary.json` were archived in draft PR #268. These checks establish actual provider HTTP response and source ranking from the combined candidate **without disturbing production**, but they do **not** prove 60s sustained playback on the original onn TV or that every provider is reliable.
+
+The latest production release gates remain unchanged: the original H3 streaming service is active; R2 and combined R2+R3 are **staged only**; the expired R2 watcher is disabled; a controlled, guarded cutover or a private TV-specific canary addon is required for full end-to-end acceptance.
