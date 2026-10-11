@@ -1,0 +1,55 @@
+name: AFZ Nuvio Onn H3 Direct ADB Read-only Probe
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/afz-nuvio-onn-h3-adb-readonly-main-20261010.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: afz-nuvio-onn-h3-direct-adb-readonly-20261010
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Check expected H3 runner and onn TV (no changes)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Write-Output ('TIME_UTC=' + (Get-Date).ToUniversalTime().ToString('o'))
+          Write-Output ('RUNNER_NAME=' + $env:RUNNER_NAME)
+          Write-Output ('HOST=' + $env:COMPUTERNAME)
+          if ($env:COMPUTERNAME -ne 'DESKTOP-H3R6CQN') {
+            Write-Output 'SKIPPED_UNEXPECTED_HOST'
+            exit 0
+          }
+          $tv = '192.168.50.31'
+          $adb = 'C:\Users\Faiz\AppData\Local\Android\Sdk\platform-tools\adb.exe'
+          Write-Output '=== TV PING ==='
+          & ping.exe -n 1 -w 900 $tv | Select-String -Pattern 'Reply from|Request timed out|Lost'
+          Write-Output '=== TV TCP ADB 5555 ==='
+          $client = New-Object System.Net.Sockets.TcpClient
+          try {
+            $async = $client.BeginConnect($tv,5555,$null,$null)
+            $connected = $async.AsyncWaitHandle.WaitOne(2500,$false)
+            if ($connected) {
+              $client.EndConnect($async)
+              Write-Output 'TV_TCP5555=OPEN'
+            } else { Write-Output 'TV_TCP5555=TIMEOUT' }
+          } catch { Write-Output ('TV_TCP5555=ERROR ' + $_.Exception.GetType().Name) }
+          finally { $client.Dispose() }
+          Write-Output '=== ADB KNOWN DEVICES ONLY ==='
+          if (Test-Path -LiteralPath $adb) {
+            $devs = & $adb devices -l 2>&1
+            foreach ($line in $devs) {
+              if ($line -match [regex]::Escape($tv)) { Write-Output ('ONN_ADB=' + $line) }
+            }
+            if (-not ($devs | Select-String -SimpleMatch $tv)) { Write-Output 'ONN_ADB=NOT_CONNECTED' }
+          } else { Write-Output 'ADB_BINARY=NOT_FOUND' }
+          Write-Output 'NO_APP_CHANGES=true'
