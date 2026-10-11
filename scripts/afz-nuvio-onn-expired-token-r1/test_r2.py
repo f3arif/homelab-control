@@ -19,6 +19,7 @@ ns={
     "parse_series_video_id":lambda v:None,
     "HTTPException":HTTPException,
     "external_source_lock":threading.RLock(),
+    "external_source_persist_lock":threading.RLock(),
     "resolved_stream_lock":threading.RLock(),
     "external_resolved_cache":{},
     "EXTERNAL_TOKEN_HISTORY_TTL":72*3600,
@@ -160,6 +161,22 @@ cache([CHANGED],ns["external_source_cache"]["history"])
 s=bridge(set())
 ns["external_source_rows"]=lambda *a,**kw: (_ for _ in ()).throw(ConnectionError("Provider unavailable"))
 assert_true("fail-closed-on-provider-outage",not resolves())
+
+
+with tempfile.TemporaryDirectory() as temp:
+    ns["EXTERNAL_SOURCE_CACHE_FILE"]=pathlib.Path(temp)/"external-source-cache.json"
+    cache([CHANGED])
+    with ns["external_source_lock"]:
+        ns["_external_token_history_remember_locked"](VID,[RELEASE],time.time())
+    threads=[threading.Thread(target=ns["_persist_external_source_cache"]) for _ in range(16)]
+    for th in threads:th.start()
+    for th in threads:th.join(timeout=12)
+    assert_true("concurrent-history-save-threads-completed",not any(th.is_alive() for th in threads))
+    j=json.loads(ns["EXTERNAL_SOURCE_CACHE_FILE"].read_text(encoding="utf-8"))
+    assert_true("concurrent-history-save-valid-json-and-content",
+                OLD in j.get("history",{}).get(VID,{}) and len(j.get("rows",{}).get(VID,[]))==1)
+    assert_true("no-racy-shared-temp-file-after-persistence",
+                not list(pathlib.Path(temp).glob("*.tmp")))
 
 assert_true("live-H3-backend-file-unchanged",
             hashlib.sha256(pathlib.Path(r"C:\AFZ\Stremio-Failover-H3\stremio_catalog.py").read_bytes()).hexdigest()
