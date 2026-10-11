@@ -1,0 +1,40 @@
+name: AFZ Nuvio Onn TV Read-only Connectivity Probe
+on:
+  push:
+    branches:
+      - probe/nuvio-onn-remote-20261010
+    paths:
+      - '.github/workflows/afz-nuvio-onn-readonly-probe-20261010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: afz-nuvio-onn-probe-20261010
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join existing AFZ tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+      - name: Check HP and H3, then probe TV via HP read-only
+        shell: bash
+        run: |
+          set +e
+          echo "AFZ_NUVIO_ONN_PROBE_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo '===HP_TAILSCALE==='
+          timeout 12 tailscale ping --c 1 --timeout 5s 100.71.26.69 2>&1 | tail -4
+          echo '===H3_TAILSCALE==='
+          timeout 12 tailscale ping --c 1 --timeout 5s 100.106.186.118 2>&1 | tail -4
+          echo '===TV_VIA_HP==='
+          timeout 24 tailscale ssh coolyo@100.71.26.69 'echo HP_SSH_CONNECTED; echo TV_LAN_PING; ping -n -c 1 -W 2 192.168.50.31 || true; echo TV_ADB_TCP; timeout 4 bash -c ">/dev/tcp/192.168.50.31/5555" && echo TV_ADB_PORT_OPEN || echo TV_ADB_PORT_CLOSED; echo HP_LAN_ROUTE; ip -4 route get 192.168.50.31 | head -1' 2>&1 | tail -20
+          echo "HP_PROBE_EXIT=${PIPESTATUS[0]}"
+          echo "AFZ_NUVIO_ONN_PROBE_END=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
