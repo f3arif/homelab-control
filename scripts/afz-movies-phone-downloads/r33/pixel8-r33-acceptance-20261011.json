@@ -1,0 +1,43 @@
+{
+  "status": "pixel8_r33_setup_acceptance_passed",
+  "verifiedAt": "2026-10-11T04:51:50Z",
+  "device": "Pixel 8",
+  "serial": "3B170DLJH000HA",
+  "package": "com.afz.nuvio.preview",
+  "versionName": "0.5.1-afz-r33",
+  "versionCode": 141,
+  "apkSha256": "1fc1a7a8cd14c74cb650312b16590e96e5f9afcb5b9b26c37122b0577a3ed2cd",
+  "adbServerPort": 5038,
+  "installedAt": "2026-10-11T04:43:49Z",
+  "uppercaseExistingAfzDuplicateRejected": true,
+  "uppercaseFreshManifestInstallPassed": true,
+  "testAddon": "Cinemeta",
+  "repeatedExistingDeepLinkRequests": 8,
+  "duplicateRowsAfterRepeat": 0,
+  "testAddonRemoved": true,
+  "finalAfzAddonCount": 1,
+  "finalActiveAddonCount": 1,
+  "finalCatalogCount": 19,
+  "preservation": {
+    "status": "state_preserved",
+    "addonCount": 1,
+    "profileName": "Pixel8",
+    "downloadStatus": "Completed",
+    "downloadedBytes": 2002704356,
+    "actualFileBytes": 2002704356,
+    "addonSettingsUnchanged": true,
+    "downloadContentPreserved": true,
+    "downloadMetadataChangedKeys": [
+      "updatedAtEpochMs"
+    ]
+  },
+  "currentProcessCrashBufferLines": 0,
+  "appForceStopped": true,
+  "mediaTestRepeated": false,
+  "backendChanged": false,
+  "limits": [
+    "Physical repeat used an already-installed test add-on; overlapping completed-fetch race is covered by host tests, not a controlled on-device race.",
+    "Profile switches during a pending fetch remain outside this fix.",
+    "OnePlus physical acceptance and intermittent Pixel 10 connectivity diagnosis remain separate."
+  ]
+}
