@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: afz-nuvio-onn-probe-20261010
