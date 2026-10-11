@@ -1,10 +1,11 @@
 --- a/stremio_catalog.py
 +++ b/stremio_catalog.py
-@@ -9234,7 +9234,12 @@
+@@ -9234,7 +9234,13 @@
  release_search_cache={}
  RELEASE_SEARCH_TTL=300
  external_source_lock=threading.Lock()
 -external_source_cache={'ts':{},'rows':{}}
++external_source_persist_lock=threading.Lock()
 +external_source_cache={'ts':{},'rows':{},'history':{}}
 +# Expired source tokens are opaque identifiers, NOT reusable media URLs.
 +# Retain only bounded release metadata to re-identify the same chosen source.
@@ -14,7 +15,7 @@
  EXTERNAL_SOURCE_CACHE_FILE=STATE_FILE.parent/'external-source-cache.json'
  external_source_refreshing=set()
  EXTERNAL_SOURCE_TTL=120
-@@ -9250,6 +9255,12 @@
+@@ -9250,6 +9256,12 @@
      if isinstance(_esc,dict):
          external_source_cache['ts']={str(k):float(v) for k,v in (_esc.get('ts') or {}).items()}
          external_source_cache['rows']={str(k):[dict(x) for x in (v or []) if isinstance(x,dict)] for k,v in (_esc.get('rows') or {}).items()}
@@ -27,7 +28,7 @@
  except Exception:
      pass
  direct_source_lock=threading.Lock()
-@@ -9417,12 +9428,90 @@
+@@ -9417,19 +9429,100 @@
      # present it must match the selected movie exactly.
      return not years or year in years
  
@@ -109,17 +110,35 @@
 +
  def _persist_external_source_cache():
      try:
-         with external_source_lock:
-             obj={
-                 'ts':dict(external_source_cache.get('ts') or {}),
+-        with external_source_lock:
+-            obj={
+-                'ts':dict(external_source_cache.get('ts') or {}),
 -                'rows':{str(k):[dict(x) for x in (v or []) if isinstance(x,dict)] for k,v in (external_source_cache.get('rows') or {}).items()}
-+                'rows':{str(k):[dict(x) for x in (v or []) if isinstance(x,dict)] for k,v in (external_source_cache.get('rows') or {}).items()},
-+                'history':{str(vid):{str(tok):dict(rec) for tok,rec in (records or {}).items()}
-+                           for vid,records in (external_source_cache.get('history') or {}).items()}
-             }
-         tmp=EXTERNAL_SOURCE_CACHE_FILE.with_suffix('.tmp')
-         tmp.write_text(json.dumps(obj,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
-@@ -9511,7 +9600,10 @@
+-            }
+-        tmp=EXTERNAL_SOURCE_CACHE_FILE.with_suffix('.tmp')
+-        tmp.write_text(json.dumps(obj,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+-        tmp.replace(EXTERNAL_SOURCE_CACHE_FILE)
++        with external_source_persist_lock:
++            with external_source_lock:
++                _external_token_history_compact_locked(time.time())
++                obj={
++                    'ts':dict(external_source_cache.get('ts') or {}),
++                    'rows':{str(k):[dict(x) for x in (v or []) if isinstance(x,dict)] for k,v in (external_source_cache.get('rows') or {}).items()},
++                    'history':{str(vid):{str(tok):dict(rec) for tok,rec in (records or {}).items()}
++                               for vid,records in (external_source_cache.get('history') or {}).items()}
++                }
++            tmp=EXTERNAL_SOURCE_CACHE_FILE.with_name(
++                EXTERNAL_SOURCE_CACHE_FILE.name+'.'+str(threading.get_ident())+'.tmp'
++            )
++            tmp.write_text(json.dumps(obj,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
++            tmp.replace(EXTERNAL_SOURCE_CACHE_FILE)
+     except Exception:
+         pass
+-
+ 
+ def external_source_rows(vid,force=False):
+     vid=str(vid or '')
+@@ -9511,7 +9604,10 @@
              })
          clean.sort(key=lambda x:(x['resolution'],1 if x['cached'] else 0,x['size']),reverse=True)
          with external_source_lock:
@@ -131,7 +150,7 @@
              external_source_cache.setdefault('rows',{})[vid]=[dict(x) for x in clean]
          _persist_external_source_cache()
          return clean
-@@ -12278,6 +12370,28 @@
+@@ -12278,6 +12374,28 @@
      timeout=4 if FAILOVER_MODE else 20
      data=h3_order_call('GET',f'/external-resolve?token={qtok}&imdb={qimdb}',timeout)
      url=str(data.get('url') or '') if isinstance(data,dict) and data.get('ok') else ''
