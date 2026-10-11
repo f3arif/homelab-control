@@ -1,0 +1,54 @@
+{
+  "status": "pixel10_healthy_baseline_external_capture_running",
+  "capturedAt": "2026-10-11T05:05:00.907977+00:00",
+  "device": "Pixel 10 Pro XL",
+  "serial": "58211FDCQ003VJ",
+  "tailscaleVersion": "1.102.4-t3caf7d9e7-g1b32d3caa",
+  "currentTailnetIp": "100.68.144.42",
+  "oldPixelPeerIp": "100.89.51.97",
+  "oldPixelPeerLastSeen": "2026-10-08T15:36:56.1Z",
+  "currentTailscaleVpnCount": 1,
+  "phoneSettings": {
+    "private_dns_mode": "null",
+    "private_dns_specifier": "null",
+    "airplane_mode_on": "0",
+    "wifi_on": "1",
+    "mobile_data": "1",
+    "always_on_vpn_app": "null",
+    "always_on_vpn_lockdown": "null"
+  },
+  "tailscaleInDeviceIdleWhitelist": true,
+  "phoneToH3TailnetPingPassed": true,
+  "publicDnsResolved": true,
+  "publicIcmpPingPassed": true,
+  "h3Health": [],
+  "baselineLogSignals": {
+    "dnsFailures": 0,
+    "derpFailures": 0,
+    "networkFailures": 0,
+    "fatal": 0
+  },
+  "externalCapture": {
+    "taskName": "AFZ Pixel10 Connectivity Capture 20261011",
+    "triggerCount": 0,
+    "status": "running",
+    "startedAt": "2026-10-11T05:07:15.192296+00:00",
+    "durationSeconds": 600,
+    "intervalSeconds": 30,
+    "samplesAtCheckpoint": 4,
+    "failuresAtCheckpoint": 0,
+    "requiresUsbConnection": true,
+    "hardRuntimeLimitMinutes": 12,
+    "automaticRestart": false
+  },
+  "settingsChanged": false,
+  "appReinstalled": false,
+  "rootCauseConfirmed": false,
+  "limits": [
+    "Healthy baseline does not diagnose the intermittent failure.",
+    "USB connection and charging can affect sleep-related behavior.",
+    "Periodic capture records VPN, process, peer and logs; it does not continuously test every application's DNS or playback.",
+    "Old duplicate peer is not the current phone address.",
+    "Raw network dumps, tailnet inventories and device logs are private and excluded from Git."
+  ]
+}
