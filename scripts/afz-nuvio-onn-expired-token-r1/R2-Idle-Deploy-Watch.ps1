@@ -83,6 +83,15 @@ try {
   }catch{
     Set-WatchStatus 'DISARMED' 'Catalog baseline unhealthy or unexpected';Stop-Watch;return
   }
+  # Protect live HLS/media sessions that can use short HTTP connections.
+  # Log bytes from the quiet observation window are only inspected locally;
+  # signed media URLs, token values and request paths are never printed.
+  $accessLog=Join-Path $root 'uvicorn-243.log'
+  if(-not(Test-Path -LiteralPath $accessLog -PathType Leaf)){
+    Set-WatchStatus 'WAITING_FOR_QUIET' 'Unable to verify recent media routes; catalog access log missing'
+    return
+  }
+  $startSize=(Get-Item -LiteralPath $accessLog).Length
   # A true quiet interval avoids a restart during an existing H3 local/edge stream.
   for($i=0;$i -lt 15;$i++){
     $sessions=ActiveSessions
@@ -98,7 +107,37 @@ try {
     Set-WatchStatus 'WAITING_FOR_QUIET' 'Connection appeared after 30-second quiet interval' $sessions.Count
     return
   }
-  Set-WatchStatus 'DEPLOY_IN_PROGRESS' '30-second network quiet gate passed; invoking guarded deploy'
+  # The catalog may be serving brief live sports HLS/segment requests even
+  # when the TCP snapshot is empty. Fail closed if any new media route was
+  # served in the same 30-second observation window.
+  if(-not $DryRun){
+    try{
+      $endSize=(Get-Item -LiteralPath $accessLog).Length
+      $delta=[long]($endSize-$startSize)
+      if($delta -lt 0 -or $delta -gt 1024*1024){
+        Set-WatchStatus 'WAITING_FOR_QUIET' 'Catalog log rotated or too much unclassified traffic'
+        return
+      }
+      if($delta -gt 0){
+        $fs=[IO.File]::Open($accessLog,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+        try{
+          $fs.Seek($startSize,[IO.SeekOrigin]::Begin)|Out-Null
+          $bytes=New-Object byte[] ([int]$delta)
+          $n=$fs.Read($bytes,0,[int]$delta)
+          $added=[Text.Encoding]::UTF8.GetString($bytes,0,$n)
+          $media='(?i)"(?:GET|HEAD)\s+/(?:sports-proxy/(?:hls|segment)/|auto-stream/|external-stream/|direct-stream/|provider-stream/|tv-media/|media/)[^\s]*\s+HTTP/'
+          if([regex]::IsMatch($added,$media)){
+            Set-WatchStatus 'WAITING_FOR_QUIET' 'Recent HLS/media request during quiet interval'
+            return
+          }
+        }finally{$fs.Dispose()}
+      }
+    }catch{
+      Set-WatchStatus 'WAITING_FOR_QUIET' 'Cannot classify media traffic safely; no deployment'
+      return
+    }
+  }
+  Set-WatchStatus 'DEPLOY_IN_PROGRESS' '30-second network and media-route quiet gates passed; invoking guarded deploy'
   $output=(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $deploy -Apply 2>&1|Out-String)
   $exitCode=$LASTEXITCODE
   $current=if(Test-Path -LiteralPath $lastReceipt){Get-Content -LiteralPath $lastReceipt -Raw|ConvertFrom-Json}else{$null}
