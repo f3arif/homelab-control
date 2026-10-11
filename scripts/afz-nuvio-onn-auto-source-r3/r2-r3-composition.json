@@ -1,0 +1,11 @@
+{
+  "status": "STAGED",
+  "created_utc": "2026-10-11T06:19:25.235612+00:00",
+  "r2_baseline_sha": "3dab113e23725a39401f8ba3c619b9eb0b6cd5eec47a0f677df2dc84404a74a5",
+  "r3_standalone_sha": "2e5b2c55967b31cd8eb149c9291ca12b5246d34ce80bd4cc276f21ea1654f013",
+  "composed_sha": "2b7a5b73392f21b99ee4b2234062b4d75c7118fd6f7fecc0d841f32691ae6572",
+  "composed_patch_lines": 99,
+  "ast_parse": "PASS",
+  "current_live_source_sha": "d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f",
+  "live_changed": false
+}
