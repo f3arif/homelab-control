@@ -39,11 +39,23 @@ jobs:
           echo '=== H3 TAILSCALE PING ==='
           timeout 14 tailscale ping --c 1 --timeout 6s 100.106.186.118 2>&1 | tail -5
           echo "H3_TS_PING_STATUS=${PIPESTATUS[0]}"
+          echo '=== H3/HP READ-ONLY SERVICE HTTP STATUS ==='
+          for url in \
+            'https://desktop-h3r6cqn.tailc9bb62.ts.net:18768/health' \
+            'http://100.106.186.118:18768/health' \
+            'https://desktop-h3r6cqn.tailc9bb62.ts.net:10000/health' \
+            'http://100.71.26.69:8789/health'; do
+            code=$(curl -k -sS --connect-timeout 3 --max-time 6 --output /dev/null --write-out '%{http_code}' "$url" 2>/dev/null)
+            echo "SERVICE_HOSTPORT=${url%%/health} HTTP=${code}"
+          done
+          echo '=== GITHUB RUNNER TO ONN LAN ROUTE (READ ONLY) ==='
+          ip -4 route get 192.168.50.31 | head -1
+          timeout 3 bash -c '>/dev/tcp/192.168.50.31/5555' 2>/dev/null && echo 'TV_ADB_TCP_FROM_RUNNER=OPEN' || echo 'TV_ADB_TCP_FROM_RUNNER=UNREACHABLE'
           echo '=== HP SSH READ-ONLY TV LAN PROBE ==='
-          timeout 25 tailscale ssh coolyo@100.71.26.69 'echo HP_SSH_OK; hostname; echo TV_PING; ping -c 1 -W 2 192.168.50.31 || true; echo TV_TCP5555; timeout 4 bash -c ">/dev/tcp/192.168.50.31/5555" && echo TV_ADB_TCP_OPEN || echo TV_ADB_TCP_CLOSED; echo HP_LAN_ROUTE; ip -4 route get 192.168.50.31 | head -1' 2>&1 | tail -18
+          timeout 8 tailscale ssh coolyo@100.71.26.69 'echo HP_SSH_OK; hostname; echo TV_PING; ping -c 1 -W 2 192.168.50.31 || true; echo TV_TCP5555; timeout 4 bash -c ">/dev/tcp/192.168.50.31/5555" && echo TV_ADB_TCP_OPEN || echo TV_ADB_TCP_CLOSED; echo HP_LAN_ROUTE; ip -4 route get 192.168.50.31 | head -1' 2>&1 | tail -18
           echo "HP_SSH_STATUS=${PIPESTATUS[0]}"
           echo '=== H3 SSH READ-ONLY TV LAN PROBE ==='
-          timeout 25 tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "Write-Output H3_SSH_OK; Write-Output TV_TCP5555; Test-NetConnection -ComputerName 192.168.50.31 -Port 5555 -InformationLevel Quiet -WarningAction SilentlyContinue"' 2>&1 | tail -14
+          timeout 8 tailscale ssh Faiz@100.106.186.118 'powershell.exe -NoProfile -NonInteractive -Command "Write-Output H3_SSH_OK; Write-Output TV_TCP5555; Test-NetConnection -ComputerName 192.168.50.31 -Port 5555 -InformationLevel Quiet -WarningAction SilentlyContinue"' 2>&1 | tail -14
           echo "H3_SSH_STATUS=${PIPESTATUS[0]}"
           echo "PROBE_DONE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
