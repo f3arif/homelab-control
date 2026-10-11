@@ -38,3 +38,23 @@ Only deploy when live file SHA and candidate SHA match, no active stream clients
 Repeat **60 seconds of uninterrupted non-AFZ-Local movie playback** on the onn 4K box using the original Nuvio package `com.nuvio.tv`, preserving AFZ account and watch history; prefer smaller cached TorBox/Comet sources. Any persistent Debridio timeout/503 requires a separate provider-aware routing investigation.
 
 Tracked in [Issue #265](https://github.com/f3arif/homelab-control/issues/265) and Draft PR #267.
+
+
+## 2026-10-11: External H3 idle-window deployment watch (ARMED; not live yet)
+
+The bounded Windows Task Scheduler task **AFZ Nuvio R2 Safe Idle Deploy** is registered on H3 as the existing interactive Windows user. It checks every five minutes for eight hours. The frozen UTC deadline is **2026-10-11T13:10:22Z**; do not silently extend that deadline.
+
+- Every attempt verifies the original H3 production source SHA and the exact tested candidate SHA. Any hash drift disarms the task.
+- It checks the catalog manifest, requires **30 continuous seconds with no established connections on ports 18774, 8445 or 10000**, then invokes the existing guarded Deploy-Expired-Token-R2.ps1 -Apply. The installer independently repeats its active-connection check and has rollback support.
+- Busy connections cause a non-destructive **WAITING_FOR_QUIET** result. Errors or mismatched files disarm the task. A deployed-and-smoke-verified receipt also disarms it.
+- Local H3 records: R2-Idle-Deploy-Watch.ps1, r2-idle-watch-config.json, r2-idle-watch-status.json and (only if applied) r2-deployment-result.json, all in the staging folder.
+- This automation runs locally on H3, not in this chat, and depends on the configured interactive Windows user being able to run scheduled tasks. It does not install a new TV app or modify accounts, Tailscale, or media storage.
+- The initial actual run returned **WAITING_FOR_QUIET**. H3 source remained SHA d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f, catalog HTTP 200, and the deployment backup did not exist.
+
+**To inspect:** On H3 PowerShell, use Get-ScheduledTask -TaskName 'AFZ Nuvio R2 Safe Idle Deploy' and Get-Content -Raw on the local r2-idle-watch-status.json.
+
+**To stop retries:** Disable-ScheduledTask -TaskName 'AFZ Nuvio R2 Safe Idle Deploy'.
+
+**Reproducibility:** Apply the Git patch with git -c core.autocrlf=false apply. Plain git apply with the Windows global core.autocrlf=true writes CRLF output, so its file hash differs from the tested LF-only candidate despite identical normalized source text. Verify-R2-Package.py checks original and candidate SHA, recreates the patched file with core.autocrlf=false and checks its exact bytes. Verified: byte-exact patch reproduction, 23/23 isolated tests and 2/2 H3 bridge integration tests.
+
+**Postdeployment evidence:** Verify local receipt status DEPLOYED_AND_SMOKE_VERIFIED, R2 candidate SHA 3dab113e23725a39401f8ba3c619b9eb0b6cd5eec47a0f677df2dc84404a74a5, local/LAN manifest HTTP 200 and TV nonlocal playback. An armed task or successful Task Scheduler invocation alone does not prove deployment.
