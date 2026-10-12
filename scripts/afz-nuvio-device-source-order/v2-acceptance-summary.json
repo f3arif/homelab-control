@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "checked_utc": "2026-10-12T04:52:13.867118+00:00",
+  "test_count": 187,
+  "all_checks_pass": true,
+  "devices": [
+    "OnePlus",
+    "Pixel10",
+    "Pixel8",
+    "onn 4K TV",
+    "unknown desktop"
+  ],
+  "movies": [
+    "Runway 34",
+    "Spider-Man: Brand New Day",
+    "Tenet",
+    "Insidious: Out of the Further"
+  ],
+  "runway34_phone_best": {
+    "label": "AFZ Play Best",
+    "resolution": "1080p",
+    "display_size": "3.3 GB",
+    "source": "TorBox / Comet",
+    "cached": true
+  },
+  "runway34_tv_best": {
+    "label": "AFZ Play Best",
+    "resolution": "2160p",
+    "display_size": "15.9 GB"
+  },
+  "other_playback_links_preserved": true,
+  "original_media_code_sha": "d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f",
+  "device_stream_order_v2_sha": "1c144432e242c42027eb00dc8841aeb9c5f3930863ea434de326829e447ac3be",
+  "source_lists_only": true,
+  "media_files_modified": false,
+  "physical_oneplus_screen_acceptance": "PENDING"
+}
