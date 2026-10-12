@@ -1,0 +1,31 @@
+{
+  "status": "completed_no_fault_observed",
+  "reviewedAt": "2026-10-12T17:56:42.968796+00:00",
+  "startedAt": "2026-10-11T05:07:15.192296+00:00",
+  "finishedAt": "2026-10-11T05:17:15.187926+00:00",
+  "device": "Pixel 10 Pro XL",
+  "serial": "58211FDCQ003VJ",
+  "samples": 20,
+  "allUsbVerified": true,
+  "allPeerOnline": true,
+  "allExactlyOneTailscaleVpn": true,
+  "sameTailscalePid": true,
+  "allH3Running": true,
+  "allH3HealthEmpty": true,
+  "allLogCapturesPassed": true,
+  "logPatternOccurrences": {
+    "dnsFailures": 0,
+    "derpFailures": 0,
+    "networkFailures": 0,
+    "fatal": 0
+  },
+  "phoneSettingsChanged": false,
+  "rootCauseConfirmed": false,
+  "fixed": false,
+  "limits": [
+    "Only a bounded 10-minute observation with USB connected.",
+    "Overlapping log windows can repeat entries; pattern counts are not unique event counts.",
+    "No continuous DNS/application-playback probe or controlled sleep/cellular-transition test.",
+    "Current H3 shared ADB server (5037) has no connected phone; Pixel 10 USB is absent."
+  ]
+}
