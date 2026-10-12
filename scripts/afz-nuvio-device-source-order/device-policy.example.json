@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "purpose": "Local-only device classification overrides; do not publish actual private peer IP addresses",
+  "phone": [],
+  "tv": [],
+  "unknown_behavior": "pass original stream order through unchanged"
+}
