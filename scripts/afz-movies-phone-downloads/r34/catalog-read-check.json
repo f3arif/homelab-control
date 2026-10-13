@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-10-13T20:50:57Z",
+  "mode": "read-only server catalog API; not device login validation",
+  "results": [
+    {
+      "path": "/api/v1/discover/trending",
+      "status": 200,
+      "results": 20
+    },
+    {
+      "path": "/api/v1/discover/movies",
+      "status": 200,
+      "results": 20
+    },
+    {
+      "path": "/api/v1/discover/tv",
+      "status": 200,
+      "results": 20
+    },
+    {
+      "path": "/api/v1/discover/movies/upcoming",
+      "status": 200,
+      "results": 20
+    }
+  ]
+}

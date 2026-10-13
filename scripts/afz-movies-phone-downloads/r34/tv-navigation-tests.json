@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "environment": "Node VM with deterministic DOM geometry; not a browser/device test",
+  "checks": 9,
+  "results": [
+    "right across poster row",
+    "down keeps column",
+    "left across second row",
+    "up keeps column",
+    "Enter activates focused poster",
+    "input editing retains native keys",
+    "reinjection does not duplicate handlers or styling",
+    "top boundary returns to native toolbar",
+    "one visible focus indicator"
+  ]
+}
