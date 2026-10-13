@@ -153,7 +153,7 @@ index 0000000..e547063
 +}
 diff --git a/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
 new file mode 100644
-index 0000000..f04ecef
+index 0000000..2a4735a
 --- /dev/null
 +++ b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
 @@ -0,0 +1,277 @@
@@ -338,7 +338,7 @@ index 0000000..f04ecef
 +                                            poster = poster?.let { "https://image.tmdb.org/t/p/w500$it" })
 +                                    }
 +                                }
-+                                if (alive && activeNow) openTitle?.invoke(preview)
++                                if (alive && activeNow && currentTitle == title) openTitle?.invoke(preview)
 +                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
 +                                throw cancelled
 +                            } catch (failure: Exception) {
@@ -434,6 +434,23 @@ index 0000000..f04ecef
 +        dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
 +    )
 +}
+diff --git a/composeApp/src/commonMain/composeResources/values/strings_account_linking.xml b/composeApp/src/commonMain/composeResources/values/strings_account_linking.xml
+new file mode 100644
+index 0000000..501de26
+--- /dev/null
++++ b/composeApp/src/commonMain/composeResources/values/strings_account_linking.xml
+@@ -0,0 +1,11 @@
++<resources>
++    <string name="settings_account_linking_title">Account linking details</string>
++    <string name="settings_account_linking_description">Verify your signed-in account to show its account UUID and authentication server. These identifiers do not grant access.</string>
++    <string name="settings_account_linking_verify">Verify account details</string>
++    <string name="settings_account_linking_verifying">Verifying account…</string>
++    <string name="settings_account_linking_uuid">Account UUID</string>
++    <string name="settings_account_linking_origin">Account server origin</string>
++    <string name="settings_account_linking_copy">Copy linking details</string>
++    <string name="settings_account_linking_copied">Linking details copied</string>
++    <string name="settings_account_linking_failed">Could not verify this account. Check your connection and try again.</string>
++</resources>
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt
 index 76a862a..e1342cf 100644
 --- a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt
@@ -532,6 +549,95 @@ index 1032903..dd53e41 100644
                          NavItem(
                              selected = selectedTab == AppScreenTab.Search,
                              onClick = { onTabSelected(AppScreenTab.Search) },
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/core/auth/AccountLinkingDetails.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/core/auth/AccountLinkingDetails.kt
+new file mode 100644
+index 0000000..400c4a9
+--- /dev/null
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/core/auth/AccountLinkingDetails.kt
+@@ -0,0 +1,83 @@
++package com.nuvio.app.core.auth
++
++import com.nuvio.app.core.network.ServerConfigurationRepository
++import com.nuvio.app.core.network.SupabaseProvider
++import io.github.jan.supabase.auth.auth
++import io.ktor.http.Url
++import kotlinx.coroutines.withTimeout
++
++/** Public identifiers only. Never include session material in the copy payload. */
++data class AccountLinkingDetails(val accountId: String, val serverOrigin: String, val email: String) {
++    fun copyText(): String = "Account UUID: $accountId\nAccount server origin: $serverOrigin"
++}
++
++internal data class AccountLinkingScope(
++    val accountId: String,
++    val email: String?,
++    val anonymous: Boolean,
++    val serverUrl: String,
++    val clientServerUrl: String = serverUrl,
++)
++internal data class AccountLinkingUser(val accountId: String, val email: String?, val anonymous: Boolean, val emailConfirmed: Boolean)
++
++/** The configured authentication origin, not a web page or a profile identifier. */
++internal fun accountServerOrigin(serverUrl: String): String {
++    require(serverUrl.isNotEmpty() && serverUrl.none { it.isWhitespace() || it == '\\' })
++    val url = Url(serverUrl)
++    require(url.protocol.name == "https" && url.host.isNotBlank())
++    require(url.user == null && url.password == null && url.parameters.isEmpty() && url.fragment.isEmpty())
++    require(url.encodedPath.isEmpty() || url.encodedPath == "/")
++    val host = url.host.lowercase().let { if (':' in it && !it.startsWith('[')) "[$it]" else it }
++    return "https://$host" + if (url.port == 443) "" else ":${url.port}"
++}
++
++internal class AccountLinkingDetailsReader(
++    private val currentScope: () -> AccountLinkingScope?,
++    private val retrieveUser: suspend () -> AccountLinkingUser,
++) {
++    suspend fun verify(): AccountLinkingDetails {
++        val before = checkNotNull(currentScope())
++        require(!before.anonymous && uuid.matches(before.accountId) && !before.email.isNullOrBlank())
++        val origin = accountServerOrigin(before.serverUrl)
++        check(accountServerOrigin(before.clientServerUrl) == origin) { "Account client server changed" }
++        val remote = retrieveUser()
++        check(currentScope() == before) { "Account or server changed" }
++        require(!remote.anonymous && remote.emailConfirmed && remote.accountId == before.accountId)
++        require(remote.email?.equals(before.email, ignoreCase = true) == true)
++        return AccountLinkingDetails(remote.accountId, origin, checkNotNull(remote.email))
++    }
++
++    private companion object {
++        val uuid = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
++    }
++}
++
++object AccountLinkingRepository {
++    /** Explicit read-only user lookup through the existing authenticated SDK client.
++     * Existing configured fallback routing stays within the app's account server setup;
++     * the exported origin is always the selected canonical backend configuration.
++     * No token parsing, storage, new login, account mutation or enrollment occurs here.
++     */
++    suspend fun verify(): AccountLinkingDetails {
++        val server = ServerConfigurationRepository.active.value
++        val client = SupabaseProvider.client
++        return AccountLinkingDetailsReader(
++            currentScope = {
++                val account = AuthRepository.state.value as? AuthState.Authenticated
++                if (account == null || ServerConfigurationRepository.active.value != server || SupabaseProvider.client !== client) null
++                else AccountLinkingScope(account.userId, account.email, account.isAnonymous, server.backendUrl, client.supabaseHttpUrl)
++            },
++            retrieveUser = {
++                val user = withTimeout(15_000) { client.auth.retrieveUserForCurrentSession(false) }
++                AccountLinkingUser(user.id, user.email, user.isAnonymous != false, user.emailConfirmedAt != null)
++            },
++        ).verify()
++    }
++
++    fun isCurrent(details: AccountLinkingDetails): Boolean {
++        val account = AuthRepository.state.value as? AuthState.Authenticated ?: return false
++        return !account.isAnonymous && account.userId == details.accountId &&
++            account.email?.equals(details.email, ignoreCase = true) == true &&
++            runCatching { accountServerOrigin(ServerConfigurationRepository.active.value.backendUrl) }.getOrNull() == details.serverOrigin
++    }
++}
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.kt
 new file mode 100644
 index 0000000..734c84e
@@ -552,6 +658,250 @@ index 0000000..734c84e
 +    onOpenTitle: ((MetaPreview) -> Unit)?,
 +    modifier: Modifier = Modifier,
 +)
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/settings/AccountSettingsPage.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/settings/AccountSettingsPage.kt
+index 77e06eb..17c25a9 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/settings/AccountSettingsPage.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/settings/AccountSettingsPage.kt
+@@ -20,6 +20,8 @@ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalClipboardManager
++import androidx.compose.ui.text.AnnotatedString
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.style.TextAlign
+ import androidx.compose.ui.text.style.TextOverflow
+@@ -27,13 +29,18 @@ import androidx.compose.ui.unit.dp
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import com.nuvio.app.core.auth.AuthRepository
+ import com.nuvio.app.core.auth.AuthState
++import com.nuvio.app.core.auth.AccountLinkingDetails
++import com.nuvio.app.core.auth.AccountLinkingRepository
+ import com.nuvio.app.core.build.AppFeaturePolicy
++import com.nuvio.app.core.network.ServerConfigurationRepository
+ import com.nuvio.app.core.ui.NuvioPrimaryButton
+ import com.nuvio.app.core.ui.NuvioStatusModal
+ import com.nuvio.app.core.ui.NuvioSurfaceCard
+ import com.nuvio.app.core.ui.NuvioTokens
+ import com.nuvio.app.core.ui.nuvio
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.TimeoutCancellationException
+ import nuvio.composeapp.generated.resources.Res
+ import nuvio.composeapp.generated.resources.action_cancel
+ import nuvio.composeapp.generated.resources.compose_settings_page_account
+@@ -50,6 +57,15 @@ import nuvio.composeapp.generated.resources.settings_account_sign_out_confirm_ti
+ import nuvio.composeapp.generated.resources.settings_account_status
+ import nuvio.composeapp.generated.resources.settings_account_status_anonymous
+ import nuvio.composeapp.generated.resources.settings_account_status_signed_in
++import nuvio.composeapp.generated.resources.settings_account_linking_title
++import nuvio.composeapp.generated.resources.settings_account_linking_description
++import nuvio.composeapp.generated.resources.settings_account_linking_verify
++import nuvio.composeapp.generated.resources.settings_account_linking_verifying
++import nuvio.composeapp.generated.resources.settings_account_linking_uuid
++import nuvio.composeapp.generated.resources.settings_account_linking_origin
++import nuvio.composeapp.generated.resources.settings_account_linking_copy
++import nuvio.composeapp.generated.resources.settings_account_linking_copied
++import nuvio.composeapp.generated.resources.settings_account_linking_failed
+ import org.jetbrains.compose.resources.stringResource
+ 
+ internal fun LazyListScope.accountSettingsContent(
+@@ -112,6 +128,10 @@ private fun AccountSettingsBody(
+             }
+         }
+ 
++        if ((authState as? AuthState.Authenticated)?.isAnonymous == false) {
++            AccountLinkingCard(authState)
++        }
++
+         NuvioPrimaryButton(
+             text = stringResource(Res.string.settings_account_sign_out),
+             onClick = { showSignOutConfirm = true },
+@@ -172,6 +192,84 @@ private fun AccountSettingsBody(
+     )
+ }
+ 
++@Composable
++private fun AccountLinkingCard(authState: AuthState) {
++    val server by ServerConfigurationRepository.active.collectAsStateWithLifecycle()
++    val scope = rememberCoroutineScope()
++    val clipboard = LocalClipboardManager.current
++    // Nothing is persisted; switching account/server discards displayed verification.
++    var details by remember(authState, server) { mutableStateOf<AccountLinkingDetails?>(null) }
++    var busy by remember(authState, server) { mutableStateOf(false) }
++    var failed by remember(authState, server) { mutableStateOf(false) }
++    var copied by remember(authState, server) { mutableStateOf(false) }
++
++    NuvioSurfaceCard {
++        Text(stringResource(Res.string.settings_account_linking_title), style = MaterialTheme.typography.titleMedium)
++        Spacer(Modifier.height(8.dp))
++        Text(stringResource(Res.string.settings_account_linking_description), style = MaterialTheme.typography.bodyMedium)
++        details?.let { verified ->
++            Spacer(Modifier.height(12.dp))
++            Text(verified.email, style = MaterialTheme.typography.bodyMedium)
++            Spacer(Modifier.height(8.dp))
++            Text(stringResource(Res.string.settings_account_linking_uuid), style = MaterialTheme.typography.labelMedium)
++            Text(verified.accountId, style = MaterialTheme.typography.bodyMedium)
++            Spacer(Modifier.height(8.dp))
++            Text(stringResource(Res.string.settings_account_linking_origin), style = MaterialTheme.typography.labelMedium)
++            Text(verified.serverOrigin, style = MaterialTheme.typography.bodyMedium)
++            Spacer(Modifier.height(12.dp))
++            NuvioPrimaryButton(text = stringResource(Res.string.settings_account_linking_copy), onClick = {
++                if (AccountLinkingRepository.isCurrent(verified)) {
++                    val payload = verified.copyText()
++                    copied = runCatching {
++                        clipboard.setText(AnnotatedString(payload))
++                        // Read only immediately after writing our known public payload.
++                        // Unexpected clipboard contents are never displayed or logged.
++                        clipboard.getText()?.text == payload
++                    }.getOrDefault(false)
++                    failed = !copied
++                } else {
++                    details = null
++                    failed = true
++                    copied = false
++                }
++            })
++        }
++        if (failed) {
++            Spacer(Modifier.height(8.dp))
++            // Never display server exception bodies, URLs, headers or session material.
++            Text(stringResource(Res.string.settings_account_linking_failed), color = MaterialTheme.colorScheme.error)
++        }
++        if (copied) {
++            Spacer(Modifier.height(8.dp))
++            Text(stringResource(Res.string.settings_account_linking_copied))
++        }
++        Spacer(Modifier.height(12.dp))
++        NuvioPrimaryButton(
++            text = stringResource(if (busy) Res.string.settings_account_linking_verifying else Res.string.settings_account_linking_verify),
++            enabled = !busy,
++            onClick = {
++                busy = true
++                details = null
++                failed = false
++                copied = false
++                scope.launch {
++                    try {
++                        details = AccountLinkingRepository.verify()
++                    } catch (_: TimeoutCancellationException) {
++                        failed = true
++                    } catch (cancelled: CancellationException) {
++                        throw cancelled
++                    } catch (_: Exception) {
++                        failed = true
++                    } finally {
++                        busy = false
++                    }
++                }
++            },
++        )
++    }
++}
++
+ @Composable
+ private fun DeleteAccountCard(
+     errorMessage: String?,
+diff --git a/composeApp/src/commonTest/kotlin/com/nuvio/app/core/auth/AccountLinkingDetailsTest.kt b/composeApp/src/commonTest/kotlin/com/nuvio/app/core/auth/AccountLinkingDetailsTest.kt
+new file mode 100644
+index 0000000..5593687
+--- /dev/null
++++ b/composeApp/src/commonTest/kotlin/com/nuvio/app/core/auth/AccountLinkingDetailsTest.kt
+@@ -0,0 +1,94 @@
++package com.nuvio.app.core.auth
++
++import io.github.jan.supabase.createSupabaseClient
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.runBlocking
++import kotlin.test.Test
++import kotlin.test.assertEquals
++import kotlin.test.assertFailsWith
++import kotlin.test.assertFalse
++
++class AccountLinkingDetailsTest {
++    private val owner = "8f97ea26-7fb4-4ccd-9ab8-7ea08d693487"
++    private val other = "ab5522a9-34e1-499b-90cc-559512987593"
++    private val scope = AccountLinkingScope(owner, "fixture@example.invalid", false, "https://accounts.example.invalid/")
++    private val user = AccountLinkingUser(owner, scope.email, false, true)
++
++    @Test fun `actual SDK origin includes the scheme before account verification`() = runBlocking<Unit> {
++        // No Auth plugin, session storage or network calls: this tests SDK URL semantics.
++        val client = createSupabaseClient("https://fixture.accounts.invalid:8443", "fixture-publishable-key") {}
++        try {
++            assertEquals("fixture.accounts.invalid:8443", client.supabaseUrl)
++            assertEquals("https://fixture.accounts.invalid:8443", client.supabaseHttpUrl)
++            assertFailsWith<IllegalArgumentException> { accountServerOrigin(client.supabaseUrl) }
++            val binding = scope.copy(serverUrl = client.supabaseHttpUrl, clientServerUrl = client.supabaseHttpUrl)
++            assertEquals(client.supabaseHttpUrl, AccountLinkingDetailsReader({ binding }, { user }).verify().serverOrigin)
++        } finally {
++            client.close()
++        }
++    }
++
++    @Test fun `verified account exports only public identifiers`() = runBlocking<Unit> {
++        val details = AccountLinkingDetailsReader({ scope }, { user }).verify()
++        assertEquals(owner, details.accountId)
++        assertEquals("https://accounts.example.invalid", details.serverOrigin)
++        assertEquals("Account UUID: $owner\nAccount server origin: https://accounts.example.invalid", details.copyText())
++        assertFalse(details.copyText().contains(scope.email!!))
++    }
++
++    @Test fun `signed out fails without a network lookup`() = runBlocking<Unit> {
++        assertFailsWith<IllegalStateException> { AccountLinkingDetailsReader({ null }, { error("Must not call") }).verify() }
++    }
++
++    @Test fun `anonymous profile identifiers and unsafe origins fail before lookup`() = runBlocking<Unit> {
++        for (invalid in listOf(scope.copy(anonymous = true), scope.copy(accountId = "1"), scope.copy(email = null), scope.copy(serverUrl = "https://accounts.example.invalid/?access_token=secret"))) {
++            assertFailsWith<IllegalArgumentException> { AccountLinkingDetailsReader({ invalid }, { error("Must not call") }).verify() }
++        }
++    }
++
++    @Test fun `a stale client for a previous server fails before lookup`() = runBlocking<Unit> {
++        val invalid = scope.copy(clientServerUrl = "https://previous.example.invalid")
++        var lookups = 0
++        assertFailsWith<IllegalStateException> { AccountLinkingDetailsReader({ invalid }, { lookups++; user }).verify() }
++        assertEquals(0, lookups)
++    }
++
++    @Test fun `another authenticated owner is rejected`() = runBlocking<Unit> {
++        assertFailsWith<IllegalArgumentException> { AccountLinkingDetailsReader({ scope }, { user.copy(accountId = other) }).verify() }
++    }
++
++    @Test fun `anonymous unconfirmed or mismatched remote identity is rejected`() = runBlocking<Unit> {
++        for (remote in listOf(user.copy(anonymous = true), user.copy(emailConfirmed = false), user.copy(email = "other@example.invalid"), user.copy(email = null))) {
++            assertFailsWith<IllegalArgumentException> { AccountLinkingDetailsReader({ scope }, { remote }).verify() }
++        }
++    }
++
++    @Test fun `account change during the request discards the response`() = runBlocking<Unit> {
++        var current: AccountLinkingScope? = scope
++        val reader = AccountLinkingDetailsReader({ current }, { current = scope.copy(accountId = other); user })
++        assertFailsWith<IllegalStateException> { reader.verify() }
++    }
++
++    @Test fun `server change or logout during the request discards the response`() = runBlocking<Unit> {
++        for (changed in listOf(scope.copy(serverUrl = "https://other.example.invalid"), null)) {
++            var current: AccountLinkingScope? = scope
++            assertFailsWith<IllegalStateException> { AccountLinkingDetailsReader({ current }, { current = changed; user }).verify() }
++        }
++    }
++
++    @Test fun `offline failure never returns cached identifiers`() = runBlocking<Unit> {
++        assertFailsWith<IllegalStateException> { AccountLinkingDetailsReader({ scope }, { error("offline") }).verify() }
++    }
++
++    @Test fun `cancellation is preserved`() = runBlocking<Unit> {
++        assertFailsWith<CancellationException> { AccountLinkingDetailsReader({ scope }, { throw CancellationException() }).verify() }
++    }
++
++    @Test fun `origin preserves explicit port and excludes page paths`() {
++        assertEquals("https://accounts.example.invalid:8443", accountServerOrigin("https://ACCOUNTS.example.invalid:8443/"))
++        assertEquals("https://accounts.example.invalid", accountServerOrigin("https://accounts.example.invalid:443"))
++        for (url in listOf("http://accounts.example.invalid", "https://accounts.example.invalid/account", "https://user:password@accounts.example.invalid", "https://accounts.example.invalid/?access_token=secret", "https://accounts.example.invalid/#secret", "https://accounts.example.invalid/ ", "https://accounts.example.invalid\\other")) {
++            assertFailsWith<IllegalArgumentException>(url) { accountServerOrigin(url) }
++        }
++    }
++}
 diff --git a/composeApp/src/iosMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.ios.kt b/composeApp/src/iosMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.ios.kt
 new file mode 100644
 index 0000000..ac6bb35
@@ -571,11 +921,96 @@ index 0000000..ac6bb35
 +actual fun SeerrScreen(profileId: Int?, onOpenTitle: ((MetaPreview) -> Unit)?, modifier: Modifier) {
 +    Text("Discover & Requests is available in the Android preview.", modifier)
 +}
+diff --git a/docs/remote-downloads/PHONE-ACCOUNT-LINKING.md b/docs/remote-downloads/PHONE-ACCOUNT-LINKING.md
+new file mode 100644
+index 0000000..2e19371
+--- /dev/null
++++ b/docs/remote-downloads/PHONE-ACCOUNT-LINKING.md
+@@ -0,0 +1,42 @@
++# Read-only phone account linking details
++
++The current Nuvio web Account overview and `get_sync_overview` response show email,
++profile identifiers and aggregate sync counts. A profile key such as `1` is not an
++account UUID. Neither the account UUID nor the authentication server origin has
++been established from the owner's screenshots. `nuvio.tv` is the displayed website,
++not evidence of the selected authentication backend. No issuer is guessed from defaults.
++
++The isolated native Account page now includes a signed-in-only **Account linking
++details** card. After an approved compatible app update, the phone flow is:
++
++1. Open **Settings → Account → Account linking details**.
++2. Tap **Verify account details** while online.
++3. Check the returned account email, then tap **Copy linking details**.
++4. Paste the two public fields into the approval discussion: Account UUID and
++   Account server origin. These identifiers alone neither enroll a device nor grant access.
++
++Verification uses the existing Supabase client's read-only
++`retrieveUserForCurrentSession(false)` lookup, with a 15-second bound. No new API,
++login, token decoding, credential export, account mutation or device registration is
++needed. It requires a matching non-anonymous user, confirmed email and valid UUID.
++It requires the SDK client's configured origin to match the selected server and
++checks account/server/client identity before and after the request. It fails
++closed on offline or mismatched results. Displayed data is not persisted; account
++or server changes discard it. Error UI never prints exception bodies or headers.
++
++The exported origin is the **selected canonical backend configuration**, normalized
++to HTTPS scheme/host/port. It excludes paths, URL credentials, query and fragment;
++unexpected backend paths fail closed. The app's existing configured fallback routing
++may service the authenticated lookup and is not changed. The card does not claim the
++browser's website domain or a contacted fallback is the canonical issuer. The backend
++will still independently verify the owner's account against the approved issuer.
++
++The copy payload contains exactly the two requested identifiers; the account email
++is displayed only for confirmation. Copying requires an explicit tap and checks that
++the displayed account/origin still matches the active account. No sharing intent,
++clipboard write on page load, session storage read or network access grant is added.
++
++This UI is source-only until a separately approved update to one named phone with
++its verified matching package/signing identity. No APK was packaged, signed or
++installed for this change, and no real identity was retrieved. The existing app,
++profiles, downloads, approved origin configuration and receiver consent are preserved.
+diff --git a/docs/remote-downloads/R33-METADATA-UPDATE.md b/docs/remote-downloads/R33-METADATA-UPDATE.md
+new file mode 100644
+index 0000000..1996dd9
+--- /dev/null
++++ b/docs/remote-downloads/R33-METADATA-UPDATE.md
+@@ -0,0 +1,31 @@
++# Approved Pixel 10 Pro XL account-details test update
++
++The owner approved preparing/installing the Pixel 10 test update on 2026-10-08
++at 10:06 PM America/New_York (2026-10-09 02:06 UTC). The scope is an in-place update,
++matching the existing signer and preserving app data. It excludes account changes,
++receiver enrollment, trust provisioning and receiving deployment.
++
++This delivery branch starts from the exact installed R32 tree
++`321bbf9f290c3e2af4cd00c9115cc022e6e3b062` and adds only the account-details card,
++its verification model/tests/resources and version code 141. The build uses version
++name `0.5.1-afz-r33-account-link`. It does not include the remote receiver changes
++from the separate feature branch. Downloads, phone quality ranking, source links,
++decoder libraries and TV navigation retain the R32 implementation.
++
++The copy action writes exactly the verified Account UUID and Account server origin,
++then immediately compares the foreground clipboard with that known payload before
++showing success. It never reads an existing clipboard before the copy action or
++displays/logs unexpected clipboard data. Verification uses the app's existing
++authenticated read-only user endpoint; anonymous users cannot use the card.
++
++Preflight found installed package `com.afz.nuvio.preview`, version 140,
++`0.5.1-afz-r32`, and byte-identical equality with the retained R32 rollback APK
++(SHA-256 `6595a1962651cda9c87ce8bec83ecf81d088a0eae85e3091df3a98774f66b6e4`).
++Its verified signer certificate SHA-256 is
++`2ead05d67ceb35e59a5f703af7fb17bc93c22e04370ad51ba754bb38e06b2b09`.
++The signer and current device package must be rechecked immediately before install.
++
++Retaining R32 supports recovery; an older version code cannot be assumed to install
++in place on every Android version. Never uninstall or wipe data to force rollback.
++A compatible forward recovery build may be necessary. No rollback is performed as
++part of this update unless it is separately authorized or needed to recover this test.
 diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
-index bde7d32..a8be3cf 100644
+index bde7d32..f0c64d6 100644
 --- a/iosApp/Configuration/Version.xcconfig
 +++ b/iosApp/Configuration/Version.xcconfig
 @@ -1,2 +1,2 @@
 -CURRENT_PROJECT_VERSION=141
-+CURRENT_PROJECT_VERSION = 142
++CURRENT_PROJECT_VERSION = 143
  MARKETING_VERSION=0.5.1
