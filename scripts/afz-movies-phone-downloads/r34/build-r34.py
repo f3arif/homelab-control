@@ -21,7 +21,7 @@ try:
     with (stage/'build.log').open('w') as log:
         save(phase='gradle')
         args=['bash','./gradlew',':androidApp:assembleFullDebug',':composeApp:testAndroidHostTest',
-            '--tests','com.nuvio.app.features.seerr.*','--tests','com.nuvio.app.RootTabHostTest','--tests','com.nuvio.app.features.addons.*','--tests','com.nuvio.app.features.downloads.*','--tests','com.nuvio.app.features.streams.*',
+            '--tests','com.nuvio.app.core.auth.AccountLinkingDetailsTest','--tests','com.nuvio.app.features.seerr.*','--tests','com.nuvio.app.RootTabHostTest','--tests','com.nuvio.app.features.addons.*','--tests','com.nuvio.app.features.downloads.*','--tests','com.nuvio.app.features.streams.*',
             '--tests','com.nuvio.app.features.jellyfin.*','--tests','com.nuvio.app.features.player.PlayerScreenRuntimeStateTest',
             '--no-daemon','--max-workers=1','--no-configuration-cache',
             '--project-cache-dir',str(build_root/'project-cache'),'-I',str(stage/'native-output.init.gradle'),
@@ -36,7 +36,8 @@ try:
         row={k:int(node.attrib.get(k,0)) for k in totals}
         suites[node.attrib['name']]=row
         for k in totals: totals[k]+=row[k]
-    assert totals['tests']>=274 and not any(totals[k] for k in ['failures','errors','skipped']),totals
+    assert suites['com.nuvio.app.core.auth.AccountLinkingDetailsTest']['tests']>=12
+    assert totals['tests']>=294 and not any(totals[k] for k in ['failures','errors','skipped']),totals
     seerr=suites['com.nuvio.app.features.seerr.SeerrPolicyTest']
     assert seerr['tests']==4 and not seerr['failures'] and not seerr['errors']
     addon=suites['com.nuvio.app.features.addons.AddonInstallationTest']
@@ -50,7 +51,7 @@ try:
     apk=apks[0]
     assert signer(apk)==signer(Path('/mnt/c/AFZ/Nuvio-Setup-20260923/R32-phone-first-candidate/AFZ-Movies-R32-phone-first.apk'))
     badging=run([str(tools/'aapt'),'dump','badging',str(apk)])
-    assert "package: name='com.afz.nuvio.preview'" in badging and "versionCode='142'" in badging and "versionName='0.5.1-afz-r34'" in badging,badging[:300]
+    assert "package: name='com.afz.nuvio.preview'" in badging and "versionCode='143'" in badging and "versionName='0.5.1-afz-r34'" in badging,badging[:300]
     out=stage/'AFZ-Movies-R34-seerr-integrated.apk';shutil.copy2(apk,out)
     summary=dict(source,status='build_verified_not_installed',tests=totals,addonTests=addon,phoneTests=phone,
         pickerTests=suites.get('com.nuvio.app.features.streams.DeviceDownloadPickerTest'),
