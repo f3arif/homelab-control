@@ -1,0 +1,14 @@
+# Replace both @...@ placeholders with verified private values before installation.
+# Install as a user unit only after explicit authorization for this private route.
+[Unit]
+Description=AFZ private Sonarr connection to H3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -i @AFZ_H3_SSH_KEY_PATH@ -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -R 127.0.0.1:18801:127.0.0.1:18801 @AFZ_H3_SSH_TARGET@
+Restart=always
+RestartSec=15
+UMask=0077
+
+[Install]
+WantedBy=default.target
