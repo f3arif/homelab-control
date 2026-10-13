@@ -153,10 +153,10 @@ index 0000000..e547063
 +}
 diff --git a/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
 new file mode 100644
-index 0000000..2a4735a
+index 0000000..9e91b9a
 --- /dev/null
 +++ b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
-@@ -0,0 +1,277 @@
+@@ -0,0 +1,287 @@
 +package com.nuvio.app.features.seerr
 +
 +import android.annotation.SuppressLint
@@ -182,6 +182,7 @@ index 0000000..2a4735a
 +import androidx.compose.material3.*
 +import androidx.compose.runtime.*
 +import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clipToBounds
 +import androidx.compose.ui.focus.FocusRequester
 +import androidx.compose.ui.focus.focusRequester
 +import androidx.compose.ui.platform.LocalContext
@@ -274,6 +275,15 @@ index 0000000..2a4735a
 +        browser?.goBack()
 +    }
 +
++    // A stalled network must leave a usable retry screen instead of a blank page.
++    LaunchedEffect(browser, progress, active) {
++        if (active && browser != null && progress in 1..99) {
++            kotlinx.coroutines.delay(30_000)
++            browser?.stopLoading()
++            error = "Requests is taking too long to respond. Check that HP Envy and Tailscale are connected, then try again."
++        }
++    }
++
 +    DisposableEffect(browser, active) {
 +        if (active) browser?.onResume() else browser?.onPause()
 +        onDispose { }
@@ -363,7 +373,7 @@ index 0000000..2a4735a
 +                }
 +            }
 +            AndroidView(
-+                modifier = if (error == null) Modifier.fillMaxWidth().weight(1f) else Modifier.size(0.dp),
++                modifier = if (error == null) Modifier.fillMaxWidth().weight(1f).clipToBounds() else Modifier.size(0.dp),
 +                factory = { ctx ->
 +                    WebView(ctx).apply {
 +                        browser = this
@@ -549,6 +559,19 @@ index 1032903..dd53e41 100644
                          NavItem(
                              selected = selectedTab == AppScreenTab.Search,
                              onClick = { onTabSelected(AppScreenTab.Search) },
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt
+index 0b1f0b5..742c47c 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt
+@@ -86,7 +86,7 @@ private fun RootTabPane(
+         stateHolder.SaveableStateProvider(tab.name) {
+             Box(
+                 Modifier.fillMaxSize()
+-                    .graphicsLayer()
++                    .then(if (tab == AppScreenTab.Discover) Modifier else Modifier.graphicsLayer())
+                     .focusProperties { canFocus = active }
+                     .pointerInput(active) {
+                         if (!active) {
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/core/auth/AccountLinkingDetails.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/core/auth/AccountLinkingDetails.kt
 new file mode 100644
 index 0000000..400c4a9
@@ -1007,10 +1030,10 @@ index 0000000..1996dd9
 +A compatible forward recovery build may be necessary. No rollback is performed as
 +part of this update unless it is separately authorized or needed to recover this test.
 diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
-index bde7d32..f0c64d6 100644
+index bde7d32..76eff99 100644
 --- a/iosApp/Configuration/Version.xcconfig
 +++ b/iosApp/Configuration/Version.xcconfig
 @@ -1,2 +1,2 @@
 -CURRENT_PROJECT_VERSION=141
-+CURRENT_PROJECT_VERSION = 143
++CURRENT_PROJECT_VERSION = 144
  MARKETING_VERSION=0.5.1
