@@ -153,10 +153,10 @@ index 0000000..e547063
 +}
 diff --git a/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
 new file mode 100644
-index 0000000..9e91b9a
+index 0000000..a098b62
 --- /dev/null
 +++ b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
-@@ -0,0 +1,287 @@
+@@ -0,0 +1,289 @@
 +package com.nuvio.app.features.seerr
 +
 +import android.annotation.SuppressLint
@@ -297,6 +297,7 @@ index 0000000..9e91b9a
 +        }
 +    }
 +
++    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
 +    BoxWithConstraints(modifier.fillMaxSize()) {
 +        val tabletTop = if (maxWidth >= 768.dp) 66.dp else 0.dp
 +        Column(Modifier.fillMaxSize().statusBarsPadding().padding(
@@ -432,6 +433,7 @@ index 0000000..9e91b9a
 +                },
 +            )
 +        }
++    }
 +    }
 +    if (confirmSignOut) AlertDialog(
 +        onDismissRequest = { confirmSignOut = false },
