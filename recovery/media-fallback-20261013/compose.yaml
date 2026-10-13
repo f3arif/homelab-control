@@ -69,11 +69,11 @@ services:
     environment:
       LOG_LEVEL: info
       TZ: America/Toronto
-      PORT: "5055"
+      PORT: "18799"
+      HOST: "127.0.0.1"
     volumes:
       - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/seerr:/app/config
-    ports:
-      - "127.0.0.1:18799:5055"
+    network_mode: host
     pids_limit: 150
     mem_limit: 1024m
     cpus: 1.0
@@ -82,14 +82,12 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5055/api/v1/settings/public"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:18799/api/v1/settings/public"]
       start_period: 30s
       timeout: 5s
       interval: 30s
       retries: 3
     restart: unless-stopped
-    networks:
-      - afz-downloads
 
 networks:
   afz-downloads:
