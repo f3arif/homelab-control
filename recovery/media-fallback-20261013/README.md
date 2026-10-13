@@ -55,19 +55,61 @@ service defaults reside in the private appdata directory. Preserve those
 settings and databases separately. Never commit API keys, passwords, session
 cookies, or private routing snapshots.
 
-Seerr still requires its initial Jellyfin owner sign-in. The former application
-API key was rejected, so no owner account or token was fabricated. Automatic
-request integration remains pending that sign-in and its subsequent connection
-checks. Existing application launchers and source-health guards were not changed.
+The original Windows-main Jellyseerr configuration was recovered from its
+attached SSD on 2026-10-13. A hash-verified copy retained SQLite WAL content,
+and both recovered databases passed quick_check before any application change.
+Seerr is now initialized with the original owner, 3 account records, 63 requests,
+and 85 media records. The original account IDs match the current Jellyfin users.
+No account or password reset was needed.
 
-Before enabling automatic requests, confirm the owner, selected libraries,
-Radarr quality profiles (including separate 4K behavior if required), completed
-download imports, and Jellyfin access to the isolated import directory. Keep
-the existing media mounts read-only until their storage plan is explicitly
-changed.
+Correction to the initial checkpoint: the saved Jellyfin API key was valid.
+Jellyfin 12 rejected the deprecated X-Emby-Token header. The standard
+Authorization: MediaBrowser header authenticated successfully. Seerr 3.5.0
+already uses that header. See the official Jellyfin change:
+https://github.com/jellyfin/jellyfin/pull/15559
+
+The H3 launcher now reads the private Requests/Radarr connection file from
+state/media-requests-connection.json, with STREMIO_RADARR_DIRECT_ROOT=/movies.
+The live /download-routing.json reports qBittorrent ready and selects
+Radarr/qBittorrent. The core source hash and source-health guard are unchanged.
+The original custom Radarr profile 7, "1080p + 4K", was restored through the API.
+
+The restored Requests API, owner, request count, Jellyfin user connection,
+Radarr/qBittorrent connection test, and H3 routing were verified. The torrent
+queue remained empty. A complete new movie request, transfer, import and
+playback has not been exercised.
+
+The old Radarr database contains 56 movies and is retained as a verified private
+backup; that catalog has not replaced the new live Radarr database. The old
+Sonarr connector is archived because no replacement Sonarr service is running.
+Jellyfin still contains legacy Windows media paths. An isolated AFZ Downloads
+library was registered against library-landing, but its collection ID was not
+assigned at verification time. Resolve that library registration and storage
+mapping before claiming completed imports/playback. Avoid a broad scan of the
+unmapped legacy libraries. Existing media mounts remain read-only.
 
 ## Scope
 
 The prior expired debrid service remained disabled. Existing media was not
 deleted or moved. No movie download was added. This recovery did not restore
-the old Radarr movie list or the former request database.
+the old Radarr movie list. The former request database has been restored.
+
+## Recovery scripts
+
+The scripts in this directory preserve the export, preflight, activation and
+launcher-update procedures. Their deployment-specific paths were replaced by
+environment variables or explicit parameters. They are one-time recovery tools,
+not recurring jobs. Read the code and set the required paths before running.
+The original SSD is only read by export_windows_main_requests.py. Keep all
+exports, databases and connection files private and out of Git.
+
+- AFZ_FALLBACK_ROOT: existing Linux stack appdata root.
+- AFZ_REQUESTS_RECOVERY_DIR: private recovery directory containing original/.
+- AFZ_REQUESTS_PUBLIC_URL, AFZ_RADARR_PUBLIC_URL, AFZ_JELLYFIN_PUBLIC_URL:
+  existing private application URLs used during preflight.
+- AFZ_H3_CORE_ROOT: Windows app directory (defaults to the established path).
+
+activate_requests_restore.py restores the previous Seerr directory if its
+owner and request-count checks do not pass. The H3 activation script similarly
+restores its launcher backup if routing does not become ready. Preserve these
+backups and avoid overwriting changes made after the checkpoint.
