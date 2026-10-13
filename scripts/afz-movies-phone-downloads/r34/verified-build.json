@@ -1,12 +1,13 @@
 {
-  "sourceCommit": "2520ccf705f185d7d83e380879717ecf8e281cb1",
+  "sourceCommit": "19da39e6f50c05abc25c85a5b532f1b2b063c9eb",
   "sourceRoot": "/home/faiz/afz-nuvio-seerr-r34-20261013",
   "baseCommit": "333523bb7cd247552e84417e7a4ee358858885c7",
   "versionName": "0.5.1-afz-r34",
-  "versionCode": 142,
+  "versionCode": 144,
+  "includesAccountLinkRevision": "9830773d4c4f661e6889c18155baa2529b39aeff",
   "status": "build_verified_not_installed",
   "tests": {
-    "tests": 282,
+    "tests": 294,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -30,11 +31,11 @@
     "skipped": 0
   },
   "apk": "/mnt/c/AFZ/Nuvio-Setup-20260923/R34-seerr-integrated-candidate/AFZ-Movies-R34-seerr-integrated.apk",
-  "apkBytes": 160211457,
-  "apkSha256": "761ecfb723faa4dae4ad2d854057e6bf01b66da0d2c727e28688aecd96b017d4",
+  "apkBytes": 160228637,
+  "apkSha256": "6d0e0c4f4681c39f8381e89dcb67fdc9c552f9725c8295de366c060d2dae2c54",
   "signerMatched": true,
   "buildOutputRoot": "/home/faiz/.local/share/afz-build-output/seerr-r34-20261013",
   "deviceInstalled": false,
   "devicePlaybackVerified": false,
-  "finishedAt": "2026-10-13T20:22:59Z"
+  "finishedAt": "2026-10-13T20:52:40Z"
 }
