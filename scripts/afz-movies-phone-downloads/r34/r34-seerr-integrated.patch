@@ -515,7 +515,7 @@ index 8d0d97e..933e720 100644
              AppScreenTab.Search -> {
                  searchFocusRequestCount++
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
-index 1032903..dd53e41 100644
+index 1032903..2e5d8d9 100644
 --- a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
 +++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
 @@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.statusBars
@@ -561,6 +561,16 @@ index 1032903..dd53e41 100644
                          NavItem(
                              selected = selectedTab == AppScreenTab.Search,
                              onClick = { onTabSelected(AppScreenTab.Search) },
+@@ -169,7 +183,8 @@ internal fun MainTabsDestination(
+                         actions = tabActions,
+                         modifier = Modifier
+                             .fillMaxSize()
+-                            .then(if (isTabletLayout || navBarStyleSetting != NavBarStyle.CLASSIC) Modifier.hazeSource(state = navBarHazeState) else Modifier)
++                            // Android WebView GL functors cannot be captured into the Haze offscreen layer.
++                            .then(if (selectedTab != AppScreenTab.Discover && (isTabletLayout || navBarStyleSetting != NavBarStyle.CLASSIC)) Modifier.hazeSource(state = navBarHazeState) else Modifier)
+                             .then(if (navBarStyleSetting == NavBarStyle.ADAPTIVE) Modifier.nestedScroll(navBarScrollState.nestedScrollConnection) else Modifier)
+                             .padding(innerPadding),
+                     )
 diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt
 index 0b1f0b5..742c47c 100644
 --- a/composeApp/src/commonMain/kotlin/com/nuvio/app/RootTabHost.kt
@@ -1032,10 +1042,10 @@ index 0000000..1996dd9
 +A compatible forward recovery build may be necessary. No rollback is performed as
 +part of this update unless it is separately authorized or needed to recover this test.
 diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
-index bde7d32..76eff99 100644
+index bde7d32..1dd5db1 100644
 --- a/iosApp/Configuration/Version.xcconfig
 +++ b/iosApp/Configuration/Version.xcconfig
 @@ -1,2 +1,2 @@
 -CURRENT_PROJECT_VERSION=141
-+CURRENT_PROJECT_VERSION = 144
++CURRENT_PROJECT_VERSION = 145
  MARKETING_VERSION=0.5.1
