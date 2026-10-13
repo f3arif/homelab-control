@@ -51,7 +51,7 @@ try:
     apk=apks[0]
     assert signer(apk)==signer(Path('/mnt/c/AFZ/Nuvio-Setup-20260923/R32-phone-first-candidate/AFZ-Movies-R32-phone-first.apk'))
     badging=run([str(tools/'aapt'),'dump','badging',str(apk)])
-    assert "package: name='com.afz.nuvio.preview'" in badging and "versionCode='143'" in badging and "versionName='0.5.1-afz-r34'" in badging,badging[:300]
+    assert "package: name='com.afz.nuvio.preview'" in badging and "versionCode='144'" in badging and "versionName='0.5.1-afz-r34'" in badging,badging[:300]
     out=stage/'AFZ-Movies-R34-seerr-integrated.apk';shutil.copy2(apk,out)
     summary=dict(source,status='build_verified_not_installed',tests=totals,addonTests=addon,phoneTests=phone,
         pickerTests=suites.get('com.nuvio.app.features.streams.DeviceDownloadPickerTest'),
