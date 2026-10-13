@@ -1,0 +1,97 @@
+name: afz-media-qbit-failover
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent@sha256:97333cc1ccf903e0bbcd8eb67e3332e4970e9c1ecabe145e499e9c0847ebcaed
+    container_name: afz-media-qbit-fallback-r1
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+      WEBUI_PORT: "18796"
+    volumes:
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/qbittorrent:/config
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/downloads:/downloads
+    ports:
+      - "127.0.0.1:18796:18796"
+    pids_limit: 150
+    mem_limit: 1024m
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - afz-downloads
+
+  radarr:
+    image: lscr.io/linuxserver/radarr@sha256:cfbc4fa09dc9d78f7cedc898f4ec48c6277cacedc523c4e159db6ff1c741959c
+    container_name: afz-media-radarr-fallback-r1
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+    volumes:
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/radarr:/config
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/downloads:/downloads
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/library-landing:/movies
+    ports:
+      - "127.0.0.1:18797:7878"
+    pids_limit: 150
+    mem_limit: 1024m
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - afz-downloads
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr@sha256:f9151e5bc1025c6d0a630d503210cdcb6bb55a7cc098562609d96a408d838902
+    container_name: afz-media-prowlarr-fallback-r1
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+    volumes:
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/prowlarr:/config
+    ports:
+      - "127.0.0.1:18798:9696"
+    pids_limit: 150
+    mem_limit: 768m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - afz-downloads
+
+  seerr:
+    image: ghcr.io/seerr-team/seerr@sha256:27602401178d54f1964442287b9f23f67a3fa2252645ee8065839ea1c3f69e45
+    container_name: afz-media-seerr-fallback-r1
+    init: true
+    environment:
+      LOG_LEVEL: info
+      TZ: America/Toronto
+      PORT: "5055"
+    volumes:
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/seerr:/app/config
+    ports:
+      - "127.0.0.1:18799:5055"
+    pids_limit: 150
+    mem_limit: 1024m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5055/api/v1/settings/public"]
+      start_period: 30s
+      timeout: 5s
+      interval: 30s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - afz-downloads
+
+networks:
+  afz-downloads:
+    name: afz-media-qbit-fallback-r1
+    driver: bridge
