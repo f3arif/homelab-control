@@ -1,0 +1,581 @@
+diff --git a/androidApp/src/main/assets/seerr-tv.js b/androidApp/src/main/assets/seerr-tv.js
+new file mode 100644
+index 0000000..0d98113
+--- /dev/null
++++ b/androidApp/src/main/assets/seerr-tv.js
+@@ -0,0 +1,34 @@
++(() => {
++  if (window.__afzSeerrNavigation) return;
++  window.__afzSeerrNavigation = true;
++  const style = document.createElement('style');
++  style.textContent = ':focus-visible,[data-afz-focus="true"]{outline:3px solid #22d3ee!important;outline-offset:4px!important;border-radius:8px}html{scroll-padding:24px}';
++  document.head.appendChild(style);
++  const candidates = () => [...document.querySelectorAll('a[href],button,input,select,textarea,[role="button"],[tabindex]')]
++    .filter(e => !e.disabled && e.getAttribute('aria-hidden') !== 'true' && e.tabIndex >= 0 && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
++  const mark = e => {
++    document.querySelectorAll('[data-afz-focus]').forEach(x => x.removeAttribute('data-afz-focus'));
++    e.dataset.afzFocus = 'true'; e.focus({preventScroll:true});
++    e.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});
++  };
++  document.addEventListener('keydown', e => {
++    if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter'].includes(e.key)) return;
++    const active = document.activeElement;
++    if (active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName)) return;
++    const list = candidates();
++    if (!list.length) return;
++    if (!list.includes(active)) {e.preventDefault();mark(list[0]);return;}
++    if (e.key === 'Enter') {e.preventDefault();active.click();return;}
++    const r = active.getBoundingClientRect(), x = r.x+r.width/2, y = r.y+r.height/2;
++    const horizontal = ['ArrowLeft','ArrowRight'].includes(e.key);
++    const positive = ['ArrowRight','ArrowDown'].includes(e.key);
++    const next = list.filter(n => n !== active).map(n => {
++      const t=n.getBoundingClientRect(), dx=t.x+t.width/2-x, dy=t.y+t.height/2-y;
++      const primary=horizontal?dx:dy, secondary=horizontal?dy:dx;
++      const aligned=horizontal?Math.abs(dy)<Math.max(r.height,t.height)*0.6:Math.abs(dx)<Math.max(r.width,t.width)*0.6;
++      return {n,primary,score:Math.abs(primary)+Math.abs(secondary)*3+(aligned?0:10000)};
++    }).filter(n => positive?n.primary>4:n.primary< -4).sort((a,b)=>a.score-b.score)[0];
++    if (next) {e.preventDefault();mark(next.n);}
++    else if(e.key==='ArrowUp') {e.preventDefault();window.location.href='afz-seerr://toolbar';}
++  },true);
++})();
+diff --git a/composeApp/src/androidHostTest/kotlin/com/nuvio/app/RootTabHostTest.kt b/composeApp/src/androidHostTest/kotlin/com/nuvio/app/RootTabHostTest.kt
+index c74113f..9ce2408 100644
+--- a/composeApp/src/androidHostTest/kotlin/com/nuvio/app/RootTabHostTest.kt
++++ b/composeApp/src/androidHostTest/kotlin/com/nuvio/app/RootTabHostTest.kt
+@@ -70,7 +70,7 @@ class RootTabHostTest {
+         val homeToken = tokens.getValue(AppScreenTab.Home)
+ 
+         repeat(2) {
+-            for (tab in listOf(AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
++            for (tab in listOf(AppScreenTab.Discover, AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
+                 select(tab)
+                 compose.onNodeWithTag(tab.name).assertIsDisplayed()
+                 AppScreenTab.entries.filter { it != tab }.forEach { hidden ->
+@@ -115,7 +115,7 @@ class RootTabHostTest {
+             }
+         }
+ 
+-        for (tab in listOf(AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
++        for (tab in listOf(AppScreenTab.Discover, AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
+             select(tab)
+             compose.runOnIdle { assertEquals(setOf(tab), runningEffects) }
+         }
+@@ -183,14 +183,14 @@ class RootTabHostTest {
+             dispatcher = requireNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
+             BackHandler { handled += tab }
+         }
+-        for (tab in listOf(AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
++        for (tab in listOf(AppScreenTab.Discover, AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home)) {
+             select(tab)
+             compose.runOnIdle { dispatcher.onBackPressed() }
+         }
+ 
+         compose.runOnIdle {
+             assertEquals(
+-                listOf(AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home),
++                listOf(AppScreenTab.Discover, AppScreenTab.Search, AppScreenTab.Library, AppScreenTab.Settings, AppScreenTab.Home),
+                 handled,
+             )
+         }
+diff --git a/composeApp/src/androidHostTest/kotlin/com/nuvio/app/features/seerr/SeerrPolicyTest.kt b/composeApp/src/androidHostTest/kotlin/com/nuvio/app/features/seerr/SeerrPolicyTest.kt
+new file mode 100644
+index 0000000..4557152
+--- /dev/null
++++ b/composeApp/src/androidHostTest/kotlin/com/nuvio/app/features/seerr/SeerrPolicyTest.kt
+@@ -0,0 +1,34 @@
++package com.nuvio.app.features.seerr
++
++import org.junit.Test
++import org.junit.Assert.*
++
++class SeerrPolicyTest {
++    @Test fun acceptsOnlyTheConfiguredSecureOrigin() {
++        assertTrue(SeerrPolicy.trusted(SeerrPolicy.origin + "/movie/123"))
++        listOf("http://hpenvy.tailc9bb62.ts.net:18799/", "https://hpenvy.tailc9bb62.ts.net/",
++            "https://hpenvy.tailc9bb62.ts.net:18799.evil.test/", "https://hpenvy.tailc9bb62.ts.net.evil.test:18799/",
++            "https://evil.test@hpenvy.tailc9bb62.ts.net:18799/", "file:///etc/passwd", "javascript:alert(1)",
++            "https://evil.test/", "https://hpenvy.tailc9bb62.ts.net:18798/", "not a url").forEach {
++            assertFalse(it, SeerrPolicy.trusted(it))
++        }
++    }
++    @Test fun mapsExactMovieAndSeriesIdentities() {
++        assertEquals(SeerrTitle("movie", "123"), SeerrPolicy.title(SeerrPolicy.origin + "/movie/123?x=y"))
++        val tv = SeerrPolicy.title(SeerrPolicy.origin + "/tv/456/")!!
++        assertEquals("series", tv.nuvioType)
++        assertEquals("/api/v1/tv/456", tv.apiPath)
++    }
++    @Test fun rejectsNonTitleRoutesAndMalformedIds() {
++        listOf("/movie/0", "/movie/-1", "/movie/123/other", "/movie/12345678901", "/login", "/tv/abc",
++            "/movie/../123", "/movie/%2F123").forEach { assertNull(it, SeerrPolicy.title(SeerrPolicy.origin + it)) }
++        assertNull(SeerrPolicy.title("https://evil.test/movie/123"))
++    }
++    @Test fun neverGuessesAnImdbIdentityFromATitle() {
++        assertEquals("tt1234567", SeerrPolicy.imdb("tt1234567"))
++        listOf("1234567", "tmdb:1234", "tt123", "tt1234567:1:2", "A movie title", "tt1234567/evil").forEach {
++            assertNull(SeerrPolicy.imdb(it))
++        }
++        assertNull(SeerrPolicy.imdb(null))
++    }
++}
+diff --git a/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrPolicy.kt b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrPolicy.kt
+new file mode 100644
+index 0000000..e547063
+--- /dev/null
++++ b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrPolicy.kt
+@@ -0,0 +1,28 @@
++package com.nuvio.app.features.seerr
++
++import java.net.URI
++
++/** Only this origin receives the embedded account's cookies or native integration. */
++internal object SeerrPolicy {
++    const val origin = "https://hpenvy.tailc9bb62.ts.net:18799"
++    private val expected = URI(origin)
++    fun trusted(url: String?): Boolean = runCatching {
++        val u = URI(url ?: return false)
++        u.scheme.equals("https", true) && u.host.equals(expected.host, true) &&
++            u.port == expected.port && u.rawUserInfo == null
++    }.getOrDefault(false)
++
++    fun title(url: String?): SeerrTitle? {
++        if (!trusted(url)) return null
++        val match = Regex("^/(movie|tv)/([1-9][0-9]{0,9})/?$")
++            .matchEntire(URI(url).path ?: return null) ?: return null
++        return SeerrTitle(match.groupValues[1], match.groupValues[2])
++    }
++
++    fun imdb(value: String?): String? = value?.takeIf { Regex("tt[0-9]{7,12}").matches(it) }
++}
++
++internal data class SeerrTitle(val mediaType: String, val tmdbId: String) {
++    val apiPath: String get() = "/api/v1/$mediaType/$tmdbId"
++    val nuvioType: String get() = if (mediaType == "tv") "series" else "movie"
++}
+diff --git a/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
+new file mode 100644
+index 0000000..f04ecef
+--- /dev/null
++++ b/composeApp/src/androidMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.android.kt
+@@ -0,0 +1,277 @@
++package com.nuvio.app.features.seerr
++
++import android.annotation.SuppressLint
++import android.content.Intent
++import android.net.Uri
++import android.net.http.SslError
++import android.webkit.CookieManager
++import android.webkit.SslErrorHandler
++import android.webkit.WebChromeClient
++import android.webkit.WebResourceError
++import android.webkit.WebResourceRequest
++import android.webkit.WebResourceResponse
++import android.webkit.WebSettings
++import android.webkit.WebStorage
++import android.webkit.WebView
++import android.webkit.WebViewClient
++import androidx.activity.compose.BackHandler
++import androidx.compose.foundation.layout.*
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material.icons.filled.MoreVert
++import androidx.compose.material.icons.filled.Refresh
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.focus.FocusRequester
++import androidx.compose.ui.focus.focusRequester
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.viewinterop.AndroidView
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.nuvio.app.core.auth.AuthRepository
++import com.nuvio.app.core.auth.userId
++import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
++import com.nuvio.app.core.ui.LocalScreenActive
++import com.nuvio.app.features.home.MetaPreview
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import org.json.JSONObject
++import java.security.MessageDigest
++import java.util.concurrent.TimeUnit
++
++actual val seerrSupported = true
++
++@Composable
++actual fun SeerrScreen(profileId: Int?, onOpenTitle: ((MetaPreview) -> Unit)?, modifier: Modifier) {
++    val auth by AuthRepository.state.collectAsStateWithLifecycle()
++    val accountId = auth.userId
++    if (accountId == null) {
++        Box(modifier.padding(24.dp)) { Text("Choose a Nuvio profile to browse Discover & Requests.") }
++        return
++    }
++    // Identity includes the Nuvio account as profile indices repeat across accounts.
++    key(accountId, profileId) {
++        SeerrBrowser("$accountId:${profileId ?: -1}", onOpenTitle, modifier)
++    }
++}
++
++@SuppressLint("SetJavaScriptEnabled")
++@Composable
++private fun SeerrBrowser(owner: String, onOpenTitle: ((MetaPreview) -> Unit)?, modifier: Modifier) {
++    val context = LocalContext.current
++    val active = LocalScreenActive.current
++    val activeNow by rememberUpdatedState(active)
++    val scope = rememberCoroutineScope()
++    val openTitle by rememberUpdatedState(onOpenTitle)
++    val toolbarFocus = remember { FocusRequester() }
++    var browser by remember { mutableStateOf<WebView?>(null) }
++    var progress by remember { mutableIntStateOf(0) }
++    var canGoBack by remember { mutableStateOf(false) }
++    var currentTitle by remember { mutableStateOf<SeerrTitle?>(null) }
++    var error by remember { mutableStateOf<String?>(null) }
++    var notice by remember { mutableStateOf<String?>(null) }
++    var openingTitle by remember { mutableStateOf(false) }
++    var menu by remember { mutableStateOf(false) }
++    var confirmSignOut by remember { mutableStateOf(false) }
++    var alive by remember { mutableStateOf(true) }
++    val ownerHash = remember(owner) {
++        MessageDigest.getInstance("SHA-256").digest(owner.toByteArray()).joinToString("") { "%02x".format(it) }
++    }
++    val preferences = remember { context.getSharedPreferences("afz_seerr_session", 0) }
++    val client = remember {
++        OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
++            .callTimeout(15, TimeUnit.SECONDS).build()
++    }
++
++    fun load(path: String) {
++        error = null
++        notice = null
++        browser?.loadUrl(SeerrPolicy.origin + path)
++    }
++
++    fun resetSession(view: WebView, then: () -> Unit) {
++        view.stopLoading()
++        view.clearHistory()
++        view.clearCache(true)
++        WebStorage.getInstance().deleteAllData()
++        // This application has no other WebView-based feature. Do not reuse this
++        // default store for future OAuth screens without adding isolated profiles.
++        CookieManager.getInstance().removeAllCookies {
++            if (alive) {
++                CookieManager.getInstance().flush()
++                preferences.edit().putString("owner", ownerHash).apply()
++                then()
++            }
++        }
++    }
++
++    BackHandler(enabled = active && canGoBack) {
++        notice = null
++        error = null
++        browser?.goBack()
++    }
++
++    DisposableEffect(browser, active) {
++        if (active) browser?.onResume() else browser?.onPause()
++        onDispose { }
++    }
++    DisposableEffect(Unit) {
++        onDispose {
++            alive = false
++            browser?.apply { stopLoading(); onPause(); destroy() }
++            CookieManager.getInstance().flush()
++            client.dispatcher.cancelAll()
++        }
++    }
++
++    BoxWithConstraints(modifier.fillMaxSize()) {
++        val tabletTop = if (maxWidth >= 768.dp) 66.dp else 0.dp
++        Column(Modifier.fillMaxSize().statusBarsPadding().padding(
++            top = tabletTop,
++            bottom = LocalNuvioBottomNavigationOverlayPadding.current,
++        )) {
++            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
++                TextButton(onClick = { load("/") }, modifier = Modifier.focusRequester(toolbarFocus)) { Text("Discover") }
++                TextButton(onClick = { load("/requests") }) { Text("Requests") }
++                IconButton(onClick = { browser?.let { if (it.canGoBack()) it.goBack() else load("/") } }) {
++                    Icon(Icons.Default.ArrowBack, "Back in Discover")
++                }
++                IconButton(onClick = { error = null; notice = null; browser?.reload() }) {
++                    Icon(Icons.Default.Refresh, "Refresh Discover")
++                }
++                Box {
++                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Discover account options") }
++                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
++                        DropdownMenuItem(text = { Text("Sign out of Requests") }, onClick = { menu = false; confirmSignOut = true })
++                    }
++                }
++            }
++            if (progress in 1..99 && error == null) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
++            currentTitle?.let { title ->
++                FilledTonalButton(
++                    enabled = !openingTitle && openTitle != null && error == null,
++                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
++                    onClick = {
++                        if (!SeerrPolicy.trusted(browser?.url)) return@FilledTonalButton
++                        val cookie = CookieManager.getInstance().getCookie(SeerrPolicy.origin).orEmpty()
++                        openingTitle = true
++                        notice = null
++                        scope.launch {
++                            try {
++                                val preview = withContext(Dispatchers.IO) {
++                                    val request = Request.Builder().url(SeerrPolicy.origin + title.apiPath)
++                                        .header("Cookie", cookie).header("Accept", "application/json").build()
++                                    client.newCall(request).execute().use { response ->
++                                        check(response.isSuccessful) { "Please sign in to Requests and try again." }
++                                        val detail = JSONObject(response.body?.string().orEmpty())
++                                        check(detail.optString("id") == title.tmdbId) { "This title could not be matched safely." }
++                                        val imdb = SeerrPolicy.imdb(detail.optJSONObject("externalIds")?.optString("imdbId"))
++                                            ?: SeerrPolicy.imdb(detail.optString("imdbId"))
++                                            ?: throw IllegalStateException("This title has no IMDb match yet. You can still request it here.")
++                                        val name = detail.optString(if (title.mediaType == "tv") "name" else "title")
++                                        check(name.isNotBlank()) { "This title could not be loaded." }
++                                        val poster = detail.optString("posterPath").takeIf { it.startsWith("/") }
++                                        MetaPreview(id = imdb, type = title.nuvioType, name = name,
++                                            poster = poster?.let { "https://image.tmdb.org/t/p/w500$it" })
++                                    }
++                                }
++                                if (alive && activeNow) openTitle?.invoke(preview)
++                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
++                                throw cancelled
++                            } catch (failure: Exception) {
++                                if (alive) notice = when (failure) {
++                                    is IllegalStateException -> failure.message
++                                    else -> "Couldn't reach Requests. Check Tailscale and try again."
++                                }
++                            } finally { openingTitle = false }
++                        }
++                    },
++                ) { Text(if (openingTitle) "Opening title…" else "Watch in Nuvio") }
++            }
++            notice?.let { Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
++            if (error != null) {
++                Column(Modifier.padding(24.dp)) {
++                    Text("Requests is unavailable", style = MaterialTheme.typography.titleLarge)
++                    Spacer(Modifier.height(8.dp))
++                    Text(error!!)
++                    Spacer(Modifier.height(12.dp))
++                    Button(onClick = { load("/") }) { Text("Try again") }
++                    Text("Your Nuvio library and downloads are still available.", Modifier.padding(top = 12.dp))
++                }
++            }
++            AndroidView(
++                modifier = if (error == null) Modifier.fillMaxWidth().weight(1f) else Modifier.size(0.dp),
++                factory = { ctx ->
++                    WebView(ctx).apply {
++                        browser = this
++                        setBackgroundColor(0xff101827.toInt())
++                        settings.javaScriptEnabled = true
++                        settings.domStorageEnabled = true
++                        settings.allowFileAccess = false
++                        settings.allowContentAccess = false
++                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
++                        settings.setSupportMultipleWindows(false)
++                        settings.mediaPlaybackRequiresUserGesture = true
++                        settings.builtInZoomControls = false
++                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
++                        webChromeClient = object : WebChromeClient() {
++                            override fun onProgressChanged(view: WebView, newProgress: Int) { if (alive) progress = newProgress }
++                        }
++                        webViewClient = object : WebViewClient() {
++                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
++                                val url = request.url.toString()
++                                if (url == "afz-seerr://toolbar" && SeerrPolicy.trusted(view.url)) {
++                                    toolbarFocus.requestFocus(); return true
++                                }
++                                if (SeerrPolicy.trusted(url)) return false
++                                if (request.hasGesture() && request.isForMainFrame && request.url.scheme == "https") {
++                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
++                                }
++                                return true
++                            }
++                            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
++                                if (alive) { progress = 1; currentTitle = null }
++                            }
++                            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
++                                if (alive) { currentTitle = SeerrPolicy.title(url); canGoBack = view.canGoBack() }
++                            }
++                            override fun onPageFinished(view: WebView, url: String) {
++                                if (!alive || !SeerrPolicy.trusted(url)) return
++                                currentTitle = SeerrPolicy.title(url)
++                                canGoBack = view.canGoBack()
++                                CookieManager.getInstance().flush()
++                                view.evaluateJavascript(ctx.assets.open("seerr-tv.js").bufferedReader().use { it.readText() }, null)
++                            }
++                            override fun onReceivedError(view: WebView, request: WebResourceRequest, failure: WebResourceError) {
++                                if (alive && request.isForMainFrame) error = "Connect Tailscale and make sure HP Envy is online, then try again."
++                            }
++                            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
++                                if (alive && request.isForMainFrame && response.statusCode >= 500) error = "The Requests server is temporarily unavailable. Try again in a moment."
++                            }
++                            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, failure: SslError) {
++                                handler.cancel()
++                                if (alive) error = "The server's secure connection could not be verified. Please check its certificate and the device time."
++                            }
++                        }
++                        if (preferences.getString("owner", null) != ownerHash) resetSession(this) { loadUrl(SeerrPolicy.origin + "/") }
++                        else loadUrl(SeerrPolicy.origin + "/")
++                    }
++                },
++            )
++        }
++    }
++    if (confirmSignOut) AlertDialog(
++        onDismissRequest = { confirmSignOut = false },
++        title = { Text("Sign out of Requests?") },
++        text = { Text("Your Nuvio profile and downloads stay signed in. You can sign into Requests again with your existing Jellyfin account.") },
++        confirmButton = { TextButton(onClick = {
++            confirmSignOut = false
++            browser?.let { view -> resetSession(view) { load("/login") } }
++        }) { Text("Sign out") } },
++        dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
++    )
++}
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt
+index 76a862a..e1342cf 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/AppScreenTab.kt
+@@ -4,6 +4,7 @@ import com.nuvio.app.core.ui.NativeNavigationTab
+ 
+ enum class AppScreenTab {
+     Home,
++    Discover,
+     Search,
+     Library,
+     Settings,
+@@ -16,6 +17,7 @@ enum class AppScreenTab {
+ }
+ 
+ internal fun AppScreenTab.toNativeNavigationTab(): NativeNavigationTab = when (this) {
++    AppScreenTab.Discover -> NativeNavigationTab.Search // Android-only embedded section
+     AppScreenTab.Home -> NativeNavigationTab.Home
+     AppScreenTab.Search -> NativeNavigationTab.Search
+     AppScreenTab.Library -> NativeNavigationTab.Library
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppShellComponents.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/AppShellComponents.kt
+index b964d55..bc7d6d0 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/AppShellComponents.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/AppShellComponents.kt
+@@ -147,6 +147,14 @@ internal fun AppTabHost(
+                 }
+             }
+ 
++            AppScreenTab.Discover -> {
++                com.nuvio.app.features.seerr.SeerrScreen(
++                    profileId = state.profileId,
++                    onOpenTitle = actions.onPosterClick,
++                    modifier = Modifier.fillMaxSize(),
++                )
++            }
++
+             AppScreenTab.Search -> {
+                 SearchScreen(
+                     modifier = Modifier.fillMaxSize(),
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainAppContent.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainAppContent.kt
+index 8d0d97e..933e720 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainAppContent.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainAppContent.kt
+@@ -397,6 +397,7 @@ internal fun MainAppContent(
+         }
+ 
+         when (tab) {
++            AppScreenTab.Discover -> Unit
+             AppScreenTab.Home -> homeScrollToTopRequests.tryEmit(Unit)
+             AppScreenTab.Search -> {
+                 searchFocusRequestCount++
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
+index 1032903..dd53e41 100644
+--- a/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/MainTabsDestination.kt
+@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.statusBars
+ import androidx.compose.foundation.layout.widthIn
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.filled.Home
++import androidx.compose.material.icons.filled.Star
++import com.nuvio.app.features.seerr.seerrSupported
+ import androidx.compose.material3.Scaffold
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.CompositionLocalProvider
+@@ -79,13 +81,19 @@ internal fun MainTabsDestination(
+         val navBarHazeState = rememberHazeState()
+         val navBarStyleSetting by remember { ThemeSettingsRepository.navBarStyle }.collectAsStateWithLifecycle()
+         val navBarGlowEnabled by ThemeSettingsRepository.navBarGlowEnabled.collectAsStateWithLifecycle()
+-        val floatingNavigationItems = listOf(
++        val floatingNavigationItems = listOfNotNull(
+             FloatingNavigationItem(
+                 selected = selectedTab == AppScreenTab.Home,
+                 onClick = { onTabSelected(AppScreenTab.Home) },
+                 icon = Icons.Filled.Home,
+                 label = stringResource(Res.string.compose_nav_home),
+             ),
++            if (seerrSupported) FloatingNavigationItem(
++                selected = selectedTab == AppScreenTab.Discover,
++                onClick = { onTabSelected(AppScreenTab.Discover) },
++                icon = Icons.Filled.Star,
++                label = "Discover",
++            ) else null,
+             FloatingNavigationItem(
+                 selected = selectedTab == AppScreenTab.Search,
+                 onClick = { onTabSelected(AppScreenTab.Search) },
+@@ -130,6 +138,12 @@ internal fun MainTabsDestination(
+                             icon = Icons.Filled.Home,
+                             contentDescription = stringResource(Res.string.compose_nav_home),
+                         )
++                        if (seerrSupported) NavItem(
++                            selected = selectedTab == AppScreenTab.Discover,
++                            onClick = { onTabSelected(AppScreenTab.Discover) },
++                            icon = Icons.Filled.Star,
++                            contentDescription = "Discover & Requests",
++                        )
+                         NavItem(
+                             selected = selectedTab == AppScreenTab.Search,
+                             onClick = { onTabSelected(AppScreenTab.Search) },
+diff --git a/composeApp/src/commonMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.kt b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.kt
+new file mode 100644
+index 0000000..734c84e
+--- /dev/null
++++ b/composeApp/src/commonMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.kt
+@@ -0,0 +1,14 @@
++package com.nuvio.app.features.seerr
++
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.Modifier
++import com.nuvio.app.features.home.MetaPreview
++
++expect val seerrSupported: Boolean
++
++@Composable
++expect fun SeerrScreen(
++    profileId: Int?,
++    onOpenTitle: ((MetaPreview) -> Unit)?,
++    modifier: Modifier = Modifier,
++)
+diff --git a/composeApp/src/iosMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.ios.kt b/composeApp/src/iosMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.ios.kt
+new file mode 100644
+index 0000000..ac6bb35
+--- /dev/null
++++ b/composeApp/src/iosMain/kotlin/com/nuvio/app/features/seerr/SeerrScreen.ios.kt
+@@ -0,0 +1,13 @@
++package com.nuvio.app.features.seerr
++
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.Modifier
++import com.nuvio.app.features.home.MetaPreview
++
++actual val seerrSupported = false
++
++@Composable
++actual fun SeerrScreen(profileId: Int?, onOpenTitle: ((MetaPreview) -> Unit)?, modifier: Modifier) {
++    Text("Discover & Requests is available in the Android preview.", modifier)
++}
+diff --git a/iosApp/Configuration/Version.xcconfig b/iosApp/Configuration/Version.xcconfig
+index bde7d32..a8be3cf 100644
+--- a/iosApp/Configuration/Version.xcconfig
++++ b/iosApp/Configuration/Version.xcconfig
+@@ -1,2 +1,2 @@
+-CURRENT_PROJECT_VERSION=141
++CURRENT_PROJECT_VERSION = 142
+ MARKETING_VERSION=0.5.1
