@@ -76,17 +76,18 @@ no owner replacement or password reset was needed.
   byte-range playback check returned HTTP 206.
 - H3 can reach Requests and Radarr. It sees the restored Sonarr connector
   through Requests. Core source and its source-health guard are unchanged.
-- A restored monitored movie request resumed automatically, downloaded
-  11,627,943,029 bytes and was seeding at the final check. It was still copying
-  from /downloads to /movies. This was an existing request, not a new test.
-  Jellyfin detected the destination, but the complete import and final-file
-  playback were not yet verified at this checkpoint.
+- A restored monitored movie request resumed automatically, downloaded and
+  imported all 11,627,943,029 bytes, and continued seeding. At 21:18:21 UTC,
+  Radarr reported hasFile=true and the full file size. Jellyfin served the
+  final 1,024 bytes with HTTP 206, matching the completed file exactly.
+  This verified an existing request through download, import and a playback
+  byte-range check; no new movie was selected as a test.
 
 The separate /downloads and /movies bind mounts caused the import hardlink to
-fail and Radarr fell back to a copy. The file was growing normally; the active
-copy was not interrupted. observe_completed_movie_import.py is a bounded,
-read-only observer for this existing import. Its private receipt records whether
-Radarr completed the import and Jellyfin served the final byte range correctly.
+fail and Radarr fell back to a copy. The copy finished without interruption.
+observe_completed_movie_import.py is a bounded, read-only observer for an
+existing import. This run finished successfully and exited. Its private receipt
+records importComplete=true and playbackVerified=true. No repeat is needed.
 
 ## H3 direct TV connection remains pending
 
