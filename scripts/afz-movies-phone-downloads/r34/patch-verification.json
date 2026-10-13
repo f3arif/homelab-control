@@ -1,11 +1,11 @@
 {
-  "sourceCommit": "19da39e6f50c05abc25c85a5b532f1b2b063c9eb",
+  "sourceCommit": "ef13dc0e98ce6b75bb4610d6ef3dc6ef04a684fb",
   "sourceRoot": "/home/faiz/afz-nuvio-seerr-r34-20261013",
   "baseCommit": "333523bb7cd247552e84417e7a4ee358858885c7",
   "versionName": "0.5.1-afz-r34",
-  "versionCode": 144,
+  "versionCode": 145,
   "includesAccountLinkRevision": "9830773d4c4f661e6889c18155baa2529b39aeff",
-  "patchSha256": "3e8e312c5d83f51ff349994beaf6f6f61aa7665fa13a46da5a4f8dc2692f61bd",
-  "candidateTree": "80646e0b852c90ee57067d71f76bfa0c69b8f6c2",
+  "patchSha256": "3c89b00dcba8d2ab3c19fa8ade983ffccc1c78eb3bc61852e9e8267862b6a47a",
+  "candidateTree": "1089916617e6771e25c3bbed7e214cabe56ce966",
   "exactTreeMatch": true
 }
