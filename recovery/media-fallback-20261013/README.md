@@ -118,8 +118,9 @@ connection or existing routing fails verification. It is an activation record,
 not a script to rerun against a later deployment without a fresh preflight.
 
 The H3 launcher already reads the private Requests/Radarr connection file and
-uses STREMIO_RADARR_DIRECT_ROOT=/movies. Preserve the core source and existing
-source-health guard. Keep the expired Real-Debrid service disabled.
+uses STREMIO_RADARR_DIRECT_ROOT=/movies. Keep the expired Real-Debrid service
+disabled. Preserve the current core and source-health guard as a matched pair;
+the later Nuvio landing repair below supersedes their connection-only hashes.
 
 ## Recovery procedures and private backups
 
@@ -153,3 +154,54 @@ https://github.com/jellyfin/jellyfin/pull/15559
 This recovery branch has not been merged into main. The existing dirty H3 Git
 checkout was not modified.
 
+
+## Nuvio Envy landing playback repaired
+
+At 22:08 UTC, the newly imported movie was added to the existing Ready to Watch
+catalog and offered through the existing AFZ Jellyfin proxy. The previous core
+required every Jellyfin movie to have a corresponding H3 filesystem path,
+which excluded movies stored only in Envy's writable movie landing folder.
+The new code explicitly opts into that one configured folder using
+AFZ_HP_JELLYFIN_MOVIE_ROOT. It accepts only file-backed Movie metadata, rejects
+remote sources, placeholders, invalid IDs and traversal paths, and verifies an
+authenticated one-byte HTTP 206 response with the expected full file size.
+The source stays pinned to its exact Jellyfin item ID. Availability probes are
+cached for 60 seconds and fail closed. Existing H3 movie and TV paths remain.
+
+The core, launcher and guard pin were updated together while holding the
+existing guard mutex. The guard's integrity check and rollback policy remain
+active; healthy_streams.py and its tests were unchanged. No Tailscale routes,
+media files, credentials, download queues or original SSD appdata were changed.
+The core's manifest version remains 0.6.243 for the existing launcher contract.
+
+Verification: nine boundary/outage unit tests passed. An isolated candidate
+check preserved all 24 existing movie cards and added the Envy movie. Live
+validation through the public Nuvio URL and health-v3 sorter returned the new
+AFZ Jellyfin source. Its 1,024-byte HTTP 206 response matched the candidate
+exactly. One restored episode from each of the three TV series also returned
+1,024 bytes with HTTP 206 through its public local-playback route. Overall
+system health was true. This verifies bounded playback delivery, not full-film
+viewing or phone codec compatibility. No new requests or torrents were created.
+
+Files:
+- prepare_nuvio_landing_playback.py prepares candidates only; it checks the
+  inspected prior hashes and never edits live files.
+- test_nuvio_landing_playback.py contains the nine isolated tests.
+- verify_nuvio_landing_candidate.py loads only selected candidate AST functions
+  and tests one existing file without starting the application.
+- Activate-Nuvio-Landing.ps1 installs the matched candidate files, keeps backups
+  and restores the prior files if live verification fails.
+- verify_nuvio_landing_live.py verifies catalog inclusion, the public source
+  sorter, movie playback and the three restored TV playback paths.
+
+The activation is complete; do not rerun it against newer files. Its private
+candidate folder holds prepared.json, candidate-verification.json,
+live-verification.json, activation.json and before-activation backups.
+Current hashes:
+- core: eaea71d7be0ffd3a78650602ee010b2360406bb95486fac286f8f9acefe56b59
+- launcher: 9e1a7a77d4eaaba2e825ddfe9f719f94bb565f82c0c68e78a4dc5cd0e729cc8f
+- guard: 6b9d1d999bf3b4211e21d73d42e4b6b71cb203e076ff6d44a8c7ac4b5b28f16a
+
+The restored TV series use the existing H3 local files in Nuvio; Envy's copied
+TV files remain playable in Jellyfin. This movie-only repair does not add a
+remote Nuvio path for future TV episodes that exist only on Envy.
