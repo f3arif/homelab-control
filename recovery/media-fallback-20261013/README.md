@@ -89,16 +89,33 @@ observe_completed_movie_import.py is a bounded, read-only observer for an
 existing import. This run finished successfully and exited. Its private receipt
 records importComplete=true and playbackVerified=true. No repeat is needed.
 
-## H3 direct TV connection remains pending
+## H3 direct TV connection verified
 
-TV Requests can use the restored Seerr-to-Sonarr connector. H3's direct Sonarr
-status/queue URL remains disabled. Creating a new Tailscale Serve route was
-rejected with 401 Unauthorized because the current account is not an approved
-operator for that change. No route or privilege setting was changed.
+The user approved the SSH alternative on 2026-10-13 after the new Tailscale
+Serve route was denied. The existing Tailscale permissions and routes were
+preserved. No public listener was added.
 
-A loopback-only SSH reverse tunnel has been prepared privately but has not
-been installed or enabled. Approval for this alternative is required before
-connecting H3's direct TV status/queue functions. No public exposure is planned.
+The Envy user service afz-sonarr-h3-tunnel.service is active and enabled.
+It uses the established SSH identity, strict host-key verification, keepalives
+and automatic restart. Existing user lingering was already enabled, so this
+runs independently of the chat and interactive login.
+
+The forwarded listener was verified as H3 127.0.0.1:18801 only. Authenticated
+Sonarr status, all 3 series and the TV queue returned HTTP 200. H3's launcher
+now uses SONARR_URL=http://127.0.0.1:18801/api/v3.
+
+At 21:35 UTC, H3's own system-health endpoint reported Radarr, Sonarr,
+Jellyfin and the Stremio bridge healthy. The TV queue was readable, qBittorrent
+remained ready, and Radarr/qBittorrent remained the selected download route.
+The existing core and all source-health guard files retained their hashes.
+The scheduled task completed with result 0 after the launcher update.
+
+The service template contains placeholders for the private SSH key path and
+target; substitute verified values before installation. Activate-H3-Sonarr.ps1
+requires a recovery directory, checks the exact approved source hashes and
+loopback listener, preserves a launcher backup, and rolls back if the changed
+connection or existing routing fails verification. It is an activation record,
+not a script to rerun against a later deployment without a fresh preflight.
 
 The H3 launcher already reads the private Requests/Radarr connection file and
 uses STREMIO_RADARR_DIRECT_ROOT=/movies. Preserve the core source and existing
