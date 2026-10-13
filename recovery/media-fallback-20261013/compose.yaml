@@ -32,6 +32,7 @@ services:
       - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/radarr:/config
       - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/downloads:/downloads
       - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/library-landing:/movies
+      - ${AFZ_JELLYFIN_ROOT:?Set AFZ_JELLYFIN_ROOT to the native Jellyfin directory}/mounts:/legacy-media:ro
     ports:
       - "127.0.0.1:18797:7878"
     pids_limit: 150
@@ -88,6 +89,28 @@ services:
       interval: 30s
       retries: 3
     restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr@sha256:0deb8db6c839ac475e9cd86277712772c40ba7f929a003d7e1de36c4b666bc13
+    container_name: afz-media-sonarr-fallback-r1
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+    volumes:
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/sonarr:/config
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/downloads:/downloads
+      - ${AFZ_FALLBACK_ROOT:?Set AFZ_FALLBACK_ROOT to the isolated appdata directory}/library-landing-tv:/tv
+    ports:
+      - "127.0.0.1:18801:8989"
+    pids_limit: 150
+    mem_limit: 1024m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    networks:
+      - afz-downloads
 
 networks:
   afz-downloads:
