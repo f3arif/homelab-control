@@ -1,0 +1,122 @@
+{
+  "status": "usb_routes_passed_external_capture_running",
+  "usb": {
+    "status": "current_diagnostics_captured",
+    "capturedAt": "2026-10-14T00:57:24.502524+00:00",
+    "model": "Pixel 10 Pro XL",
+    "serial": "58211FDCQ003VJ",
+    "transport": "usb",
+    "adbServerPort": 5038,
+    "endpoint": "58211FDCQ003VJ",
+    "tailscalePid": "9535",
+    "tailscaleVersion": "1.102.4-t3caf7d9e7-g1b32d3caa",
+    "currentVpnCount": 1,
+    "vpnValidated": true,
+    "vpnIps": [
+      "100.68.144.42"
+    ],
+    "defaultNetwork": [
+      "127"
+    ],
+    "publicDnsResolved": true,
+    "publicPingCode": 0,
+    "settings": {
+      "private_dns_mode": "null",
+      "private_dns_specifier": "null",
+      "airplane_mode_on": "0",
+      "wifi_on": "1",
+      "mobile_data": "1",
+      "always_on_vpn_app": "null",
+      "always_on_vpn_lockdown": "null"
+    },
+    "availableNetworkTools": {
+      "curl": "",
+      "wget": "",
+      "nc": "/system/bin/nc",
+      "nslookup": ""
+    },
+    "settingsChanged": false
+  },
+  "routes": {
+    "status": "fresh_routes_checked",
+    "checkedAt": "2026-10-14T00:57:59.374341+00:00",
+    "device": "Pixel 10 Pro XL",
+    "serial": "58211FDCQ003VJ",
+    "transport": "usb",
+    "adbServerPort": 5038,
+    "h3BackendState": "Running",
+    "h3Health": [],
+    "phoneToH3TailnetPingPassed": true,
+    "afzPreviewVersion": "0.5.1-afz-r33.1-account-link",
+    "privateAddonPreferencesReadable": true,
+    "installedAddonHostChecks": [
+      {
+        "label": "installedAddonHost1",
+        "port": 10000,
+        "dnsAndTcpPassed": true,
+        "code": 0
+      },
+      {
+        "label": "installedAddonHost2",
+        "port": 443,
+        "dnsAndTcpPassed": true,
+        "code": 0
+      }
+    ],
+    "logPatternOccurrences": {
+      "dnsFailures": 0,
+      "derpFailures": 0,
+      "networkFailures": 0,
+      "fatal": 0
+    },
+    "phoneSettingsChanged": false,
+    "limits": [
+      "Installed-addon probe verifies DNS/TCP, not TLS, manifest response or actual media playback.",
+      "USB identity verified through the existing ADB server at port 5038; no ADB server was restarted.",
+      "Healthy current tests do not diagnose the intermittent fault."
+    ]
+  },
+  "recorder": {
+    "status": "running",
+    "startedAt": "2026-10-14T00:59:04.409348+00:00",
+    "pid": 38756,
+    "durationSeconds": 1800,
+    "intervalSeconds": 60,
+    "samples": 1,
+    "failingSamples": 0,
+    "coverageGaps": 0,
+    "settingsChanged": false,
+    "adbServerPort": 5038,
+    "device": "Pixel 10 Pro XL",
+    "serial": "58211FDCQ003VJ",
+    "lastSample": {
+      "sample": 0,
+      "capturedAt": "2026-10-14T00:59:05.114695+00:00",
+      "usbVerified": true,
+      "failures": [],
+      "publicDnsResolved": true,
+      "publicPingCode": 0,
+      "h3PrivatePingPassed": true,
+      "addonHosts": [
+        {
+          "label": "addonHost1",
+          "port": 10000,
+          "code": 0
+        },
+        {
+          "label": "addonHost2",
+          "port": 443,
+          "code": 0
+        }
+      ],
+      "tailscalePid": "9535"
+    }
+  },
+  "task": {
+    "name": "AFZ Pixel10 USB Route Capture 20261013",
+    "triggerCount": 0,
+    "hardRuntimeLimitMinutes": 35
+  },
+  "rootCauseConfirmed": false,
+  "appsOrNetworkSettingsChanged": false
+}
