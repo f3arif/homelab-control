@@ -1,0 +1,12 @@
+// Source discovery uses the existing private headless provider configuration.
+// Account/order operations retain their original getCollection behavior.
+async function getExternalSourceCollection(){
+  const p='C:\\AFZ\\Stremio-Failover-H3\\private\\addon-collection-private.json';
+  const obj=JSON.parse(fs.readFileSync(p,'utf8'));
+  const addons=Array.isArray(obj?.addons)?obj.addons:[];
+  const selected=addons.filter(a=>/debridio|torrentio|comet/i.test(
+    String(a?.manifest?.name||'')+' '+String(a?.manifest?.id||'')));
+  if(!selected.length)throw new Error('STATIC_SOURCE_COLLECTION_EMPTY');
+  return selected;
+}
+
