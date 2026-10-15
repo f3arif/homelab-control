@@ -1,0 +1,5 @@
+# AFZ expired-link recovery: retain only source identity, never provider URLs.
+from external_stream_recovery import SourceHistory, same_file as _same_external_file
+_external_history=SourceHistory(EXTERNAL_SOURCE_CACHE_FILE.with_name('external-source-history.json'))
+_external_history.remember_many(external_source_cache.get('rows') or {})
+
