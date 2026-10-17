@@ -1,0 +1,51 @@
+{
+  "resumeKey": "AFZ-ONN-INTERNET-20261017",
+  "addon": {
+    "name": "AFZ Internet",
+    "id": "com.afzengineering.releasecatalog.internet",
+    "catalogs": 16,
+    "types": [
+      "movie",
+      "series"
+    ]
+  },
+  "runtime": {
+    "host": "H3",
+    "task": "AFZ ONN Internet Gateway",
+    "gatewaySha256": "cd561c26587fa7c86689226b95c79189d93d9c132a71941b44a71ceeefa681dc",
+    "startupTriggers": [
+      "boot",
+      "user_sign_in"
+    ],
+    "loopbackPort": 19088,
+    "publicPort": 443,
+    "existingTcpMappingsPreserved": 19,
+    "existingWebMappingsPreserved": 14
+  },
+  "validation": {
+    "linuxTests": 30,
+    "windowsTests": 30,
+    "publicDnsTlsChecks": 10,
+    "startRange206": true,
+    "seekRange206": true,
+    "head200": true,
+    "anonymousAndControlRoutesDenied": true
+  },
+  "onn": {
+    "model": "onn. 4K Streaming Box",
+    "identityVerified": true,
+    "app": "com.stremio.one",
+    "version": "1.11.2",
+    "addonInstalled": true,
+    "confirmation": "Install changed to Uninstall",
+    "vpnTransportPresent": false,
+    "tun0Present": false,
+    "renderedPlaybackObserved": false
+  },
+  "retiredTrial": {
+    "host": "ZBook",
+    "newGatewayDisabled": true,
+    "newFunnelRemoved": true,
+    "originalRoutesPreserved": true
+  }
+}
