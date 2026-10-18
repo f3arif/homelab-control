@@ -1,0 +1,50 @@
+{
+  "utc": "2026-10-18T03:53:00Z",
+  "failure": {
+    "originalManifestStatus": 502,
+    "originalSourcesStatus": 502,
+    "coreManifestStatus": 200,
+    "coreSources": 12,
+    "internetManifestStatus": 200,
+    "internetSources": 11,
+    "originalProxyListenerAbsent": true,
+    "originalStartupTaskDisabled": true
+  },
+  "repair": {
+    "task": "AFZ Nuvio Public Edge",
+    "startupAndLogon": true,
+    "restartAttempts": 3,
+    "restartIntervalSeconds": 60,
+    "runLevel": "Limited",
+    "coreRestarted": false,
+    "existingMappingsPreserved": true,
+    "proxySourceUnchanged": true,
+    "sourceSha256": "a5f66368f5713718ae87d88e2e2780d98aeb9aba126148dc155259e004d54ebd"
+  },
+  "acceptance": {
+    "publicDnsVerified": true,
+    "tlsVerified": true,
+    "checks": 9,
+    "manifestStatus": 200,
+    "catalogs": 19,
+    "catalogItems": 10,
+    "episodeSources": 12,
+    "anonymousStatus": 404,
+    "metadataStatus": 200,
+    "artworkStatus": 200,
+    "artworkBytes": 65098,
+    "mediaStart": {
+      "status": 206,
+      "bytes": 4096,
+      "range": "bytes 0-4095/2573211753",
+      "validContainer": true
+    },
+    "mediaSeek": {
+      "status": 206,
+      "bytes": 4096,
+      "range": "bytes 1048576-1052671/2573211753"
+    },
+    "mediaHeadStatus": 200,
+    "physicalDevicePlaybackObserved": false
+  }
+}
