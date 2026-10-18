@@ -1,0 +1,5 @@
+*-private.*
+*.log
+__pycache__/
+serve-before-private.json
+runtime-private.json
