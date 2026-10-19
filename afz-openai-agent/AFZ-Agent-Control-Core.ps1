@@ -7,6 +7,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $allowFile=Join-Path $InstallRoot 'afz-openai-agent\allowed-clients.txt'
+$deployPeerFile=Join-Path $InstallRoot 'afz-openai-agent\deploy-peers.json'
 $logRoot='C:\ProgramData\AFZ\OpenAIAgent\logs'
 $sourceState='C:\ProgramData\AFZ\OpenAIAgent\source-state.json'
 $updateState='C:\ProgramData\AFZ\OpenAIAgent\last-update.json'
@@ -50,11 +51,32 @@ function Get-TailscaleCli{
   if($c){if($c.Source){return [string]$c.Source};if($c.Path){return [string]$c.Path}}
   $p='C:\Program Files\Tailscale\tailscale.exe';if(Test-Path $p){return $p};return $null
 }
+function Get-PinnedDeployPeers{
+  if(-not(Test-Path -LiteralPath $deployPeerFile -PathType Leaf)){return @()}
+  try{
+    $items=@(Get-Content -LiteralPath $deployPeerFile -Raw -Encoding UTF8|ConvertFrom-Json)
+    return @($items|Where-Object{
+      [string]$_.stableId -match '^[A-Za-z0-9]{8,64}$' -and
+      [string]$_.nodeName -match '^[A-Za-z0-9.-]+$'
+    })
+  }catch{return @()}
+}
 function Test-DeployPeer([string]$ip){
   if($ip -in @('127.0.0.1','::1')){return $true}
   if($ip -notmatch '^100\.(?:\d{1,3}\.){2}\d{1,3}$'){return $false}
   $ts=Get-TailscaleCli;if(-not $ts){return $false}
-  try{$raw=(& $ts whois --json $ip 2>$null|Out-String);if($LASTEXITCODE -ne 0){return $false};return [bool]($raw -match '"tag:afz-deploy"')}catch{return $false}
+  try{
+    $raw=(& $ts whois --json $ip 2>$null|Out-String)
+    if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)){return $false}
+    $who=$raw|ConvertFrom-Json
+    if(@($who.Node.Tags) -contains 'tag:afz-deploy'){return $true}
+    $stable=[string]$who.Node.StableID
+    $name=[string]$who.Node.Name
+    foreach($peer in @(Get-PinnedDeployPeers)){
+      if(([string]$peer.stableId -eq $stable) -and ([string]$peer.nodeName -eq $name)){return $true}
+    }
+    return $false
+  }catch{return $false}
 }
 function Start-H3QwenBenchmark([string]$jobId,[int]$startIteration,[int]$maxIterations,[string]$sha){
   if($jobId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$'){throw 'invalid benchmark jobId'}
