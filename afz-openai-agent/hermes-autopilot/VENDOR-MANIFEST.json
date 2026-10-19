@@ -1,0 +1,18 @@
+{
+  "schema": "afz-r3-vendor-manifest-v1",
+  "source": {
+    "origin_head": "d7931b4212c944540f684f76fcbe4aece1a5b1a0",
+    "origin_source_commit": "88d54117ebdebb19e1264526dc18524e8344e280",
+    "independent_receipt_sha256": "17269514e5cd4567b49787b87df4b9a7f01b47592cf2ee9b066b5b2e969913f0",
+    "files": {
+      "src/afz_autopilot/core.py": "617f227717b7b0ecd500d5618664fae79472c8f5634b0ce74ae238255a6db651",
+      "tests/vendor/test_acceptance.py": "30fade9ebbd496bf7a89c67cca03959d886effb3e3eb21f7ad33479031283fb1",
+      "tests/vendor/test_independent_regressions.py": "beca76a8907d245c5a7a87ae9ec13abb59fbe9d0215899d8ba9e146691322c8b",
+      "tests/vendor/test_r2_corrections.py": "c0d01aad8e0bc64a27567178027e664c0fce8fb1446b3f43cad89e46bec68673",
+      "tests/vendor/test_r2_extended_independent.py": "06f13783cec010760af15a19b7f453d9fa47cde193dcb7d71df019806aaf4df8",
+      "tests/vendor/test_r3_claim_recovery_independent.py": "e4702bd2a4bebfe563fc639e454ef04d6ffb6103dd57eb8b95e5842a02baa81e",
+      "tests/vendor/test_r3_corrections.py": "a7eb37f4fe7264259e6f38fd1303bfbafd9217a4bf7aebbff6fe0cb2adc0905f"
+    },
+    "unique_test_cases": 54
+  }
+}

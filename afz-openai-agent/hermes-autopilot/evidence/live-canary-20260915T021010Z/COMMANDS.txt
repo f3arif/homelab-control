@@ -1,0 +1,29 @@
+AFZ Hermes Autopilot protected integration command receipt
+UTC evidence directory: 2026-09-15T02:10:10Z
+
+Source preflight (exit 0):
+  git ls-remote --heads https://github.com/f3arif/homelab-control.git main
+Observed refs/heads/main:
+  0e8987577c5d5860ca55cdff4e1943bc22ff67e9
+Local branch merge-base with main:
+  0e8987577c5d5860ca55cdff4e1943bc22ff67e9
+
+Read-only fixed-target precheck (exit 0):
+  AFZ_PRECHECK_OUT=<evidence>/precheck PYTHONPATH=<project>/src PYTHONDONTWRITEBYTECODE=1 <project>/.venv/Scripts/python.exe C:/AFZ/Development/AFZ-Hermes-Autopilot-Integration-20260914/work/precheck_health.py
+Network request resolved by the checked adapter:
+  GET http://100.70.25.8:8797/health
+  body=null
+
+Read-only canary (exit 0):
+  <project>/.venv/Scripts/afz-autopilot-health-canary.exe --state-db <evidence>/canary/state.sqlite3 --admission-db <evidence>/canary/admission.sqlite3 --evidence-dir <evidence>/canary --authorization-key AFZ-HERMES-AUTOPILOT-INTEGRATION-20260914 --source-task-id t_834aebec --source-task-status triage
+Network request resolved by the checked adapter:
+  GET http://100.70.25.8:8797/health
+  body=null
+
+Separate verifier command (exit 0):
+  C:/AFZ/Development/AFZ-Hermes-Autopilot-Integration-20260914/work/homelab-control/afz-openai-agent/hermes-autopilot/.venv/Scripts/python.exe -m afz_hermes_autopilot.verifier_cli --packet C:/AFZ/Development/AFZ-Hermes-Autopilot-Integration-20260914/work/homelab-control/afz-openai-agent/hermes-autopilot/evidence/live-canary-20260915T021010Z/canary/worker-execution-packet.json --packet-sha256 d961961db90d8bc7cc5fb86883adeb7fb03444bebe2582f6538a9bb955a192f5 --source-sha256 6ee8d074af239dc056f3a57b17f0a2f6af351def370f84be9be04bf48a54bb20 --expected-commit 0e8987577c5d5860ca55cdff4e1943bc22ff67e9 --approval-id 07cf82cc5edd5f71bd3072c957db348c3a334934c1a5abac03671b1d66fa7e94 --output C:/AFZ/Development/AFZ-Hermes-Autopilot-Integration-20260914/work/homelab-control/afz-openai-agent/hermes-autopilot/evidence/live-canary-20260915T021010Z/canary/verifier-process-output.json
+Network request resolved by the checked adapter:
+  GET http://100.70.25.8:8797/health
+  body=null
+
+No POST/apply/audit route was called. The authorization key above is a public mission resume/binding key, not a credential or authenticated identity proof.

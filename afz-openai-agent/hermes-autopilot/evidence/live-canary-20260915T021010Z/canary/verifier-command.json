@@ -1,0 +1,17 @@
+[
+  "C:\\AFZ\\Development\\AFZ-Hermes-Autopilot-Integration-20260914\\work\\homelab-control\\afz-openai-agent\\hermes-autopilot\\.venv\\Scripts\\python.exe",
+  "-m",
+  "afz_hermes_autopilot.verifier_cli",
+  "--packet",
+  "C:\\AFZ\\Development\\AFZ-Hermes-Autopilot-Integration-20260914\\work\\homelab-control\\afz-openai-agent\\hermes-autopilot\\evidence\\live-canary-20260915T021010Z\\canary\\worker-execution-packet.json",
+  "--packet-sha256",
+  "d961961db90d8bc7cc5fb86883adeb7fb03444bebe2582f6538a9bb955a192f5",
+  "--source-sha256",
+  "6ee8d074af239dc056f3a57b17f0a2f6af351def370f84be9be04bf48a54bb20",
+  "--expected-commit",
+  "0e8987577c5d5860ca55cdff4e1943bc22ff67e9",
+  "--approval-id",
+  "07cf82cc5edd5f71bd3072c957db348c3a334934c1a5abac03671b1d66fa7e94",
+  "--output",
+  "C:\\AFZ\\Development\\AFZ-Hermes-Autopilot-Integration-20260914\\work\\homelab-control\\afz-openai-agent\\hermes-autopilot\\evidence\\live-canary-20260915T021010Z\\canary\\verifier-process-output.json"
+]
