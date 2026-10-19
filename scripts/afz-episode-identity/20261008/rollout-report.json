@@ -1,0 +1,137 @@
+{
+  "resumeKey": "AFZ-EPISODE-IDENTITY-20261008",
+  "status": "deployed_verified",
+  "manifestVersion": "0.6.243",
+  "baseSha256": "3a51419da35600ffa9668e3e60923a63459afb76e5e6325bf4fd1c0eed7a347f",
+  "liveSha256": "d6523ee180b3ea6e0b8a41d08c4454e945af662f0d585fc6139a370826605a4f",
+  "tests": {
+    "passed": true,
+    "testsRun": 37,
+    "failures": 0,
+    "errors": 0,
+    "releaseIdentityCases": 24
+  },
+  "deploymentCompletedAtUtc": "2026-10-08T21:49:14.5502422Z",
+  "rollbackCopiesPreserved": true,
+  "runtimeChecks": {
+    "atUtc": "2026-10-08T21:49:13.116813+00:00",
+    "cases": [
+      {
+        "videoId": "tt0108778:1:1",
+        "canonicalTitle": "Friends",
+        "playableCount": 11,
+        "autoFilename": "Friends.S01E01.The.One.Where.Monica.Gets.a.Roommate.UHD.BluRay.2160p.DTS-HD.MA.5.1.DV.HEVC.REMUX-FraMeSToR.mkv",
+        "wrongShowCount": 0,
+        "names": [
+          "AFZ TV Mobile 1080p · Comet",
+          "AFZ TV Mobile 1080p · Comet",
+          "AFZ TV Auto",
+          "AFZ TV 1080p · Comet",
+          "AFZ TV 2160p · Comet",
+          "AFZ TV 1080p · Comet",
+          "AFZ TV 2160p · Torrentio",
+          "AFZ TV 1080p · Comet",
+          "AFZ TV 2160p · Comet",
+          "AFZ TV 1080p · Comet",
+          "AFZ TV 2160p · Comet",
+          "AFZ Auto Download ✓"
+        ]
+      },
+      {
+        "videoId": "tt0169414:1:1",
+        "canonicalTitle": "Arthur",
+        "localFilePreserved": true,
+        "wrongYearAbsent": true,
+        "streams": [
+          {
+            "name": "AFZ TV Downloaded",
+            "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day.mkv"
+          },
+          {
+            "name": "AFZ TV Save Offline",
+            "filename": null
+          },
+          {
+            "name": "AFZ TV Auto",
+            "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Torrentio",
+            "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV DVDRip · Comet",
+            "filename": "Arthur.S01E01.TRUEFRENCH.DVDrip.x264-NOTAG.m4v"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - S01E01 - Arthur's Eyes SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - S01E01 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - S01E01-E02 - Arthur's Eyes + Francine's Bad Hair Day SDTV.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - S01E01 S01E02 - Arthur's Eyes - Francine's Bad Hair Day.mkv"
+          },
+          {
+            "name": "AFZ TV Source · Comet",
+            "filename": "Arthur - Season 1 - Episode 1 - Full Episode - Arthur's Eyes 1-2.mp4"
+          },
+          {
+            "name": "AFZ Auto Download ✓",
+            "filename": null
+          }
+        ]
+      }
+    ],
+    "mediaPlayed": false,
+    "mediaDownloadQueued": false,
+    "manifestVersion": "0.6.243",
+    "oldExcludedResolverStatus": 404,
+    "excludedFilename": "老友记.Friends.S01E01.1080p.WEB-DL.H264.AAC-SeeWEB.mp4",
+    "passed": true
+  },
+  "pixelChecks": {
+    "passed": true,
+    "atUtc": "2026-10-08T21:55:53.171358+00:00",
+    "model": "Pixel 10 Pro XL",
+    "videoId": "tt0108778:1:1",
+    "featuredSource": "1080p | 1.6 GB | TorBox / Comet | cached | FRIENDS.S01E01.The.One.Where.Monica.Gets.a.Roommate.MULTi.1080p.MAX.WEB-DL.DDP2.0.H264-Ralf.mkv",
+    "featuredBeforeSourceGroup": true,
+    "unrelatedShowsAbsentFromCapturedList": true,
+    "currentAppCrashBufferLines": 0,
+    "accelerometerRotation": "1",
+    "userRotation": "0",
+    "deviceSettingsChanged": false,
+    "mediaPlayed": false,
+    "mediaDownloadQueued": false,
+    "evidence": [
+      "episode-identity-final-top",
+      "episode-identity-final-lower",
+      "episode-identity-final-bottom"
+    ],
+    "fullListEvidenceSameRefresh": true,
+    "featuredAppearsOnce": true,
+    "capturedSourceRowsIncludingOverlaps": 14,
+    "allCapturedReleaseIdentitiesMatched": true
+  },
+  "mediaPlayed": false,
+  "mediaDownloadQueued": false,
+  "knownLimits": [
+    "Strict canonical-title matching can hide otherwise legitimate localized or anonymous filenames",
+    "No full playback or download validation",
+    "OnePlus acceptance remains separate",
+    "Intermittent Tailscale fault remains unresolved"
+  ],
+  "firstAttemptStoppedBeforeMutation": true
+}
