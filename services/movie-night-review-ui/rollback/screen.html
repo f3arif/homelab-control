@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mn-base" content="__BASE__"><meta name="mn-csrf" content="__CSRF__">
+<title>Movie Night</title><link rel="stylesheet" href="__BASE__/screen.css"><script defer src="__BASE__/screen.js"></script></head>
+<body><main><header><p class="eyebrow">Your Wednesday shortlist</p><h1>Movie Night</h1>
+<p>Suspense, relationship tension and twists. Movies from 2016 onward, without intense horror.</p>
+<p>Crime thrillers can include strong violence and mature themes.</p>
+<p>Like what interests you. Dislike a suggestion to replace it. Select and finalize 3–4 movies when you are ready.</p></header>
+<p id="notice" role="status" aria-live="polite"></p><section id="movies" aria-label="Movie suggestions"></section>
+<section id="refill" aria-label="More reviewed suggestions"><p id="reserve-status"></p><button id="request-refill" type="button">Request more reviewed picks</button><p id="refill-status" role="status">Requests wait for the next reviewed update; they do not start downloads.</p></section>
+<section id="selection" hidden aria-label="Finalize your picks"><p id="selection-count" role="status"></p>
+<button id="finalize" type="button" disabled>Finalize 3–4 picks</button><p>Likes and finalized picks never start a download.</p></section>
+<section id="finalized" hidden aria-label="Finalized picks"><h2>Your finalized picks</h2><p id="finalized-status"></p>
+<div id="finalized-movies"></div><p>Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.</p></section>
+<details id="removed" hidden><summary>Removed suggestions</summary><div id="removed-movies"></div></details>
+<section id="stream-result" hidden><h2>Checked source</h2><p>Source and connection checked recently. Actual playback has not been verified.</p><a id="stream-now">Stream now</a></section>
+<section id="job" hidden aria-labelledby="job-title"><h2 id="job-title">Your download</h2><p id="job-status" role="status" aria-live="polite"></p>
+<progress id="progress" value="0" max="1" aria-label="Downloaded bytes"></progress><p id="completion"></p>
+<button id="cancel" type="button">Cancel download</button></section>
+<dialog id="confirmation" aria-labelledby="confirm-title"><h2 id="confirm-title" tabindex="-1">Confirm server download</h2>
+<p>Only this file will be requested. A changed source needs a new confirmation.</p><dl id="facts"></dl>
+<label for="reply">Type <strong>yes</strong> to confirm this exact download</label><input id="reply" autocomplete="off" spellcheck="false">
+<p id="confirm-error" role="alert"></p><div class="buttons"><button id="confirm-yes" type="button">Confirm download</button><button id="back" type="button">Not now</button></div></dialog>
+</main></body></html>
