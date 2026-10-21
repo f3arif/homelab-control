@@ -1,0 +1,61 @@
+name: Movie Night staged UI read-only review
+on:
+  push:
+    branches: [codex/movie-night-ui-refresh-20261021]
+    paths: [.github/workflows/movie-night-ui-readonly-20261021.yml]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: movie-night-ui-readonly-20261021
+  cancel-in-progress: true
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Join existing AFZ tailnet
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:afz-deploy
+          version: 1.94.2
+          retry: 1
+      - name: Inspect existing Movie Night staging without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          date -u +%FT%TZ
+          timeout 12 tailscale ping --c 1 --timeout 5s 100.71.26.69 || true
+          timeout 12 tailscale ping --c 1 --timeout 5s 100.77.196.70 || true
+          for host in 100.71.26.69 100.77.196.70; do
+            if timeout 3 bash -c "</dev/tcp/$host/22" 2>/dev/null; then
+              echo "SSH_TCP=$host:open"
+            else
+              echo "SSH_TCP=$host:unreachable"
+            fi
+          done
+          timeout 25 tailscale ssh coolyo@100.71.26.69 'python3 -' <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, socket
+          base = Path('/home/coolyo/afz-stremio-secondhost-20260918')
+          stage = base / 'movie-night-ui-refresh-20261021'
+          print('REMOTE_HOST=' + socket.gethostname())
+          print('STAGE_EXISTS=' + str(stage.is_dir()))
+          for p in [Path('/AGENTS.md'), Path('/home/AGENTS.md'), Path('/home/coolyo/AGENTS.md'), base/'AGENTS.md', stage/'AGENTS.md']:
+              if p.is_file():
+                  print('POLICY_FILE=' + str(p))
+                  print(p.read_text()[:30000])
+          if not stage.is_dir():
+              raise SystemExit(2)
+          for p in sorted(stage.iterdir()):
+              print('STAGED_ENTRY=' + json.dumps({'name':p.name, 'bytes':p.lstat().st_size, 'directory':p.is_dir(), 'symlink':p.is_symlink()}))
+          p = stage/'swap.sh'
+          if p.is_file() and not p.is_symlink():
+              data=p.read_bytes()
+              print('SWAP_SHA256=' + hashlib.sha256(data).hexdigest())
+              print('SWAP_SOURCE_BEGIN')
+              print(data.decode())
+              print('SWAP_SOURCE_END')
+          PY
