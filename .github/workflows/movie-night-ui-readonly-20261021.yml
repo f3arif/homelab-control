@@ -1,7 +1,7 @@
 name: Movie Night staged UI read-only review
 on:
   push:
-    branches: [codex/movie-night-ui-refresh-20261021]
+    branches: [main]
     paths: [.github/workflows/movie-night-ui-readonly-20261021.yml]
 permissions:
   contents: read
