@@ -6,6 +6,7 @@ const fs=require('fs'),assert=require('node:assert/strict');
  try{
   for(const width of [360,412,1280]){
    const p=await browser.newPage();await p.setViewport({width,height:860});
+   await p.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
    await p.setCookie({name:'afz_owner',value:process.env.AFZ_GATEWAY_QA_COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});
    const errors=[];p.on('pageerror',e=>errors.push(e.message));
    await p.goto(origin+'/movie-night',{waitUntil:'networkidle0',timeout:40000});
