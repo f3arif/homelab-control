@@ -1,6 +1,8 @@
 'use strict';
 const base = document.querySelector('meta[name="mn-base"]').content;
 const csrf = document.querySelector('meta[name="mn-csrf"]').content;
+const minPicks = Number(document.querySelector('meta[name="mn-min-picks"]').content);
+const maxPicks = Number(document.querySelector('meta[name="mn-max-picks"]').content);
 const $ = id => document.getElementById(id);
 let pending = null, job = null, timer = null, loadGeneration = 0;
 let sourceBusy=false,downloadTimer=null;
@@ -122,12 +124,12 @@ function sameAsFinalized(){return finalizedValid&&finalizedIds.length===selected
 function selectionCount(){
   const n=selected.size, done=sameAsFinalized();
   const dots=document.createElement('span');dots.className='dots';dots.setAttribute('aria-hidden','true');
-  for(let i=0;i<4;i++){const d=document.createElement('i');if(i<n)d.className='on';dots.append(d);}
-  const label=done?`${n} picks finalized`:n<3?`${n} of 3–4 picked`:`${n} picked · ready to finalize`;
+  for(let i=0;i<maxPicks;i++){const d=document.createElement('i');if(i<n)d.className='on';dots.append(d);}
+  const label=done?`${n} picks finalized`:n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
   $('selection-count').replaceChildren(dots,document.createTextNode(label));
-  $('selection-names').textContent=n?[...selected].map(id=>titles.get(id)||'').filter(Boolean).join(' · '):'Use Pick on 3 or 4 movies.';
-  $('finalize').textContent=done?'Finalized ✓':n>=3&&n<=4?`Finalize ${n} picks`:'Finalize picks';
-  $('finalize').disabled=reviewBusy||done||n<3||n>4;
+  $('selection-names').textContent=n?[...selected].map(id=>titles.get(id)||'').filter(Boolean).join(' · '):`Use Pick on ${minPicks}–${maxPicks} movies.`;
+  $('finalize').textContent=done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks';
+  $('finalize').disabled=reviewBusy||done||n<minPicks||n>maxPicks;
   for(const [id,ui] of pickCards)paintPick(id,ui);
 }
 function paintPick(id,ui){
@@ -240,13 +242,13 @@ async function dislike(movie,value='dislike'){
   if(await reviewWrite('feedback',{imdb:movie.id,value}))
     toast(value==='seen'?`Marked “${movie.name}” as seen. It won’t be suggested again.`:`Removed “${movie.name}”`,'Undo',async()=>{
       if(await reviewWrite('feedback',{imdb:movie.id,value:previous})){
-        if(wasPicked&&pickCards.has(movie.id)&&selected.size<4){selected.add(movie.id);selectionCount();}
+        if(wasPicked&&pickCards.has(movie.id)&&selected.size<maxPicks){selected.add(movie.id);selectionCount();}
       }
     });
 }
 function togglePick(movie){
   if(selected.has(movie.id))selected.delete(movie.id);
-  else if(selected.size>=4){toast('You already have 4 picks. Remove one first.');return;}
+  else if(selected.size>=maxPicks){toast(`You already have ${maxPicks} picks. Remove one first.`);return;}
   else selected.add(movie.id);
   selectionCount();
 }
@@ -260,7 +262,7 @@ function render(data){
   if(!data.actionsEnabled)messages.push('Downloads and stream checks are not activated.');
   if(data.shortlistFresh===false)messages.push('Weekly suggestions need refreshing. Your likes, dislikes and saved selections are retained.');
   else if(!data.movies.length)messages.push('No more reviewed suggestions match. Removed or seen movies will not be used as replacements.');
-  else if(data.movies.length<5)messages.push('These are the remaining reviewed matches; no unrelated fallback was added.');
+  else if(data.movies.length<(data.selectionLimits?.visible||maxPicks))messages.push('These are the remaining reviewed matches; no unrelated fallback was added.');
   inform(messages);
   for(const movie of data.movies){
     const card=cardBody(movie,'h2');
@@ -298,7 +300,7 @@ function render(data){
   $('selection').hidden=!data.reviewEnabled;
   const f=data.finalized||{ids:[],valid:false,movies:[]};$('finalized').hidden=!f.ids.length;
   finalizedIds=f.ids||[];finalizedValid=!!f.valid;
-  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. No download starts until you confirm an exact file.`:f.reason==='genre-filter'?'Your saved selections are retained, but a title is ineligible under your no Comedy filter. Choose eligible replacements.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':'Your saved selections are retained but need review because eligibility or feedback changed. Finalize 3–4 eligible movies again.';
+  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. No download starts until you confirm an exact file.`:f.reason==='genre-filter'?'Your saved selections are retained, but a title is ineligible under your no Comedy filter. Choose eligible replacements.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
   for(const movie of f.movies){const card=cardBody(movie,'h3');if(f.valid&&data.actionsEnabled)card.append(watchButtons(movie,true));$('finalized-movies').append(card);}
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}

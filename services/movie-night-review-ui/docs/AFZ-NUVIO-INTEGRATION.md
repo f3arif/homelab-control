@@ -7,7 +7,7 @@ Scope: separate web access is implemented in this change. The Android integratio
 
 The independent entry is `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. Tailscale Serve authenticates the caller; a private allowlist admits only the existing owner's exact account. The gateway binds to loopback and exposes only Movie Night routes. No billing password, cookie or billing endpoint is used. The old billing entry on 8447 remains available for compatibility. Both reach the same private review socket and stable internal principal, so existing feedback, finalized selections and jobs are preserved.
 
-Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, stacked on download PR #281 commit `7f5a84689840074462f58e5fe547d76a5d43d239`. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. Downloads require finalizing 3–4 eligible films, reviewing one exact file, then explicit yes. Files go to HP Envy, not the phone or ZBook.
+Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, stacked on download PR #281 commit `7f5a84689840074462f58e5fe547d76a5d43d239`. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. Downloads require finalizing 3–10 eligible films, reviewing one exact file, then explicit yes. Files go to HP Envy, not the phone or ZBook.
 
 AFZ Nuvio PR #21 is an open draft at `579d79c81338eed7431127629744f9bba47a1ea5`. R48 build161 was built but its handoff reports no installation. Native source was independently read on H3, WSL **Ubuntu-24.04**, `/home/faiz/afz-nuvio-r48-movie-night-daily-20261023`, clean commit `6e79f7c4e1c256cd4fb9e87049254c3b9ef9bd5a`. Do not confuse that native commit with the GitHub receipts commit.
 
@@ -37,7 +37,7 @@ Before editing, refresh both repos and all claim-board pages. Preserve R48/PR #2
 
 Create `MovieNightServerClient` and `MovieNightServerRepository` in the existing home feature. Use the app's established HTTP stack, bounded timeouts/response sizes and normal TLS verification. Tailscale adds identity at the server proxy; the app must never synthesize a `Tailscale-User-Login` header, ship a billing password or store provider keys.
 
-Fetch `/movie-night/api/shortlist`; render the same five visible cards in server order, the saved finalization and `/movie-night/api/downloads` status. Resolve relative poster paths against the configured origin. Persist only a bounded owner/profile-scoped snapshot, mark it stale when offline and disable mutations. Do not silently fall back to a different list. An access denial hides cached private data until the owner reconnects. Refresh on foreground/reconnect and after each successful mutation, with bounded polling only while visible.
+Fetch `/movie-night/api/shortlist`; render the same ten visible cards in server order, the saved finalization and `/movie-night/api/downloads` status. Resolve relative poster paths against the configured origin. Persist only a bounded owner/profile-scoped snapshot, mark it stale when offline and disable mutations. Do not silently fall back to a different list. An access denial hides cached private data until the owner reconnects. Refresh on foreground/reconnect and after each successful mutation, with bounded polling only while visible.
 
 Keep server Movie Night “Seen” separate from Nuvio's playback/watch history until an explicit reconciliation feature is designed. Never bulk-import historical Skip/dismissal as “Not for me”: those actions had different meaning. Likewise, do not apply native daily shuffling to the continuously replenished server list.
 
@@ -47,7 +47,7 @@ Add an authenticated, non-cacheable `/movie-night/api/session` endpoint returnin
 
 Retain exact external Origin checking and `X-Movie-Night-CSRF` on writes. The standalone gateway normalizes a successfully checked external Origin to the backend's legacy origin; never let a client choose the backend origin or principal. For native requests set the documented public Origin explicitly. Authentication remains the owner Tailscale identity on every request, with no CORS wildcard or general bearer bypass.
 
-For true cross-device Pick synchronization, add a server draft resource before advertising it: `GET/PUT /movie-night/api/selection` with `{ids, revision}` and compare-and-swap conflict handling. This is a proposed contract, not a current endpoint. Limit drafts to four eligible IDs; Finalize still requires 3–4. Add a revision-aware finalize operation so one device cannot silently overwrite a newer selection. Store draft and finalization atomically with their revision, and update the web UI to consume the same resource. Do not automatically merge competing selections or replay an uncertain finalize.
+For true cross-device Pick synchronization, add a server draft resource before advertising it: `GET/PUT /movie-night/api/selection` with `{ids, revision}` and compare-and-swap conflict handling. This is a proposed contract, not a current endpoint. Limit drafts to ten eligible IDs; Finalize still requires 3–10. Add a revision-aware finalize operation so one device cannot silently overwrite a newer selection. Store draft and finalization atomically with their revision, and update the web UI to consume the same resource. Do not automatically merge competing selections or replay an uncertain finalize.
 
 Current APIs to preserve:
 
@@ -55,7 +55,7 @@ Current APIs to preserve:
 |---|---|---|
 | Feedback | `POST /movie-night/api/feedback`, `{imdb,value}` | Use existing backend values; explicit Like / Not for me / Seen / Undo semantics |
 | Refill | Same endpoint, `{action:"request-refill",requestId}` | Preserve existing deduplication; no download side effect |
-| Finalize | `POST /movie-night/api/finalize`, `{ids}` | 3–4 eligible IDs; extend with revision in the shared-draft phase |
+| Finalize | `POST /movie-night/api/finalize`, `{ids}` | 3–10 eligible IDs; extend with revision in the shared-draft phase |
 | Prepare source | `POST /movie-night/api/propose`, `{imdb}` | Poll returned `lookupId` at `/api/lookup/{id}` |
 | Approve exact file | `POST /movie-night/api/approve`, `{confirmationId,binding,reply:"yes"}` | Explicit review/confirmation; never auto-approve on Pick or Like |
 | Status / cancel | `GET /api/status/{confirmationId}`; `POST /api/cancel`, `{confirmationId}` | Preserve completed files and durable job state |
@@ -72,7 +72,7 @@ For completed media, use the existing authenticated catalog/media paths and veri
 
 ## Acceptance and rollout gates
 
-Use disposable movies/provider/video for all write/download tests. Verify web/native list parity by IMDb and revision; Like, Seen, Not for me and Undo on each surface; two-device draft conflicts; 4-pick limit; invalid/stale finalization; offline and access revocation; switching profiles mid-request; expired CSRF/confirmation; duplicate approval; cancel/restart; unavailable sources and low storage. Never verify by changing real saved choices without the user's instruction.
+Use disposable movies/provider/video for all write/download tests. Verify web/native list parity by IMDb and revision; Like, Seen, Not for me and Undo on each surface; two-device draft conflicts; 10-pick limit; invalid/stale finalization; offline and access revocation; switching profiles mid-request; expired CSRF/confirmation; duplicate approval; cancel/restart; unavailable sources and low storage. Never verify by changing real saved choices without the user's instruction.
 
 Run the existing native Movie Night policy/session/catalog/UI tests plus new contract/profile-isolation tests and the full Android host suite. R48's recorded baseline is 1729 passing tests, not a claim about the future integration build. Verify phone layout, TalkBack and TV remote focus where supported. Preserve signing key/package and increment versionCode. Stage a signed build and exact source/receipt; obtain installation authorization, then verify on Pixel 10 Pro XL and OnePlus 13R. No physical-device acceptance is implied by desktop browser emulation.
 

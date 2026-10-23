@@ -8,9 +8,11 @@ The standalone gateway validates the actual external Host/Origin before normaliz
 
 Access deployment: run the 16 standalone boundary tests and tests/standalone_qa.py from a clean tested checkout, then deploy_access.py apply on HP Envy. The script verifies tested source hashes, unused ports and owner identity, adds only afz-movie-night-access.service and the 8453 handler, and guards unrelated Serve configuration. Rollback from /home/coolyo/afz-stremio-secondhost-20260918/movie-night-access-20261023/deploy_access.py rollback refuses drift and leaves preferences/media/backend intact. Other historical download/UI rollback scripts do not manage this access service.
 
+The page shows up to ten eligible suggestions, and both the server and browser allow 3–10 finalized picks. Refresh an already-open page after upgrading. Saved 3/4-pick selections remain valid; picking/finalizing still never starts a download.
+
 The source-backed Android integration plan is [docs/AFZ-NUVIO-INTEGRATION.md](docs/AFZ-NUVIO-INTEGRATION.md). Nuvio currently uses its own local Movie Night picker; this change does not install an APK or claim synchronized draft picks.
 
-Use Pick on 3 or 4 movies, Finalize, then Review server download. Lookup examines only completed, present files already in the owner's configured TorBox inventory. It does not add torrents or start media traffic. Exact title/year, file identity, 1080p, known codec, safety fields and size <=9GB are required; 3-5GB is ranked first. A background lookup prevents the gateway timeout. Missing sources are reported honestly.
+Use Pick on 3 to 10 movies, Finalize, then Review server download. Lookup examines only completed, present files already in the owner's configured TorBox inventory. It does not add torrents or start media traffic. Exact title/year, file identity, 1080p, known codec, safety fields and size <=9GB are required; 3-5GB is ranked first. A background lookup prevents the gateway timeout. Missing sources are reported honestly.
 
 Confirmation displays source filename and edition, IDs, codec, exact size, destination, measured free space, 50GiB reserve, remaining 100GB lifetime transfer budget and expiry. Only yes to that bound confirmation creates a durable job. Replays never dispatch twice. Files are downloaded to HP Envy /home/coolyo/afz-curated-media/Movies, NOT to a phone or the ZBook 8TB drive. Existing/partial files are preserved. No source substitution or automatic retries after interruption.
 

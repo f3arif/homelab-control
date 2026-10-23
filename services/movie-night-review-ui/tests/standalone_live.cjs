@@ -14,7 +14,7 @@ const assert=require('node:assert/strict'), fs=require('fs');
    const response=await p.goto(origin+'/movie-night/',{waitUntil:'networkidle0',timeout:45000});
    assert.equal(response.status(),200);await p.waitForSelector('#movies .movie-card',{timeout:15000});
    const state=await p.evaluate(()=>({background:getComputedStyle(document.documentElement).backgroundColor,overflow:document.documentElement.scrollWidth>innerWidth,cards:document.querySelectorAll('#movies .movie-card').length,smallButtons:[...document.querySelectorAll('button')].filter(b=>b.getClientRects().length&&b.getBoundingClientRect().height<40).length,hasBillingForm:!!document.querySelector('input[type=password]')}));
-   assert.equal(state.background,'rgb(11, 18, 32)');assert(!state.overflow);assert.equal(state.cards,5);assert.equal(state.smallButtons,0);assert(!state.hasBillingForm);assert.deepEqual(errors,[]);
+   assert.equal(state.background,'rgb(11, 18, 32)');assert(!state.overflow);assert.equal(state.cards,10);assert.equal(state.smallButtons,0);assert(!state.hasBillingForm);assert.deepEqual(errors,[]);
    assert(!failed.some(x=>['script','stylesheet','fetch'].includes(x.type)));
    await p.screenshot({path:out+'/live-'+width+'.png',fullPage:true});
    results.push({width,status:response.status(),...state,errors,failed});await p.close();
