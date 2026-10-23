@@ -33,7 +33,7 @@ const fs=require('fs'),assert=require('node:assert/strict');
      assert.equal(rejected,409);
     }
     await p.click('#finalized-movies [data-movie="tt12345"] .buttons button');
-    await p.waitForFunction(()=>document.querySelector('#confirmation').open);
+    await p.waitForFunction(()=>document.querySelector('#confirmation').dataset.state==='ready');
     const facts=await p.$eval('#facts',el=>el.textContent);
     assert(facts.includes('Fixture One'));assert(facts.includes('1080p / AVC'));assert(facts.includes('/home/coolyo/afz-curated-media/Movies/'));
     await p.type('#reply','yes');await p.click('#confirm-yes');
