@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mn-base" content="__BASE__"><meta name="mn-csrf" content="__CSRF__"><meta name="theme-color" content="#0b1220">
+<title>AFZ Movie Night</title><link rel="stylesheet" href="__BASE__/screen.css"><script defer src="__BASE__/screen.js"></script></head>
+<body><main>
+<header class="masthead"><p class="eyebrow">Your Wednesday shortlist</p><h1>Movie Night</h1>
+<p class="lede">Thrillers, horror, creature features, crime and action.</p>
+<ul class="chips" aria-label="Filters in use"><li>2016 onward</li><li>No Comedy</li></ul>
+<details class="how"><summary>How it works</summary><ol>
+<li><strong>Like</strong> anything that interests you.</li>
+<li><strong>Not for me</strong> replaces a suggestion. You can restore it later.</li>
+<li><strong>Seen</strong> hides a movie you’ve already watched. It won’t come back.</li>
+<li><strong>Pick</strong> 3–4 movies, then finalize.</li><li><strong>Review server download</strong> on a finalized movie. Confirm its exact file to start.</li></ol>
+<p>Horror, creature and crime movies can include frightening scenes and strong violence. Likes and finalized picks never start a download.</p></details></header>
+<div id="notice" role="status" aria-live="polite"></div>
+<section id="movies" aria-label="Movie suggestions"></section>
+<section id="selection" class="tray" hidden aria-label="Finalize your picks"><div class="tray-inner">
+<div class="tray-text"><p id="selection-count" role="status"></p><p id="selection-names" class="tray-names"></p></div>
+<button id="finalize" type="button" disabled>Finalize picks</button></div></section>
+<section id="refill" class="panel" aria-labelledby="refill-title"><h2 id="refill-title">Want more options?</h2><p id="reserve-status"></p>
+<button id="request-refill" class="secondary" type="button">Request more picks</button><p id="refill-status" class="muted" role="status">Requests wait for the next reviewed update; they do not start downloads.</p></section>
+<section id="finalized" class="panel" hidden aria-labelledby="finalized-title"><h2 id="finalized-title" tabindex="-1">Your finalized picks</h2><p id="finalized-status"></p>
+<div id="finalized-movies"></div><p class="muted">Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.</p></section>
+<details id="removed" class="panel" hidden><summary>Removed or seen <span id="removed-count"></span></summary><ul id="removed-movies"></ul></details>
+<section id="downloads" class="panel" hidden aria-labelledby="downloads-title"><h2 id="downloads-title">Server downloads</h2><p class="muted">Files are saved on HP Envy. After completion you can save a separate copy to this device.</p><div id="download-list"></div></section>
+<section id="stream-result" class="panel" hidden><h2>Checked source</h2><p>Source and connection checked recently. Actual playback has not been verified.</p><a id="stream-now">Stream now</a></section>
+<section id="job" class="panel" hidden aria-labelledby="job-title"><h2 id="job-title">Your download</h2><p id="job-status" role="status" aria-live="polite"></p>
+<progress id="progress" value="0" max="1" aria-label="Downloaded bytes"></progress><p id="completion"></p>
+<button id="cancel" type="button">Cancel download</button></section>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="confirmation" aria-labelledby="confirm-title"><h2 id="confirm-title" tabindex="-1">Confirm server download</h2>
+<p>Only this file will be requested. A changed source needs a new confirmation.</p><dl id="facts"></dl>
+<label for="reply">Type <strong>yes</strong> to confirm this exact download</label><input id="reply" autocomplete="off" spellcheck="false">
+<p id="confirm-error" role="alert"></p><div class="buttons"><button id="confirm-yes" type="button">Confirm download</button><button id="back" class="secondary" type="button">Not now</button></div></dialog>
+</main></body></html>
