@@ -15,6 +15,7 @@ The isolated download index is served by authenticated Movie Night catalog/media
 Review-only mode remains default. --downloads is an explicit deployment setting. Production files and unit are backed up and hash guarded by deploy.py; rollback restores code and unit, not user DB choices or completed/partial media. Credentials are read lazily from the existing server-private addon configuration, never copied to Git.
 
 Validation:
-PYTHONPATH=src:tests python -m unittest discover -s tests -v
+python -m pip install --target .test-deps -r requirements-test.txt
+PYTHONPATH=src:tests:.test-deps python -m unittest discover -s tests -v
 node --check src/screen.js
 Gateway/browser QA uses disposable credentials, provider, movie data and a tiny generated video; it never uses real owner cookies or downloads a movie.

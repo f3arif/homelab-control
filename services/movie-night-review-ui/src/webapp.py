@@ -251,6 +251,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         return principal
     def safe(call):
         try: return call()
+        except HTTPException: raise
         except PermissionError: raise HTTPException(404,'Confirmation unavailable')
         except (ValueError,sqlite3.IntegrityError) as exc:
             allowed={'No matching compact source','Too many source checks. Try again shortly.','Downloads and source checks are disabled pending activation approval.',

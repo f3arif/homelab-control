@@ -1,4 +1,4 @@
-"""Standalone review service with bounded public metadata discovery; no media acquisition."""
+"""Private review service with bounded discovery and optional confirmed server downloads."""
 import argparse
 import json
 import os

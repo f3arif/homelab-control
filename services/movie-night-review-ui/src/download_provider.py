@@ -27,13 +27,13 @@ class InventoryChoices:
         with self.lock:
             if self.clock()-self.checked<60: return self.rows,self.complete
             rows=[]; seen=set();complete=False
-            for offset in range(0,2000,100):
-                page=self.provider._api('mylist',{'limit':100,'offset':offset},True)
+            for offset in range(0,2000,25):
+                page=self.provider._api('mylist',{'limit':25,'offset':offset},True)
                 if not isinstance(page,list): raise ValueError('Provider inventory unavailable')
                 for row in page:
                     if not isinstance(row,dict) or type(row.get('id')) is not int or row['id'] in seen:continue
                     seen.add(row['id']);rows.append(row)
-                if len(page)<100:complete=True;break
+                if len(page)<25:complete=True;break
             self.rows,self.complete,self.checked=rows,complete,self.clock()
             return rows,complete
     def __call__(self,imdb):

@@ -131,4 +131,38 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual([],self.parse(self.rows(size=9_000_000_001)))
         self.assertEqual([],self.parse(self.rows(name='Fixture.One.2024.720p.x264.mkv')))
 
+class PaginationTests(unittest.TestCase):
+    def test_bounded_small_pages_and_cache(self):
+        template=InventoryTests().rows()[0];calls=[]
+        class P:
+            def _api(self,endpoint,query,bearer):
+                calls.append(query)
+                return [dict(template,id=n) for n in range(query['offset'],min(26,query['offset']+query['limit']))]
+        choices=InventoryChoices(P(),lambda:{'movies':[{'id':'tt12345','name':'Fixture One','year':2024}]})
+        self.assertEqual(26,len(choices('tt12345')))
+        self.assertEqual([{'limit':25,'offset':0},{'limit':25,'offset':25}],calls)
+        self.assertEqual(26,len(choices('tt12345')));self.assertEqual(2,len(calls));self.assertTrue(choices.complete)
+
+class FactoryTests(unittest.TestCase):
+    def test_review_mode_has_no_download_routes(self):
+        from review_service import build_app
+        with tempfile.TemporaryDirectory() as td:
+            app,controller=build_app(td,'http://testserver')
+            try:
+                c=TestClient(app);c.headers['x-afz-review-principal']='billing-owner'
+                self.assertFalse(c.get('/movie-night/api/shortlist').json()['actionsEnabled'])
+                self.assertEqual(404,c.get('/movie-night/api/downloads').status_code)
+                self.assertEqual(404,c.post('/movie-night/api/propose',json={}).status_code)
+            finally:controller.close()
+    def test_activated_factory_exact_routes(self):
+        from review_service import build_app
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);(root/'state').mkdir()
+            app,controller=build_app(root/'state','http://testserver',downloads=True,provider=Provider(),media_root=root/'media')
+            try:
+                c=TestClient(app);c.headers['x-afz-review-principal']='billing-owner'
+                self.assertTrue(c.get('/movie-night/api/shortlist').json()['actionsEnabled'])
+                self.assertEqual(200,c.get('/movie-night/api/downloads').status_code)
+                self.assertEqual(404,c.post('/movie-night/api/check-stream',json={}).status_code)
+            finally:controller.close()
 if __name__=='__main__':unittest.main()

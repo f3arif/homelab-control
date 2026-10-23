@@ -1,1 +1,2 @@
-from worker_candidate import *
+import sys,worker_candidate
+sys.modules[__name__]=worker_candidate

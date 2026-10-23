@@ -1,4 +1,4 @@
-"""Offline Movie Night policy/approval prototype. No network or worker activation."""
+"""Movie Night source policy and durable bound approvals. This module performs no network I/O."""
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
@@ -124,7 +124,7 @@ def shortlist(payload, now, seen_policy=None, limit=12):
         reason = 'Fits your stated preference: ' + ', '.join(sorted(tags))
         result.append({'id': imdb, 'type': 'movie', 'name': str(name),
                        'releaseInfo': str(row.get('year', '')),
-                       'description': reason + '\nChoose Download ahead for an exact confirmation, or Check stream. Source availability and playback are not yet verified.',
+                       'description': reason + '\nReview a finalized movie for its exact server download. Source availability and playback are not yet verified.',
                        'posterShape': 'poster', 'fitTags': sorted(tags),
                        'trailer': reviewed_trailer(row.get('trailer'), imdb),
                        'synopsis': str(row.get('synopsis',''))[:450],
@@ -140,9 +140,9 @@ def shortlist(payload, now, seen_policy=None, limit=12):
 
 
 class ApprovalStore:
-    """Durable authorization state, deliberately disconnected from any downloader.
+    """Durable authorization state shared by the confirmed-download controller.
 
-    This is an isolated prototype database, never the production download queue.
+    The store itself never dispatches a downloader or reads provider credentials.
     Transport must bind the principal and confirmation ID before calling approve.
     """
     def __init__(self, path):
@@ -198,7 +198,7 @@ class ApprovalStore:
             raise
 
     def transition(self, pid, state, *, bytes_received=None, evidence=None):
-        """Offline worker events only. No network, indexing or playback is executed."""
+        """Record verified worker events. This method performs no network, indexing or playback."""
         allowed = {'approved': {'downloading', 'cancelled', 'failed'},
                    'downloading': {'downloading', 'cancelled', 'failed', 'downloaded'},
                    'downloaded': {'indexed'}, 'indexed': {'playback-tested'}}
