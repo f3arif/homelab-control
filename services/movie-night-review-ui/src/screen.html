@@ -29,8 +29,9 @@
 <progress id="progress" value="0" max="1" aria-label="Downloaded bytes"></progress><p id="completion"></p>
 <button id="cancel" type="button">Cancel download</button></section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
-<dialog id="confirmation" aria-labelledby="confirm-title"><h2 id="confirm-title" tabindex="-1">Confirm server download</h2>
-<p>Only this file will be requested. A changed source needs a new confirmation.</p><dl id="facts"></dl>
-<label for="reply">Type <strong>yes</strong> to confirm this exact download</label><input id="reply" autocomplete="off" spellcheck="false">
-<p id="confirm-error" role="alert"></p><div class="buttons"><button id="confirm-yes" type="button">Confirm download</button><button id="back" class="secondary" type="button">Not now</button></div></dialog>
+<dialog id="confirmation" aria-labelledby="confirm-title" aria-describedby="source-status"><h2 id="confirm-title" tabindex="-1">Review server download</h2>
+<p id="source-status" role="status" aria-live="polite"></p>
+<div id="confirmation-details" hidden><p>Only this file will be requested. A changed source needs a new confirmation.</p><dl id="facts"></dl>
+<label for="reply">Type <strong>yes</strong> to confirm this exact download</label><input id="reply" autocomplete="off" spellcheck="false"></div>
+<p id="confirm-error" role="alert"></p><div class="buttons"><button id="confirm-yes" type="button" hidden disabled>Confirm download</button><button id="retry-source" type="button" hidden>Check again</button><a id="source-reload" href="__BASE__/" hidden>Reload Movie Night</a><button id="back" class="secondary" type="button">Close</button></div></dialog>
 </main></body></html>

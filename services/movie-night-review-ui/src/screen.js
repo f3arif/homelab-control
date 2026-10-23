@@ -5,7 +5,7 @@ const minPicks = Number(document.querySelector('meta[name="mn-min-picks"]').cont
 const maxPicks = Number(document.querySelector('meta[name="mn-max-picks"]').content);
 const $ = id => document.getElementById(id);
 let pending = null, job = null, timer = null, loadGeneration = 0;
-let sourceBusy=false,downloadTimer=null;
+let sourceBusy=false,sourceGeneration=0,sourceMovie=null,downloadTimer=null;
 let selected=new Set(), initialized=false, reviewBusy=false;let refillTimer=null, recoveryTimer=null, recoveryAttempts=0, uncertainWrite=false;
 let toastTimer=null, finalizedIds=[], finalizedValid=false;const titles=new Map(), pickCards=new Map();
 const deviceId=crypto.randomUUID();let generation=0, sample=null;
@@ -80,12 +80,40 @@ function fact(label, value) {
   const dt=document.createElement('dt'), dd=document.createElement('dd');
   dt.textContent=label; dd.textContent=String(value); $('facts').append(dt,dd);
 }
-async function propose(imdb) {
+function sourceView(state,title,message=''){
+  const dialog=$('confirmation');dialog.dataset.state=state;
+  dialog.setAttribute('aria-busy',String(state==='loading'));
+  $('confirm-title').textContent=title;
+  $('source-status').textContent=message;
+  $('confirmation-details').hidden=state!=='ready';
+  $('confirm-yes').hidden=state!=='ready';$('confirm-yes').disabled=state!=='ready';
+  $('retry-source').hidden=state!=='error';$('source-reload').hidden=true;
+  $('confirm-error').textContent='';
+  $('back').textContent=state==='ready'?'Not now':'Close';
+  dialog.scrollTop=0;if(dialog.open)$('confirm-title').focus({preventScroll:true});
+}
+function dismissSource(){
+  ++sourceGeneration;sourceBusy=false;sourceMovie=null;pending=null;$('confirmation').close();
+}
+async function propose(imdb,title=titles.get(imdb)||'this movie') {
+  if(sourceBusy)return;
+  const request=++sourceGeneration;sourceBusy=true;sourceMovie={imdb,title};pending=null;
+  $('facts').replaceChildren();$('reply').value='';
+  sourceView('loading','Checking server download',`Checking completed TorBox files for ${title}. This may take up to a minute. No download has started.`);
+  if(!$('confirmation').open)$('confirmation').showModal();
+  $('confirm-title').focus({preventScroll:true});
+  const current=()=>request===sourceGeneration&&$('confirmation').open;
+  const deadline=performance.now()+60000;
   try {
-    if(sourceBusy)return;sourceBusy=true;
-    say('Checking completed TorBox files for this movie. No download has started.');
     let result=await api('propose',{imdb});
-    while(result.lookupId){await new Promise(resolve=>setTimeout(resolve,1200));result=await api('lookup/'+result.lookupId);}
+    if(!current())return;
+    while(result.lookupId){
+      if(performance.now()>=deadline)throw requestError('The source check took too long. Try again in a minute. Nothing has been downloaded.','timeout');
+      await new Promise(resolve=>setTimeout(resolve,1200));
+      if(!current())return;
+      result=await api('lookup/'+result.lookupId);
+      if(!current())return;
+    }
     pending=result;const c=pending.choice;
     $('facts').replaceChildren();
     for(const [name,value] of [['Movie',`${c.title} (${c.year})`],['Edition',c.edition],['Provider',c.provider],
@@ -93,10 +121,24 @@ async function propose(imdb) {
       ['Exact size',`${c.size.toLocaleString('en-US')} bytes (${(c.size/1e9).toFixed(2)} GB)`],['Destination',c.destination],
       ['Free storage',`${pending.freeBytes.toLocaleString('en-US')} bytes`],['Required reserve',`${pending.reserveBytes.toLocaleString('en-US')} bytes`],
       ['Remaining transfer budget',`${pending.quotaRemainingBytes.toLocaleString('en-US')} bytes`],['Confirmation expires',new Date(pending.expiresEpoch*1000).toLocaleString()]]) fact(name,value);
-    $('reply').value=''; $('confirm-error').textContent=''; $('confirmation').showModal(); $('confirmation').scrollTop=0; $('confirm-title').focus({preventScroll:true});
-  } catch(error) { if(error.message==='No matching compact source')say('No completed 1080p file with a verified title, year, codec and size is available in your TorBox inventory. Nothing was started.');else showFailure(error); }
-  finally{sourceBusy=false;}
+    sourceView('ready','Confirm server download','Review this exact file before confirming.');
+  } catch(error) {
+    if(!current())return;
+    pending=null;
+    const missing=error.message==='No matching compact source';
+    sourceView('error',missing?'No ready file found':'Source check unavailable');
+    $('confirm-error').textContent=missing
+      ? `No matching completed 1080p file for ${title} is in your TorBox library. This checks files already in your account; it does not add a new movie to TorBox. Nothing was downloaded.`
+      : error.message+' Your picks are saved. No download has started.';
+    if(error.kind==='session'||error.kind==='page'){
+      $('retry-source').hidden=true;$('source-reload').hidden=false;
+    }
+  } finally {if(request===sourceGeneration)sourceBusy=false;}
 }
+$('retry-source').onclick=()=>{if(sourceMovie)propose(sourceMovie.imdb,sourceMovie.title);};
+$('confirmation').addEventListener('cancel',event=>{event.preventDefault();dismissSource();});
+$('confirmation').addEventListener('close',()=>{if(!$('confirmation').open){++sourceGeneration;sourceBusy=false;sourceMovie=null;pending=null;}});
+
 async function poll() {
   if (!job) return;
   try {
@@ -118,7 +160,7 @@ $('confirm-yes').onclick=async()=>{
     job=result.id; $('progress').max=pending.choice.size; $('job').hidden=false; $('confirmation').close(); await poll();await loadDownloads();
   }catch(error){$('confirm-error').textContent=error.message;}finally{$('confirm-yes').disabled=false;}
 };
-$('back').onclick=()=>{$('confirmation').close();pending=null;};
+$('back').onclick=dismissSource;
 $('cancel').onclick=async()=>{if(job)try{await api('cancel',{confirmationId:job});say('Cancellation requested. Partial files will be preserved.');await poll();}catch(e){say(e.message);}};
 function sameAsFinalized(){return finalizedValid&&finalizedIds.length===selected.size&&finalizedIds.every(id=>selected.has(id));}
 function selectionCount(){
@@ -150,7 +192,7 @@ function watchButtons(movie,enabled){
   const actions=document.createElement('div');actions.className='buttons';
   if(!enabled){actions.hidden=true;return actions;}
   const download=document.createElement('button');download.textContent='Review server download';
-  download.onclick=async()=>{download.disabled=true;try{await propose(movie.id);}finally{download.disabled=false;}};
+  download.onclick=()=>propose(movie.id,movie.name);
   actions.append(download);return actions;
 }
 async function loadDownloads(){

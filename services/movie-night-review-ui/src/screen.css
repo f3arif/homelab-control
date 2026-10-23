@@ -101,9 +101,9 @@ article{min-width:0;overflow-wrap:anywhere}
 #toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:12px;max-width:calc(100% - 32px);padding:8px 8px 8px 16px;border-radius:12px;background:#e9eff8;color:#0b1220;font-size:.9rem;box-shadow:0 8px 28px rgba(0,0,0,.45)}
 #toast button{background:#0b1220;color:#e9eff8;border-color:#0b1220;min-height:40px}
 
-/* Download dialog (unchanged behaviour) */
+/* Source lookup and exact-file confirmation stay visible beside the action. */
 #job progress{width:100%}
-dialog{max-width:580px;max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--surface);color:var(--text)}
+dialog{width:min(580px,calc(100% - 24px));max-width:580px;max-height:85vh;overflow:auto;border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--surface);color:var(--text)}
 dialog::backdrop{background:#000b}
 dl{display:grid;grid-template-columns:1fr 2fr;gap:8px}
 dt{color:var(--muted)}
@@ -143,3 +143,5 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 @media(max-width:400px){.card-controls{grid-template-columns:1fr 1fr}.card-controls .pick-toggle{grid-column:auto}}
 
 .download-row{padding:16px 0;border-top:1px solid #334155}.download-row progress{width:100%}#download-list a{display:inline-flex;padding:12px;min-height:44px;align-items:center}#facts dd{overflow-wrap:anywhere}
+
+#source-status{overflow-wrap:anywhere}#source-status:empty,#confirm-error:empty{display:none}#source-reload{display:inline-flex;align-items:center;min-height:44px;padding:9px 16px;border:1px solid var(--line);border-radius:10px;font-weight:650}dialog[aria-busy="true"] #source-status{border-left:3px solid var(--accent);padding-left:12px}
