@@ -31,7 +31,7 @@ const fs=require('fs'),assert=require('node:assert/strict');
      const rejected=await p.evaluate(async()=>{const r=await fetch('/movie-night/api/shortlist');const data=await r.json();const q=await fetch('/movie-night/api/finalize',{method:'POST',headers:{'Content-Type':'application/json','X-Movie-Night-CSRF':document.querySelector('meta[name="mn-csrf"]').content},body:JSON.stringify({ids:data.eligibleIds.slice(0,11)})});return q.status;});
      assert.equal(rejected,409);
     }
-    await p.click('#finalized-movies .buttons button');
+    await p.click('#finalized-movies [data-movie="tt12345"] .buttons button');
     await p.waitForFunction(()=>document.querySelector('#confirmation').open);
     const facts=await p.$eval('#facts',el=>el.textContent);
     assert(facts.includes('Fixture One'));assert(facts.includes('1080p / AVC'));assert(facts.includes('/home/coolyo/afz-curated-media/Movies/'));
