@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from movie_night import ApprovalStore, Choice, QUOTA, ROOT, select_compact, shortlist, stream_status, excluded_genres
 from movie_posters import PosterCache, image_mime
+from feedback import MIN_PICKS, MAX_PICKS, VISIBLE_MOVIES
 
 
 class Controller:
@@ -62,18 +63,18 @@ class Controller:
             saved=self.feedback.saved(principal)
             refill_at=self.feedback.refill_requested(principal)
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
-            valid=saved['valid'] and 3<=len(saved['ids'])<=4 and set(saved['ids'])<=set(eligible)
+            valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
             return {'movies':rank_reviewed(pool,ratings),'reviewEnabled':self.review_enabled,
                     'actionsEnabled':self.enabled,'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
-                    'eligibleIds':list(eligible),
+                    'eligibleIds':list(eligible),'selectionLimits':{'min':MIN_PICKS,'max':MAX_PICKS,'visible':VISIBLE_MOVIES},
                     'disliked':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='dislike'],
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
                     'finalized':{'ids':saved['ids'],'valid':valid,'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
                     'excludedGenres':['Comedy'],
-                    'reserveCount':max(0,len(eligible)-5),
+                    'reserveCount':max(0,len(eligible)-VISIBLE_MOVIES),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
-                    'replacementAvailable':len(eligible)>5}
+                    'replacementAvailable':len(eligible)>VISIBLE_MOVIES}
 
     def request_refill(self,principal,request_id=None):
         if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
@@ -95,7 +96,7 @@ class Controller:
             if not movie:raise ValueError('A selected movie is no longer eligible. Refresh your picks.')
             self.feedback.rate(principal,movie,value)
             result=self.review(principal)
-            if value in ('dislike','seen') and getattr(self.refill_provider,'automatic',False) and len(result['eligibleIds'])<5:
+            if value in ('dislike','seen') and getattr(self.refill_provider,'automatic',False) and len(result['eligibleIds'])<VISIBLE_MOVIES:
                 return self.request_refill(principal,'auto-'+secrets.token_hex(16))
             return result
 
@@ -111,7 +112,7 @@ class Controller:
         if not self.review_enabled:return # preserve existing non-review/manual integration
         state=self.review(principal)['finalized']
         if not state['valid'] or imdb not in state['ids']:
-            raise ValueError('Finalize 3 or 4 eligible movies before reviewing a download.')
+            raise ValueError(f'Finalize {MIN_PICKS} to {MAX_PICKS} eligible movies before reviewing a download.')
 
 
     def token(self, principal):
@@ -261,9 +262,9 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
                      'choice changed; new confirmation required','stale choice; new confirmation required',
                      'insufficient storage or quota','explicit yes to this confirmation required',
                      'approval binding mismatch','Movie review is disabled pending activation.',
-                     'Choose Like or Dislike for a listed movie.','Select 3 or 4 different movies to finalize.',
+                     'Choose Like or Dislike for a listed movie.',f'Select {MIN_PICKS} to {MAX_PICKS} different movies to finalize.',
                      'A selected movie is no longer eligible. Refresh your picks.',
-                     'Finalize 3 or 4 eligible movies before reviewing a download.'}
+                     f'Finalize {MIN_PICKS} to {MAX_PICKS} eligible movies before reviewing a download.'}
             message=str(exc) if str(exc) in allowed else 'Source or confirmation unavailable. Refresh before confirming again.'
             raise HTTPException(409,message)
         except Exception: raise HTTPException(503,'Source or worker unavailable; nothing new was started.')
@@ -281,7 +282,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     def page(request:Request):
         principal=identity(request)
         base=request.scope.get('root_path','')+prefix
-        html=(assets/'screen.html').read_text().replace('__BASE__',escape(base,quote=True)).replace('__CSRF__',escape(controller.token(principal),quote=True))
+        html=(assets/'screen.html').read_text().replace('__BASE__',escape(base,quote=True)).replace('__CSRF__',escape(controller.token(principal),quote=True)).replace('__MIN_PICKS__',str(MIN_PICKS)).replace('__MAX_PICKS__',str(MAX_PICKS))
         return HTMLResponse(html,headers={'Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer'})
 
     @app.get(prefix+'/screen.js')

@@ -15,6 +15,8 @@ with tempfile.TemporaryDirectory(prefix='afz-access-qa-') as td:
     subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=black:s=1920x1080:r=1','-t','1','-c:v','libx264','-pix_fmt','yuv420p','-y',str(video)],check=True,timeout=30)
     h=Harness(root/'backend',video.read_bytes()); h.worker.probe=ffprobe
     with sqlite3.connect(h.db) as c: c.execute('DELETE FROM movie_finalized')
+    template=h.payload['movies'][0]
+    h.payload['movies'].extend(dict(template,id='tt'+str(12348+i),name='Fixture Extra '+str(i+1)) for i in range(8))
     endpoint=root/'backend/review.sock'
     backend_origin='https://backend.example.test:8447'
     front=MovieNightServer('http://localhost',backend_origin,'owner@example.test',0,str(endpoint))
@@ -42,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='afz-access-qa-') as td:
         (out/'browser.log').write_text(result.stdout+result.stderr)
         assert result.returncode==0,(result.stdout+result.stderr)[-2500:]
         assert h.provider.resolves==1
-        (out/'tested-source.json').write_text(json.dumps({name:hashlib.sha256((BASE/name).read_bytes()).hexdigest() for name in ['gateway/standalone_server.py','gateway/movie_gateway.py']},indent=2))
+        (out/'tested-source.json').write_text(json.dumps({name:hashlib.sha256((BASE/name).read_bytes()).hexdigest() for name in ['gateway/standalone_server.py','gateway/movie_gateway.py','src/feedback.py','src/webapp.py','src/screen.html','src/screen.js']},indent=2))
         print('STANDALONE_IDENTITY_FULL_UI_TRANSFER_PASS_360_412_1280')
     finally:
         front.shutdown(); front.server_close(); server.should_exit=True; backend.join(10); h.close()

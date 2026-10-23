@@ -5,6 +5,10 @@ import sqlite3
 import time
 from seen_policy import canonical_id
 
+MIN_PICKS = 3
+MAX_PICKS = 10
+VISIBLE_MOVIES = 10
+
 class FeedbackStore:
     def __init__(self,path):
         self.path=path
@@ -41,8 +45,8 @@ class FeedbackStore:
         return {'ids':json.loads(row[0]),'valid':bool(row[1])} if row else {'ids':[],'valid':False}
     def finalize(self,principal,ids,eligible):
         self.principal(principal)
-        if not isinstance(ids,list) or not 3<=len(ids)<=4 or any(not isinstance(x,str) for x in ids) or len(set(ids))!=len(ids):
-            raise ValueError('Select 3 or 4 different movies to finalize.')
+        if not isinstance(ids,list) or not MIN_PICKS<=len(ids)<=MAX_PICKS or any(not isinstance(x,str) for x in ids) or len(set(ids))!=len(ids):
+            raise ValueError(f'Select {MIN_PICKS} to {MAX_PICKS} different movies to finalize.')
         if not set(ids)<=set(eligible):raise ValueError('A selected movie is no longer eligible. Refresh your picks.')
         with closing(self.connect()) as db,db:
             db.execute('INSERT INTO movie_finalized VALUES(?,?,1,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,valid=1,updated=excluded.updated',(principal,json.dumps(ids),int(time.time())))
@@ -60,7 +64,7 @@ class FeedbackStore:
             if not row or row[0]<=published_epoch:
                 db.execute('INSERT INTO movie_refill_requests VALUES(?,?) ON CONFLICT(principal) DO UPDATE SET requested=excluded.requested',(principal,now))
 
-def rank_reviewed(rows,ratings,limit=5):
+def rank_reviewed(rows,ratings,limit=VISIBLE_MOVIES):
     eligible=[r for r in rows if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')]
     liked_tags=set();liked_genres=set()
     for rating in ratings.values():

@@ -11,9 +11,22 @@ const fs=require('fs'),assert=require('node:assert/strict');
    await p.goto(origin+'/movie-night',{waitUntil:'networkidle0',timeout:40000});
    await p.waitForSelector('#movies .movie-card',{timeout:15000});
    if(width===360){
-    await p.$$eval('#movies .pick-toggle',buttons=>buttons.forEach(b=>b.click()));
+    const available=await p.$$eval('#movies .pick-toggle',buttons=>buttons.length);
+    if(available===10){
+     await p.$$eval('#movies .pick-toggle',buttons=>buttons.slice(0,5).forEach(b=>b.click()));
+     assert.equal(await p.$eval('#finalize',b=>b.textContent),'Finalize 5 picks');
+     await p.$$eval('#movies .pick-toggle',buttons=>buttons.slice(5).forEach(b=>b.click()));
+     assert.equal(await p.$eval('#finalize',b=>b.textContent),'Finalize 10 picks');
+     await p.evaluate(()=>togglePick({id:'tt12355',name:'Fixture extra'}));
+     assert.equal(await p.$eval('#finalize',b=>b.textContent),'Finalize 10 picks');
+    }else await p.$$eval('#movies .pick-toggle',buttons=>buttons.forEach(b=>b.click()));
     await p.click('#finalize');
     await p.waitForFunction(()=>!document.querySelector('#finalized').hidden);
+    if(available===10){
+     await p.waitForFunction(()=>document.querySelector('#finalized-status').textContent.startsWith('10 movies finalized.'));
+     const rejected=await p.evaluate(async()=>{const r=await fetch('/movie-night/api/shortlist');const data=await r.json();const q=await fetch('/movie-night/api/finalize',{method:'POST',headers:{'Content-Type':'application/json','X-Movie-Night-CSRF':document.querySelector('meta[name="mn-csrf"]').content},body:JSON.stringify({ids:data.eligibleIds.slice(0,11)})});return q.status;});
+     assert.equal(rejected,409);
+    }
     await p.click('#finalized-movies .buttons button');
     await p.waitForFunction(()=>document.querySelector('#confirmation').open);
     const facts=await p.$eval('#facts',el=>el.textContent);
@@ -29,6 +42,7 @@ const fs=require('fs'),assert=require('node:assert/strict');
     finalizedVisible:!document.querySelector('#finalized').hidden,jobRestored:document.querySelector('#download-list').textContent.includes('indexed'),
     smallButtons:[...document.querySelectorAll('button')].filter(b=>b.getClientRects().length&&b.getBoundingClientRect().height<40).map(b=>b.textContent)}));
    assert.equal(state.background,'rgb(11, 18, 32)');assert(!state.overflow);assert(state.cards>0);assert(state.selectionVisible);assert(state.finalizedVisible);assert(state.jobRestored);
+   if(state.cards===10){assert.equal(await p.$eval('#finalized-movies',x=>x.children.length),10);assert.equal(await p.$eval('#finalize',x=>x.textContent),'Finalized ✓');}
    assert.deepEqual(state.smallButtons,[]);assert.deepEqual(errors,[]);
    await p.screenshot({path:process.env.AFZ_GATEWAY_QA_OUTPUT+'/download-'+width+'.png',fullPage:true});
    results.push({width,...state,errors});await p.close();
