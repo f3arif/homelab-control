@@ -17,9 +17,13 @@ const out=path.resolve(__dirname,'../qa/similar-search-live');fs.mkdirSync(out,{
   const response=await p.goto('https://hpenvy.tailc9bb62.ts.net:8453/movie-night/',{waitUntil:'networkidle'});assert.equal(response.status(),200);
   await p.locator('#search-titles:not(:disabled)').waitFor();
   const before=await p.evaluate(async()=>fetch('/movie-night/api/shortlist').then(r=>r.json()));assert(before.similarSearchEnabled);
-  await p.locator('#similar-query').fill('Inception');await p.locator('#search-titles').click();
-  await p.getByRole('button',{name:'Inception · 2010',exact:true}).waitFor({timeout:30000});
-  await p.getByRole('button',{name:'Inception · 2010',exact:true}).click();await p.locator('#similar-results').waitFor({state:'visible',timeout:80000});
+  await p.locator('#similar-query').pressSequentially('Inception',{delay:70});
+  await p.getByRole('option',{name:'Inception · 2010',exact:true}).waitFor({timeout:30000});
+  assert.equal(await p.locator('#similar-query').getAttribute('aria-expanded'),'true');
+  const popup=await p.locator('#title-popup').boundingBox();assert(popup.x>=0&&popup.x+popup.width<=width+1&&popup.y>=0&&popup.y+popup.height<=(await p.locator('#selection').boundingBox()).y+1);
+  await p.screenshot({path:path.join(out,'popup-'+width+'.png')});
+  await p.getByRole('option',{name:'Inception · 2010',exact:true}).click();await p.locator('#similar-results').waitFor({state:'visible',timeout:80000});
+  assert(await p.locator('#title-popup').isHidden());
   const cards=p.locator('#similar-movies .movie-card');const count=await cards.count();assert(count>0);
   assert.equal(await p.locator('#similar-movies [data-movie="tt26584495"]').count(),0);
   assert.equal(await p.locator('#similar-movies [data-movie="tt1375666"]').count(),0);
@@ -34,5 +38,5 @@ const out=path.resolve(__dirname,'../qa/similar-search-live');fs.mkdirSync(out,{
   assert.deepEqual(after.genreSettings,before.genreSettings);assert.deepEqual(after.finalized,before.finalized);assert.deepEqual(after.disliked,before.disliked);assert.deepEqual(after.seen,before.seen);
   results.push({width,count,overflow,smallControls:small,errors,blocked,readOnlyMetadataActions:actions.length,savedStateUnchanged:true});await p.close();
  }}finally{await browser.close();}
- fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({passed:true,results},null,2));console.log('SIMILAR_SEARCH_LIVE_HTTPS_PASS_360_412_1280_NO_SAVED_STATE_WRITES');console.log(JSON.stringify(results));
+ fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({passed:true,results},null,2));console.log('TITLE_POPUP_LIVE_HTTPS_PASS_360_412_1280_NO_SAVED_STATE_WRITES');console.log(JSON.stringify(results));
 })().catch(e=>{console.error(e);process.exitCode=1;});

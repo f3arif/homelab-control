@@ -14,9 +14,9 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   await p.locator('#similar-query').fill('Nothing');await p.locator('#search-titles').click();
   await p.waitForFunction(()=>document.querySelector('#similar-status').textContent.includes('No movie titles'));
   await p.locator('#similar-query').fill('Original');await p.locator('#similar-query').press('Enter');
-  await p.getByRole('button',{name:'Original · 2008',exact:true}).waitFor();
-  assert.equal(await p.getByRole('button',{name:'Original · 2020',exact:true}).count(),1);
-  await p.getByRole('button',{name:'Original · 2008',exact:true}).click();
+  await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
+  assert.equal(await p.getByRole('option',{name:'Original · 2020',exact:true}).count(),1);
+  await p.getByRole('option',{name:'Original · 2008',exact:true}).click();
   await p.locator('#similar-results').waitFor({state:'visible'});
   assert.equal(await p.locator('#similar-movies .movie-card').count(),2);
   assert((await p.locator('#similar-movies').textContent()).includes('Genre match only'));

@@ -1,6 +1,6 @@
 ## Movie Night reference-title discovery
 
-The web owner entry offers title/year disambiguation and explicit related-movie search. Nuvio may reuse the existing authenticated feedback endpoint contract:
+The web owner entry offers a title/year autocomplete popup while typing and explicit related-movie search. Type at least two characters; tap an option or use arrows/Enter. Client title lookups are debounced and serialized, and stale responses cannot replace newer typing. Dismissal, IME composition and keyboard selection are handled in the web frontend; the API contract is unchanged. Nuvio may reuse the existing authenticated feedback endpoint contract:
 
 - `search-titles` with `query` → `jobId`; poll `similar-status` with that ID until `titles` is returned.
 - `find-similar` with the title-search `jobId` and a returned `imdb` → a new job; poll for `reference`, screened `movies`, `similarReasons`, and `partial`.
