@@ -18,8 +18,8 @@ const out=path.resolve(__dirname,'../qa/similar-search-live');fs.mkdirSync(out,{
   await p.locator('#search-titles:not(:disabled)').waitFor();
   const before=await p.evaluate(async()=>fetch('/movie-night/api/shortlist').then(r=>r.json()));assert(before.similarSearchEnabled);
   await p.locator('#similar-query').fill('Inception');await p.locator('#search-titles').click();
-  await p.getByRole('button',{name:'Inception · 2010',exact:true}).waitFor({timeout:30000});
-  await p.getByRole('button',{name:'Inception · 2010',exact:true}).click();await p.locator('#similar-results').waitFor({state:'visible',timeout:80000});
+  await p.getByRole('option',{name:'Inception · 2010',exact:true}).waitFor({timeout:30000});
+  await p.getByRole('option',{name:'Inception · 2010',exact:true}).click();await p.locator('#similar-results').waitFor({state:'visible',timeout:80000});
   const cards=p.locator('#similar-movies .movie-card');const count=await cards.count();assert(count>0);
   assert.equal(await p.locator('#similar-movies [data-movie="tt26584495"]').count(),0);
   assert.equal(await p.locator('#similar-movies [data-movie="tt1375666"]').count(),0);

@@ -1,6 +1,6 @@
 ## Reference-movie search
 
-Type a title in **Find movies like…**, choose the correct title/year, then review related suggestions. **Add to shortlist** persists a screened result; use the normal Pick and Finalize controls afterward. Clear search removes only the temporary search display. Searching and adding do not finalize or start downloads.
+Start typing in **Find movies like…**. After two characters, matching titles/years appear in a popup. Tap the desired movie, or use the arrow keys and Enter, to view related suggestions. Escape or tapping outside dismisses the popup; Clear search clears the field. Find movie remains available for an immediate manual lookup. **Add to shortlist** persists a screened result; use the normal Pick and Finalize controls afterward. Clear search removes only the temporary search display. Searching and adding do not finalize or start downloads.
 
 Cinemeta supplies public title and movie metadata. Explicit similarity ranks shared genres, distinctive synopsis words, directors and cast across a bounded catalog sample, with visible reasons; genre-only matches are labelled. This is not a provider-curated recommendation list or an exhaustive semantic search. Regular recommendations retain genre variety. A reference may be older or already watched; suggested results still obey the current saved genre exclusions, 2016 onward, intensity screening, and known seen/disliked filters. There may be no matches.
 
@@ -8,7 +8,7 @@ The existing owner-authenticated, Origin/CSRF-protected feedback endpoint accept
 
 Added metadata lives privately in `state/movie-night-review/similar-suggestions.json` (atomic mode 0600, at most 100 rows/750 KB), independently of editorial publication and saved choices. Added titles appear first and remain available to exact download-source lookup. Not for me/Seen use existing removal and Undo controls. Source-only rollback preserves this metadata and all saved state; the previous code will not display added search titles until this feature is restored. No APK or gateway route changes.
 
-Qualification/deployment is tracked in claim #302 and its stacked PR; this paragraph documents the feature contract, not deployment evidence. `deploy_similar_search.py` is the idle-only source swap/rollback helper.
+Title-popup follow-on: claim #304, stacked on #303. The browser debounces typing for 350 ms, serializes title jobs, ignores stale responses, waits for IME composition, and positions the list within the visible viewport. `deploy_title_popup.py` guards a three-static-file swap without restarting the backend. Run its rollback before the earlier backend release rollback. Qualification/deployment evidence is recorded in the claim and MemoryHub handoff. `deploy_similar_search.py` is the idle-only source swap/rollback helper.
 
 ## Editable genre settings — 2026-10-24
 

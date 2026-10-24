@@ -425,12 +425,14 @@ $('save-genres').onclick=async()=>{
   }finally{genreSaving=false;reviewBusy=false;if(genreDraft)fillGenreDraft();$('edit-genres').disabled=!savedGenres;selectionCount();}
 };
 let similarGeneration=0,similarBusy=false,similarEnabled=false,similarRevision=null;
+let titleTimer=null,titleWorking=false,titlePending=null,titleVersion=0,titleResponse=null,titleActive=-1,titleWantsPopup=false,titleComposing=false;
 function searchControls(){
   $('search-titles').disabled=!similarEnabled||similarBusy;
-  for(const b of $('similar-titles').querySelectorAll('button'))b.disabled=similarBusy;
-  $('similar-search').setAttribute('aria-busy',String(similarBusy));
+  $('similar-query').disabled=!similarEnabled;
+  $('similar-search').setAttribute('aria-busy',String(similarBusy||titleWorking));
 }
 function clearSimilar(message=''){
+  invalidateTitles();
   ++similarGeneration;similarBusy=false;similarRevision=null;
   $('similar-titles').replaceChildren();$('similar-movies').replaceChildren();$('similar-results').hidden=true;
   $('similar-status').textContent=message;$('clear-similar').hidden=!message;searchControls();
@@ -443,16 +445,16 @@ function syncSimilar(data){
     b.textContent=pickCards.has(b.dataset.similarAdd)?'Show in shortlist':'Add to shortlist';
   searchControls();
 }
-async function searchJob(data,generation){
+async function searchJob(data,generation,finishStale=false){
   let result=await api('feedback',data);const deadline=performance.now()+75000;
   while(result.state==='searching'){
-    if(generation!==similarGeneration)return null;
+    if(!finishStale&&generation!==similarGeneration)return null;
     if(performance.now()>deadline)throw new Error('This search is taking too long. Please try again shortly.');
     await new Promise(resolve=>setTimeout(resolve,750));
-    if(generation!==similarGeneration)return null;
+    if(!finishStale&&generation!==similarGeneration)return null;
     result=await api('feedback',{action:'similar-status',jobId:result.jobId});
   }
-  return generation===similarGeneration?result:null;
+  return finishStale||generation===similarGeneration?result:null;
 }
 function similarError(error){
   $('similar-status').textContent=error.message+' Your picks have been kept.';
@@ -491,27 +493,133 @@ async function findSimilar(title,titleJob){
       };
       card.append(reasons,add);$('similar-movies').append(card);
     }
-    if(result.movies.length)$('similar-results-title').focus({preventScroll:true});
+    if(result.movies.length){$('similar-results-title').scrollIntoView({block:'start'});$('similar-results-title').focus({preventScroll:true});}
   }catch(error){if(generation===similarGeneration)similarError(error);}
   finally{if(generation===similarGeneration){similarBusy=false;searchControls();}}
 }
-$('similar-form').onsubmit=async event=>{
-  event.preventDefault();if(similarBusy||!similarEnabled)return;
-  clearSimilar();const generation=++similarGeneration;similarBusy=true;similarRevision=savedGenres?.revision??null;
-  $('clear-similar').hidden=false;$('similar-status').textContent='Looking up movie titles…';searchControls();
+// One debounced title lookup at a time; newer typing replaces pending work.
+function titleQuery(){return $('similar-query').value.trim().replace(/\s+/g,' ');}
+function positionTitlePopup(){
+  if($('title-popup').hidden)return;
+  const rect=$('similar-query').getBoundingClientRect(),view=window.visualViewport;
+  const top=view?.offsetTop||0,bottom=top+(view?.height||innerHeight);
+  const below=bottom-rect.bottom-12,above=rect.top-top-12,useAbove=below<160&&above>below;
+  $('title-popup').style.width=$('similar-form').querySelector('.similar-input').clientWidth+'px';
+  $('title-popup').classList.toggle('above',useAbove);
+  $('title-popup').style.maxHeight=Math.max(80,Math.min(360,useAbove?above:below))+'px';
+}
+function closeTitlePopup(){
+  titleWantsPopup=false;$('title-popup').hidden=true;$('similar-query').setAttribute('aria-expanded','false');
+  setTitleActive(-1);
+}
+function showTitlePopup(message,retry=false){
+  $('title-popup-status').textContent=message;$('title-popup-retry').hidden=!retry;
+  if(!titleWantsPopup||!$('title-picker').contains(document.activeElement))return;
+  $('title-popup').hidden=false;$('similar-query').setAttribute('aria-expanded','true');positionTitlePopup();
+}
+function setTitleActive(index){
+  const options=[...$('similar-titles').querySelectorAll('[role="option"]')];
+  titleActive=index>=0&&index<options.length?index:-1;
+  options.forEach((option,i)=>option.setAttribute('aria-selected',String(i===titleActive)));
+  if(titleActive<0)$('similar-query').removeAttribute('aria-activedescendant');
+  else{$('similar-query').setAttribute('aria-activedescendant',options[titleActive].id);options[titleActive].scrollIntoView({block:'nearest'});}
+}
+function invalidateTitles(){
+  if(titleTimer)clearTimeout(titleTimer);titleTimer=null;titlePending=null;++titleVersion;
+  titleResponse=null;$('similar-titles').replaceChildren();closeTitlePopup();
+}
+function chooseTitle(title,jobId){
+  if(similarBusy)return;
+  if(titleTimer)clearTimeout(titleTimer);titleTimer=null;titlePending=null;++titleVersion;
+  $('similar-query').value=title.name;closeTitlePopup();$('similar-query').blur();
+  findSimilar(title,jobId);
+}
+function renderTitles(result){
+  $('similar-titles').replaceChildren();setTitleActive(-1);
+  for(const [index,title] of result.titles.entries()){
+    const li=document.createElement('li'),button=document.createElement('button');li.setAttribute('role','presentation');
+    button.type='button';button.tabIndex=-1;button.id='movie-title-option-'+index;button.setAttribute('role','option');button.setAttribute('aria-selected','false');
+    button.textContent=title.name+' · '+(title.releaseInfo||'Year unavailable');
+    button.onpointerdown=event=>{if(event.pointerType==='mouse')event.preventDefault();};
+    button.onclick=()=>chooseTitle(title,result.jobId);li.append(button);$('similar-titles').append(li);
+  }
+  const message=result.titles.length?`${result.titles.length} matches. Tap a movie, or use ↑ ↓ and Enter.`:'No movie titles found. Check the spelling or try a shorter title.';
+  showTitlePopup(message);$('similar-status').textContent=result.titles.length?'Choose a movie from the popup to find related suggestions.':message;
+}
+async function drainTitleLookups(){
+  if(titleWorking)return;
+  titleWorking=true;searchControls();
   try{
-    const result=await searchJob({action:'search-titles',query:$('similar-query').value},generation);
-    if(!result)return;
-    $('similar-status').textContent=result.titles.length?'Choose the movie you mean to find related suggestions.':'No movie titles found. Check the spelling or try a shorter title.';
-    for(const title of result.titles){
-      const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.className='secondary';
-      button.textContent=title.name+' · '+(title.releaseInfo||'Year unavailable');
-      button.onclick=()=>findSimilar(title,result.jobId);li.append(button);$('similar-titles').append(li);
+    while(titlePending){
+      const request=titlePending;titlePending=null;
+      try{
+        // Finish an older read silently so fast typing cannot flood the server's job queue.
+        const result=await searchJob({action:'search-titles',query:request.query},null,true);
+        if(request.version!==titleVersion||request.query!==titleQuery())continue;
+        titleResponse={...result,query:request.query,receivedAt:Date.now()};renderTitles(titleResponse);
+      }catch(error){
+        if(request.version!==titleVersion)continue;
+        showTitlePopup(error.message+' Try again.',true);similarError(error);
+      }
     }
-  }catch(error){if(generation===similarGeneration)similarError(error);}
-  finally{if(generation===similarGeneration){similarBusy=false;searchControls();}}
+  }finally{titleWorking=false;searchControls();}
+}
+function requestTitles(immediate=false){
+  if(titleTimer)clearTimeout(titleTimer);titleTimer=null;titlePending=null;
+  const query=titleQuery(),version=++titleVersion;
+  $('similar-titles').replaceChildren();setTitleActive(-1);
+  if(!similarEnabled||query.length<2||query.length>120||titleComposing){closeTitlePopup();return;}
+  titleWantsPopup=true;$('clear-similar').hidden=false;titleResponse=null;
+  showTitlePopup('Looking up movie titles…');
+  const launch=()=>{titleTimer=null;titlePending={query,version};drainTitleLookups();};
+  if(immediate)launch();else titleTimer=setTimeout(launch,350);
+}
+function titleEdited(){
+  ++similarGeneration;similarBusy=false;similarRevision=null;
+  $('similar-movies').replaceChildren();$('similar-results').hidden=true;$('similar-status').textContent='';
+  $('clear-similar').hidden=!$('similar-query').value;
+  requestTitles();searchControls();
+}
+$('similar-query').addEventListener('input',titleEdited);
+$('similar-query').addEventListener('compositionstart',()=>{titleComposing=true;invalidateTitles();});
+$('similar-query').addEventListener('compositionend',()=>{titleComposing=false;titleEdited();});
+$('similar-query').addEventListener('focus',()=>{
+  if(titleComposing||titleQuery().length<2||similarBusy)return;
+  titleWantsPopup=true;
+  if(titleResponse?.query===titleQuery()&&Date.now()-titleResponse.receivedAt<600000)renderTitles(titleResponse);
+  else requestTitles();
+});
+$('similar-query').addEventListener('keydown',event=>{
+  if(event.isComposing||titleComposing)return;
+  if(event.key==='Escape'){
+    event.preventDefault();if(titleTimer)clearTimeout(titleTimer);titleTimer=null;titlePending=null;++titleVersion;closeTitlePopup();return;
+  }
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault();
+    if($('title-popup').hidden){
+      titleWantsPopup=true;
+      if(titleResponse?.query===titleQuery()&&Date.now()-titleResponse.receivedAt<600000)renderTitles(titleResponse);
+      else{requestTitles(true);return;}
+    }
+    const count=$('similar-titles').children.length;
+    if(count)setTitleActive(titleActive<0?(event.key==='ArrowDown'?0:count-1):(titleActive+(event.key==='ArrowDown'?1:-1)+count)%count);
+  }else if(event.key==='Enter'&&!$('title-popup').hidden&&titleActive>=0){
+    event.preventDefault();$('similar-titles').querySelectorAll('[role="option"]')[titleActive].click();
+  }
+});
+$('title-picker').addEventListener('focusout',event=>{if(!$('title-picker').contains(event.relatedTarget))closeTitlePopup();});
+document.addEventListener('pointerdown',event=>{if(!$('title-picker').contains(event.target))closeTitlePopup();});
+window.addEventListener('resize',positionTitlePopup);
+window.addEventListener('scroll',positionTitlePopup,true);
+window.visualViewport?.addEventListener('resize',positionTitlePopup);
+window.visualViewport?.addEventListener('scroll',positionTitlePopup);
+$('similar-form').onsubmit=event=>{
+  event.preventDefault();if(!similarEnabled||titleComposing)return;
+  $('similar-query').focus();requestTitles(true);
 };
+$('title-popup-retry').onclick=()=>{$('similar-query').focus();requestTitles(true);};
 $('clear-similar').onclick=()=>{clearSimilar();$('similar-query').value='';$('similar-query').focus();};
+
 
 function render(data){
   renderGenreSummary(data);
@@ -592,7 +700,7 @@ async function load(){
   try{const data=await api('shortlist');if(generation===loadGeneration){recoveryAttempts=0;render(data);if(data.actionsEnabled)loadDownloads();if(uncertainWrite){uncertainWrite=false;say('Connection recovered. Saved choices reloaded; check them before repeating your last action.');}}}
   catch(error){if(generation===loadGeneration)showFailure(error);}
 }
-window.addEventListener('pagehide',()=>{++similarGeneration;if(timer)clearTimeout(timer);if(downloadTimer)clearTimeout(downloadTimer);if(refillTimer)clearTimeout(refillTimer);hideToast();stopRecovery();});
+window.addEventListener('pagehide',()=>{invalidateTitles();++similarGeneration;if(timer)clearTimeout(timer);if(downloadTimer)clearTimeout(downloadTimer);if(refillTimer)clearTimeout(refillTimer);hideToast();stopRecovery();});
 window.addEventListener('focus',load);
 window.addEventListener('online',()=>{recoveryAttempts=0;load();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});

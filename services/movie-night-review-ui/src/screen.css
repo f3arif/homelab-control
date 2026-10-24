@@ -174,12 +174,21 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 
 /* Explicit reference-title search; the shortlist remains independent. */
 .similar-input{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.similar-input input{flex:1 1 220px;min-width:0;width:100%;margin:0}
+.title-picker{flex:1 1 140px;min-width:0;position:relative}
+.similar-input input{width:100%;margin:0;padding-right:48px}
+.similar-input>button{padding-inline:12px}
+.title-clear{position:absolute;right:3px;top:3px;min-height:40px;width:40px;padding:0;border:0;background:transparent;color:var(--text);font-size:24px}
 #similar-search label{margin:12px 0 6px}
 #similar-status{overflow-wrap:anywhere}
 #similar-status:empty,.similar-titles:empty{display:none}
-.similar-titles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:8px;padding:0;list-style:none}
-.similar-titles button{width:100%;text-align:left;min-height:48px;white-space:normal;overflow-wrap:anywhere}
+.similar-titles{margin:0;padding:0;list-style:none}
+.title-popup{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:360px;overflow-y:auto;overscroll-behavior:contain;background:var(--surface-2);border:1px solid var(--accent);border-radius:12px;padding:6px;box-shadow:0 14px 32px #0009;scroll-padding:6px}
+.title-popup.above{top:auto;bottom:calc(100% + 6px)}
+#title-popup-status{font-size:.82rem;color:var(--muted);margin:8px 10px;line-height:1.4}
+.similar-titles li+li{border-top:1px solid var(--line)}
+.similar-titles button{width:100%;text-align:left;justify-content:flex-start;min-height:48px;white-space:normal;overflow-wrap:anywhere;border:0;border-radius:7px;padding:12px 10px;color:var(--text);background:transparent}
+.similar-titles button[aria-selected="true"],.similar-titles button:hover{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent)}
+#title-popup-retry{margin:4px 10px 8px}
 #similar-movies{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;margin-top:16px}
 #similar-movies .movie-card{margin:0}
 .similar-reasons{padding-left:20px;font-size:.86rem;color:var(--muted)}
