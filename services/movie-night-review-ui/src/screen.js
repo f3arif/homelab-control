@@ -209,7 +209,7 @@ async function loadDownloads(){
     for(const item of items)if(item.state==='linked'){item.state='checking';item.message='Refreshing transfer status.';}
     const priority={downloading:0,approved:1,checking:2,queued:3,indexed:4,'playback-tested':4,downloaded:4,unavailable:6,failed:6,cancelled:7};
     items.sort((a,b)=>(priority[a.state]??5)-(priority[b.state]??5));
-    if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to HP Envy.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
+    if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to the 8 TB drive.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
     const labels={queued:'Queued',checking:'Finding a source',unavailable:'No ready source',failed:'Needs attention',cancelled:'Cancelled',approved:'Queued for transfer',downloading:'Downloading',downloaded:'Downloaded',indexed:'Ready on server','playback-tested':'Ready on server'};
     for(const item of items){
       const row=document.createElement('article');row.className='download-row';row.dataset.imdb=item.imdb;row.dataset.state=item.state;
@@ -219,8 +219,8 @@ async function loadDownloads(){
       row.append(title,state);
       if(item.size){const progress=document.createElement('progress');progress.max=item.size;progress.value=item.bytesReceived||0;progress.setAttribute('aria-label',item.name+' downloaded bytes');row.append(progress);}
       const detail=document.createElement('p');detail.className='muted';
-      detail.textContent=item.downloaded?(item.indexed?'Verified file available on HP Envy. Playback has not been tested.':'Verified file preserved on HP Envy; library availability needs checking.'):
-        item.jobId||item.size?(['failed','cancelled'].includes(item.state)?'Transfer stopped. Any partial file is preserved; it will not be overwritten.':'Saving to HP Envy. You can close this page and return to check progress.'):
+      detail.textContent=item.downloaded?(item.indexed?'Verified file available on the 8 TB drive. Playback has not been tested.':'Verified file preserved on the 8 TB drive; library availability needs checking.'):
+        item.jobId||item.size?(['failed','cancelled'].includes(item.state)?'Transfer stopped. Any partial file is preserved; it will not be overwritten.':'Saving to the 8 TB drive. You can close this page and return to check progress.'):
         item.message||'Waiting for the server.';
       row.append(detail);
       if(['queued','checking','approved','downloading'].includes(item.state)){
@@ -315,7 +315,7 @@ function render(data){
   autoDownloads=!!data.autoDownloads;downloadRequestedIds=new Set(data.downloadRequestedIds||[]);
   $('download-step').textContent=autoDownloads?'Finalize & download saves your picks and starts their server downloads automatically.':'Review server download on a finalized movie. Confirm its exact file to start.';
   $('download-rule').textContent=autoDownloads?'The server chooses a suitable cached 1080p file. Downloads keep running after you close the page. Likes and Pick alone do not start downloads.':'Likes and finalized picks never start a download.';
-  $('finalized-help').textContent=autoDownloads?'See Server downloads for progress, unavailable sources, retry and cancellation. Files are saved on HP Envy.':'Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.';
+  $('finalized-help').textContent=autoDownloads?'See 8 TB drive downloads for progress, unavailable sources, retry and cancellation. Files are saved on the 8 TB drive.':'Next, review each exact file, quality, codec, size, available storage and 8 TB drive destination before confirming its download.';
   if(!initialized){selected=new Set(data.finalized?.valid?data.finalized.ids:[]);initialized=true;}
   selected=new Set([...selected].filter(id=>(data.eligibleIds||[]).includes(id)));
   $('movies').replaceChildren();$('finalized-movies').replaceChildren();$('removed-movies').replaceChildren();pickCards.clear();
@@ -372,7 +372,7 @@ function render(data){
 $('request-refill').onclick=()=>reviewWrite('feedback',{action:'request-refill',requestId:crypto.randomUUID()});
 $('finalize').onclick=async()=>{
   if(await reviewWrite('finalize',{ids:[...selected],...(autoDownloads?{startDownloads:true,requestId:crypto.randomUUID()}:{})})&&finalizedValid&&!$('finalized').hidden){
-    toast(autoDownloads?'Picks finalized. Server downloads requested.':'Picks finalized. No download starts until you confirm an exact file.');
+    toast(autoDownloads?'Picks finalized. 8 TB drive downloads requested.':'Picks finalized. No download starts until you confirm an exact file.');
     if(autoDownloads)await loadDownloads();
     $(autoDownloads?'downloads':'finalized').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});$(autoDownloads?'downloads-title':'finalized-title').focus({preventScroll:true});
   }

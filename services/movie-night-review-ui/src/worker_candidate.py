@@ -6,6 +6,8 @@ import json, os, re, shutil, socket, ssl, time
 from pathlib import Path
 from urllib.parse import urlsplit, unquote, urlencode
 
+from movie_night import MIN_BYTES, CAP
+
 MAX_BYTES = 100_000_000_000
 RESERVE = 50 * 1024**3
 CONFIG = Path('/home/coolyo/afz-stremio-secondhost-20260918/private/addon-collection-private.json')
@@ -21,7 +23,7 @@ def validate_manifest(m):
         if type(size) is not int or size<=0: raise Rejected('unknown-size')
         cid=row.get('canonicalId','')
         if not re.fullmatch(r'tt\d+(?::\d+:\d+)?',cid): raise Rejected('canonical-id')
-        if ':' not in cid and size>9_000_000_000: raise Rejected('movie-over-nine-billion')
+        if ':' not in cid and not MIN_BYTES <= size <= CAP: raise Rejected('movie-outside-five-to-fifteen-GB')
         rel=row.get('destination','');p=Path(rel)
         if p.is_absolute() or '..' in p.parts or not p.parts or p.parts[0] not in ('Movies','TV') or '\\' in rel: raise Rejected('unsafe-destination')
         if p.parts[0]!=('TV' if ':' in cid else 'Movies'): raise Rejected('media-kind-destination')

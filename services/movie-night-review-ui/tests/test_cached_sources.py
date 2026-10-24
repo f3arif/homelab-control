@@ -13,12 +13,12 @@ MOVIE={'id':'tt12345','name':'Fixture One','year':2024}
 class CacheProvider:
     def __init__(self):
         self.added=[];self.calls=[];self.ready=True;self.safe=True;self.changed=False
-        self.cached={HASH:{'hash':HASH,'name':NAME,'files':[{'name':NAME,'size':4_000_000_000}]}}
+        self.cached={HASH:{'hash':HASH,'name':NAME,'files':[{'name':NAME,'size':5_000_000_000}]}}
     def add_cached(self,h):self.added.append(h);return 987
     def _api(self,endpoint,query,bearer):
         self.calls.append((endpoint,query,bearer))
         if endpoint=='checkcached':return self.cached
-        if endpoint=='mylist':return {'id':987,'hash':HASH,'name':NAME,'download_finished':self.ready,'download_present':self.ready,'files':[{'id':32,'name':NAME,'size':4_000_000_001 if self.changed else 4_000_000_000,'infected':False if self.safe else None,'zipped':False}]}
+        if endpoint=='mylist':return {'id':987,'hash':HASH,'name':NAME,'download_finished':self.ready,'download_present':self.ready,'files':[{'id':32,'name':NAME,'size':5_000_000_001 if self.changed else 5_000_000_000,'infected':False if self.safe else None,'zipped':False}]}
         raise AssertionError('unexpected endpoint')
 
 
@@ -38,13 +38,13 @@ class CachedSourceTests(unittest.TestCase):
         self.assertEqual(['https://comet.elfhosted.com/fixture/stream/movie/tt12345.json'],self.opened)
     def test_acquire_requires_fresh_real_ids_safety_and_size(self):
         result=self.sources.acquire('tt12345',self.guard)
-        self.assertEqual((987,32,4_000_000_000),(result.torrent_id,result.file_id,result.size))
+        self.assertEqual((987,32,5_000_000_000),(result.torrent_id,result.file_id,result.size))
         self.assertEqual([HASH],self.provider.added);self.assertGreaterEqual(len(self.guards),2)
     def test_missing_cache_does_not_add(self):
         self.provider.cached={};self.assertIsNone(self.sources.acquire('tt12345',self.guard))
         self.assertEqual([],self.provider.added)
     def test_mismatched_title_year_quality_and_size_are_excluded(self):
-        for name,size in [('Wrong.2024.1080p.x264.mkv',4_000_000_000),('Fixture.One.2023.1080p.x264.mkv',4_000_000_000),('Fixture.One.2024.2160p.x264.mkv',4_000_000_000),(NAME,9_000_000_001),(NAME,None)]:
+        for name,size in [('Wrong.2024.1080p.x264.mkv',5_000_000_000),('Fixture.One.2023.1080p.x264.mkv',5_000_000_000),('Fixture.One.2024.2160p.x264.mkv',5_000_000_000),(NAME,15_000_000_001),(NAME,None)]:
             self.provider.cached[HASH]['files']=[{'name':name,'size':size}]
             self.assertIsNone(self.sources.acquire('tt12345',self.guard))
         self.assertEqual([],self.provider.added)

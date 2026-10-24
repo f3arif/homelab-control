@@ -13,7 +13,7 @@ PRINCIPAL = 'billing-owner'
 GET_PATHS = frozenset(('/movie-night', '/movie-night/', '/movie-night/screen.js', '/movie-night/screen.css', '/movie-night/api/shortlist', '/movie-night/posters/{imdb}.img'))
 POST_PATHS = frozenset(('/movie-night/api/feedback', '/movie-night/api/finalize'))
 
-def build_app(state, origin, discovery=None, downloads=False, provider=None, media_root=None, auto_downloads=False):
+def build_app(state, origin, discovery=None, downloads=False, provider=None, media_root=None, auto_downloads=False, volume=None):
     if auto_downloads and not downloads:raise ValueError('Automatic downloads require --downloads')
     state = Path(state)
     def payload():
@@ -36,14 +36,19 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
         from adapters import WorkerAdapter, ProviderInventory, MediaIndex
         from download_provider import ConfiguredProvider, InventoryChoices
         import worker_candidate as worker
-        root=worker.safe_directory(media_root or '/home/coolyo/afz-curated-media',create=True)
-        worker.safe_directory(root/'Movies',create=True)
+        if media_root is None:
+            from storage_volume import MediaVolume
+            volume = volume or MediaVolume()
+            root = volume.root  # no creation or fallback when the disk is unavailable
+        else:
+            root=worker.safe_directory(media_root,create=True)
+            worker.safe_directory(root/'Movies',create=True)
         transfer_state=worker.safe_directory(state/'transfers',create=True)
         provider=provider or ConfiguredProvider()
-        index=MediaIndex(state/'download-index.sqlite3',root)
-        free=lambda:shutil.disk_usage(root).free
+        index=MediaIndex(state/'download-index.sqlite3',root,storage_guard=volume.check if volume else None)
+        free=volume.check if volume else lambda:shutil.disk_usage(root).free
         adapter=WorkerAdapter(state/'preferences.sqlite3',root,transfer_state,provider,index,enabled=True,
-                              free=lambda _root:free(),verify_route=lambda imdb,size:verify_local_route(state,imdb,size))
+                              free=lambda _root:free(),storage_guard=volume.check if volume else None,verify_route=lambda imdb,size:verify_local_route(state,imdb,size))
         controller.choices=InventoryChoices(provider,payload)
         controller.inventory=ProviderInventory(provider);controller.worker=adapter;controller.index=index
         controller.free=free;controller.enabled=True
@@ -68,7 +73,11 @@ def main():
     parser.add_argument('--origin', required=True)
     parser.add_argument('--downloads', action='store_true')
     parser.add_argument('--auto-downloads', action='store_true')
+    parser.add_argument('--relay-secret')
+    parser.add_argument('--listen', choices=['100.77.196.70'])
+    parser.add_argument('--port', type=int, default=8797, choices=[8797])
     args = parser.parse_args()
+    if bool(args.listen) != bool(args.relay_secret):parser.error('Listen and relay secret must be configured together')
     os.umask(0o077)
     state = Path(args.state)
     run = state / 'run'
@@ -96,11 +105,18 @@ def main():
     listener.listen(128)
     from metadata_discovery import CinemetaDiscovery
     app, controller = build_app(state, args.origin, discovery=CinemetaDiscovery(), downloads=args.downloads, auto_downloads=args.auto_downloads)
+    listeners=[listener]
+    if args.listen:
+        from private_relay import RelayAuth, read_secret
+        app=RelayAuth(app,read_secret(args.relay_secret))
+        tcp=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        tcp.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        tcp.bind((args.listen,args.port));tcp.listen(128);listeners.append(tcp)
     try:
-        uvicorn.Server(uvicorn.Config(app, access_log=False, log_level='warning')).run(sockets=[listener])
+        uvicorn.Server(uvicorn.Config(app, access_log=False, log_level='warning',proxy_headers=False)).run(sockets=listeners)
     finally:
         controller.close()
-        listener.close()
+        for s in listeners:s.close()
 
 
 

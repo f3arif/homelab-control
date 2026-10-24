@@ -64,14 +64,15 @@ def validate_file(path, choice, probe=ffprobe):
 
 class MediaIndex:
     """Isolated index served through the existing catalog host, no library migration."""
-    def __init__(self, db, root):
-        self.db=Path(db);self.root=Path(root)
+    def __init__(self, db, root, storage_guard=None):
+        self.db=Path(db);self.root=Path(root);self.storage_guard=storage_guard
         with sqlite3.connect(self.db) as c:
             c.execute('CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, filename TEXT UNIQUE, metadata TEXT, size INTEGER, sha TEXT, visible INTEGER NOT NULL DEFAULT 0)')
             if 'visible' not in {x[1] for x in c.execute('PRAGMA table_info(media)')}:
                 raise ValueError('Preserve old index; select a new isolated index path')
 
     def register(self, choice, proof):
+        if self.storage_guard:self.storage_guard()
         path=self.root/'Movies'/Path(choice.destination).name
         if path.is_symlink() or not path.is_file() or path.stat().st_size!=choice.size:
             raise ValueError('published file missing')
@@ -84,6 +85,7 @@ class MediaIndex:
         return {'catalogId':choice.imdb,'existingRouteVerified':False}
 
     def resolve(self, imdb, include_pending=False):
+        if self.storage_guard:self.storage_guard()
         with sqlite3.connect(self.db) as c:
             row=c.execute('SELECT filename,size,visible FROM media WHERE id=?',(imdb,)).fetchone()
         if not row: return None
@@ -104,11 +106,11 @@ class MediaIndex:
 
 class WorkerAdapter:
     def __init__(self, db, root, state, provider, index, *, enabled=False,
-                 open_media=worker.https_get, free=None, probe=ffprobe, verify_route=None):
+                 open_media=worker.https_get, free=None, probe=ffprobe, verify_route=None, storage_guard=None):
         self.db,self.root,self.state=Path(db),Path(root),Path(state)
         self.provider,self.index=provider,index
         self.enabled,self.open_media,self.free,self.probe=enabled,open_media,free,probe
-        self.verify_route=verify_route
+        self.verify_route=verify_route;self.storage_guard=storage_guard
 
     def _store(self): return ApprovalStore(self.db)
 
@@ -118,20 +120,24 @@ class WorkerAdapter:
         try:
             row=store.db.execute('SELECT payload,state FROM jobs WHERE id=?',(pid,)).fetchone()
             if not row or row[1]!='approved': raise ValueError('job is not newly approved')
-            choice=Choice(**json.loads(row[0])['choice']).validate()
             # Claim once under SQLite's writer lock. A second dispatcher cannot run it.
             with store.db:
                 claimed=store.db.execute("UPDATE jobs SET state='downloading' WHERE id=? AND state='approved'",(pid,)).rowcount
             if claimed!=1: raise ValueError('job already claimed')
             owned=True
+            choice=Choice(**json.loads(row[0])['choice']).validate()
+            if self.storage_guard:self.storage_guard()
             def cancelled():
                 return bool(store.db.execute('SELECT 1 FROM cancellations WHERE id=?',(pid,)).fetchone())
             proof={}
-            def validate(destination,partial,entry): proof.update(validate_file(partial,choice,self.probe))
+            def validate(destination,partial,entry):
+                if self.storage_guard:self.storage_guard()
+                proof.update(validate_file(partial,choice,self.probe))
             last=[0.0]
             def progress(count):
                 now=time.monotonic()
                 if now-last[0]>=1 or count==choice.size:
+                    if self.storage_guard:self.storage_guard()
                     store.transition(pid,'downloading',bytes_received=count);last[0]=now
             manifest={'approved':True,'files':[{'canonicalId':choice.imdb,'torrentId':choice.torrent_id,'fileId':choice.file_id,
                       'providerName':choice.provider_name,'sizeBytes':choice.size,'editionConfirmed':True,

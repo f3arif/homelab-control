@@ -61,7 +61,7 @@ class InventoryChoices:
                 if re.search(r'(?i)(?:sample|trailer|2160p|720p|remux|\bs\d{1,2}e\d{1,3}\b)',text):continue
                 if not re.search(r'(?i)(?<!\d)1080p(?!\d)',text):continue
                 size=f.get('size')
-                if type(size) is not int or not 0<size<=CAP or (size>5_000_000_000 and not complete):continue
+                if type(size) is not int or not 0<size<=CAP:continue
                 codec=next((c for c,p in [('HEVC',r'(?i)(?:hevc|[xh][ .]?265)'),('AVC',r'(?i)(?:avc|[xh][ .]?264)'),('AV1',r'(?i)\bav0?1\b')] if re.search(p,text)),None)
                 if not codec:continue
                 flags=[word for word in ('extended','unrated','remastered','directors cut','theatrical') if word in norm(text)]

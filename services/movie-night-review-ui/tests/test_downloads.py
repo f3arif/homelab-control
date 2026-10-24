@@ -22,6 +22,8 @@ class Provider:
 
 class Harness:
     def __init__(self,tmp,body=None):
+        self.minimum_patches=[patch('movie_night.MIN_BYTES',1),patch('worker_candidate.MIN_BYTES',1)]
+        for p in self.minimum_patches:p.start() # tiny generated media only; boundary tests use production limits
         self.root=Path(tmp);self.media=self.root/'media';self.media.mkdir()
         self.state=self.root/'transfers';self.state.mkdir();self.body=body or b'fixture bytes'*8
         self.choice=Choice('tt12345','Fixture One',2024,'Theatrical','torbox',12,3,'Fixture.One.2024.1080p.x264.mkv','1080p','AVC',len(self.body),ROOT+'/tt12345.2024.mkv')
@@ -54,7 +56,9 @@ class Harness:
     def approve(self,p,reply='yes'):
         return self.post('approve',{'confirmationId':p['confirmationId'],'binding':p['binding'],'reply':reply})
     def wait(self,p):return self.controller.futures[p['confirmationId']].result(5)
-    def close(self):self.block.set();self.controller.close();self.client.close()
+    def close(self):
+        self.block.set();self.controller.close();self.client.close()
+        for p in reversed(self.minimum_patches):p.stop()
 
 class DownloadTests(unittest.TestCase):
     def setUp(self):
@@ -114,7 +118,7 @@ class DownloadTests(unittest.TestCase):
 
 class InventoryTests(unittest.TestCase):
     def rows(self,name='Fixture.One.2024.1080p.x264.mkv',**kw):
-        f={'id':3,'name':name,'size':4_000_000_000,'infected':False,'zipped':False};f.update(kw)
+        f={'id':3,'name':name,'size':5_000_000_000,'infected':False,'zipped':False};f.update(kw)
         return [{'id':12,'download_finished':True,'download_present':True,'name':name,'files':[f]}]
     def parse(self,rows):
         class P:
@@ -128,7 +132,7 @@ class InventoryTests(unittest.TestCase):
         rows=self.rows();rows[0]['download_finished']=False;self.assertEqual([],self.parse(rows))
     def test_unknown_codec(self):self.assertEqual([],self.parse(self.rows(name='Fixture.One.2024.1080p.mkv')))
     def test_large_or_720p(self):
-        self.assertEqual([],self.parse(self.rows(size=9_000_000_001)))
+        self.assertEqual([],self.parse(self.rows(size=15_000_000_001)))
         self.assertEqual([],self.parse(self.rows(name='Fixture.One.2024.720p.x264.mkv')))
 
 class PaginationTests(unittest.TestCase):

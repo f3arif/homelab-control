@@ -88,7 +88,7 @@ class AutoDownloads:
                     self.future=None
                     return
                 request_id,principal,imdb=row
-                db.execute("UPDATE movie_download_queue SET state='checking',message='Finding a suitable 1080p file.' WHERE id=?",(request_id,))
+                db.execute("UPDATE movie_download_queue SET state='checking',message='Finding a cached 1080p file (5–15 GB).' WHERE id=?",(request_id,))
             try:
                 self._active(request_id,principal,imdb)
                 with closing(ApprovalStore(self.c.db)) as store:
@@ -108,7 +108,7 @@ class AutoDownloads:
                         if self.c.free()-reserved-size<RESERVE or QUOTA-committed<size+1:raise ValueError('insufficient storage or quota')
                     guard();choice=self.acquire(imdb,guard)
                 if not choice:
-                    self._finish(request_id,'unavailable','No suitable cached 1080p file is available. Try again later.');continue
+                    self._finish(request_id,'unavailable','No cached 1080p file between 5 and 15 GB is available. Try again later.');continue
                 self._active(request_id,principal,imdb)
                 if self.c.inventory.verify(choice)!=choice:raise ValueError('source changed')
                 checked=int(self.c.clock())
@@ -124,6 +124,7 @@ class AutoDownloads:
                 # Never expose provider exceptions, credentials or temporary URLs.
                 message='Source service unavailable. Try again later.'
                 if str(exc)=='insufficient storage or quota':message='Not enough free storage or transfer budget. No server transfer started.'
+                elif str(exc)=='8 TB drive unavailable; downloads paused.':message=str(exc)
                 elif str(exc)=='existing file':message='An existing or partial server file needs review; it will not be overwritten.'
                 elif str(exc)=='source changed':message='Source details changed during checking. Try again.'
                 elif str(exc).startswith('Finalize '):message='Your selection changed. Finalize eligible picks before retrying.'
