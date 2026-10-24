@@ -312,7 +312,6 @@ function movieOverview(movie,heading='h2'){
   text.append(facts);
   if(movie.genres?.length){const genres=document.createElement('ul');genres.className='movie-genres';genres.setAttribute('aria-label','Genres');
     for(const g of movie.genres){const li=document.createElement('li');li.textContent=g;genres.append(li);}text.append(genres);}
-  if(movie.similarToLiked&&movie.feedback!=='like'){const why=document.createElement('p');why.className='liked-note';why.textContent='Similar to movies you liked';text.append(why);}
   overview.append(poster,text);overview.pickBadge=badge;return overview;
 }
 function fullSummary(movie){
