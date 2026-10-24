@@ -1,6 +1,6 @@
 """Durable Finalize & download queue. Imports, reads and old picks start nothing."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, nullcontext
 from pathlib import Path
 from uuid import uuid4
 import json
@@ -52,8 +52,8 @@ class AutoDownloads:
             db.execute("UPDATE movie_download_queue SET state='queued' WHERE state='checking' AND job_id IS NULL")
         self.start()
 
-    def requests(self, principal):
-        with closing(self.c.feedback.connect()) as db:
+    def requests(self, principal, db=None):
+        with (closing(self.c.feedback.connect()) if db is None else nullcontext(db)) as db:
             rows=db.execute('SELECT id,imdb,name,state,job_id,message FROM movie_download_queue WHERE principal=? ORDER BY rowid DESC LIMIT 100',(principal,)).fetchall()
         return [dict(id=r[0],imdb=r[1],name=r[2],state=r[3],jobId=r[4],message=r[5],
                      canRetry=r[4] is None and r[3] in ('unavailable','failed','cancelled')) for r in rows]

@@ -177,13 +177,16 @@ class Controller:
 
     def downloads(self,principal):
         with closing(ApprovalStore(self.db)) as store:
+            # Queue linkage and jobs must be read from one SQLite snapshot.
+            # Otherwise a concurrent dispatch can appear linked without its job.
+            store.db.execute('BEGIN')
             rows=store.db.execute('SELECT j.id,j.payload FROM jobs j JOIN plans p ON p.id=j.id WHERE p.principal=? ORDER BY p.rowid DESC LIMIT 100',(principal,)).fetchall()
             result=[]
             for pid,raw in rows:
                 choice=json.loads(raw)['choice'];status=store.status(pid)
                 result.append({'id':pid,'name':choice['title'],'imdb':choice['imdb'],'size':choice['size'],
                                'destination':choice['destination'],**status})
-            return {'jobs':result,'requests':self.auto_downloads.requests(principal) if self.auto_downloads else []}
+            return {'jobs':result,'requests':self.auto_downloads.requests(principal,db=store.db) if self.auto_downloads else []}
 
     def propose(self, imdb, principal):
         self.require_enabled()

@@ -172,6 +172,23 @@ class AutoDownloadTests(unittest.TestCase):
     def test_disabled_downloads_reject_finalize(self):
         self.h.controller.enabled=False
         self.assertEqual(409,self.finalize().status_code);self.assertEqual(0,self.count('movie_download_queue'))
+    def test_download_snapshot_cannot_link_a_job_missing_from_same_response(self):
+        q=self.h.controller.auto_downloads
+        with sqlite3.connect(self.h.db) as db:db.execute('PRAGMA journal_mode=WAL')
+        with patch.object(q,'start'):self.finalize()
+        request=next(r for r in q.requests('fixture') if r['imdb']==IDS[0])
+        with sqlite3.connect(self.h.db) as db:db.execute("UPDATE movie_download_queue SET state='checking' WHERE id=?",(request['id'],))
+        original=q.requests
+        def dispatch_between_reads(principal,db=None):
+            self.assertTrue(db.in_transaction)
+            with closing(ApprovalStore(self.h.db)) as writer:
+                writer.approve_finalized(self.h.choice,'fixture',request['id'],1000,200_000_000_000,1000)
+            return original(principal,db=db)
+        with patch.object(q,'requests',dispatch_between_reads):result=self.h.controller.downloads('fixture')
+        self.assertEqual([],result['jobs'])
+        self.assertEqual('checking',next(r for r in result['requests'] if r['imdb']==IDS[0])['state'])
+        fresh=self.h.controller.downloads('fixture')
+        self.assertEqual(fresh['jobs'][0]['id'],next(r for r in fresh['requests'] if r['imdb']==IDS[0])['jobId'])
 
 
 if __name__=='__main__':unittest.main()
