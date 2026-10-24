@@ -1,0 +1,6 @@
+# Direct dependencies for the qualified Python 3.12 Movie Night runtime.
+# requests is required by both default poster fetches and Cinemeta discovery.
+fastapi==0.141.1
+uvicorn==0.53.0
+httpx==0.28.1
+requests==2.34.2
