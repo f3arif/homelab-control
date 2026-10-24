@@ -24,6 +24,7 @@ const fs=require('fs'),assert=require('node:assert/strict');
     assert(!await p.$eval('#confirmation',d=>d.open));
     assert(!writes.some(x=>/\/(approve|propose)$/.test(x)));
     assert.equal(await p.$eval('#download-list',x=>x.querySelectorAll('article').length),10);
+    assert.equal(await p.$eval('#download-list article',x=>x.dataset.state),'indexed');
     const file=await p.$eval('#download-list a',async a=>{const r=await fetch(a.href,{headers:{Range:'bytes=0-31'}});return {status:r.status,bytes:(await r.arrayBuffer()).byteLength};});
     assert.deepEqual(file,{status:206,bytes:32});
     await p.click('#download-list [data-state="unavailable"] button');

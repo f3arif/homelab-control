@@ -206,6 +206,8 @@ async function loadDownloads(){
     const linked=new Set(requests.map(r=>r.jobId).filter(Boolean));
     downloadRequestedIds=new Set(requests.map(r=>r.imdb));selectionCount();
     const items=[...requests.map(r=>({...r,...(jobs.get(r.jobId)||{}),requestId:r.id})),...data.jobs.filter(j=>!linked.has(j.id))];
+    const priority={downloading:0,approved:1,checking:2,queued:3,indexed:4,'playback-tested':4,downloaded:4,unavailable:6,failed:6,cancelled:7};
+    items.sort((a,b)=>(priority[a.state]??5)-(priority[b.state]??5));
     if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to HP Envy.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
     const labels={queued:'Queued',checking:'Finding a source',unavailable:'No ready source',failed:'Needs attention',cancelled:'Cancelled',approved:'Queued for transfer',downloading:'Downloading',downloaded:'Downloaded',indexed:'Ready on server','playback-tested':'Ready on server'};
     for(const item of items){

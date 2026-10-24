@@ -124,7 +124,7 @@ def shortlist(payload, now, seen_policy=None, limit=12):
         reason = 'Fits your stated preference: ' + ', '.join(sorted(tags))
         result.append({'id': imdb, 'type': 'movie', 'name': str(name),
                        'releaseInfo': str(row.get('year', '')),
-                       'description': reason + '\nReview a finalized movie for its exact server download. Source availability and playback are not yet verified.',
+                       'description': reason + '\nFinalize your picks to request their server downloads. Source availability and playback are not yet verified.',
                        'posterShape': 'poster', 'fitTags': sorted(tags),
                        'trailer': reviewed_trailer(row.get('trailer'), imdb),
                        'synopsis': str(row.get('synopsis',''))[:450],
