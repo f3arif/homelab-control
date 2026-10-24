@@ -17,6 +17,7 @@ class ConfiguredProvider:
             if self.instance is None: self.instance=worker.Provider(worker.existing_key())
             return self.instance
     def _api(self,*a,**kw): return self.get()._api(*a,**kw)
+    def add_cached(self,*a,**kw):return self.get().add_cached(*a,**kw)
     def resolve(self,*a,**kw): return self.get().resolve(*a,**kw)
 
 class InventoryChoices:
@@ -40,7 +41,12 @@ class InventoryChoices:
         movies=[x for x in self.payload().get('movies',[]) if x.get('id')==imdb]
         if len(movies)!=1:return []
         m=movies[0];title=norm(m['name']);year=str(m['year'])
-        rows,complete=self.refresh();result=[]
+        rows,complete=self.refresh()
+        return self.parse(m,rows,complete)
+
+    @staticmethod
+    def parse(m,rows,complete=True):
+        imdb=m["id"];title=norm(m["name"]);year=str(m["year"]);result=[]
         for row in rows:
             if row.get('download_finished') is not True or row.get('download_present') is not True:continue
             for f in row.get('files',[]):
@@ -64,3 +70,4 @@ class InventoryChoices:
                     result.append(Choice(imdb,m['name'],m['year'],edition,'torbox',row['id'],f['id'],name,'1080p',codec,size,ROOT+'/'+imdb+'.'+year+suffix).validate())
                 except (ValueError,TypeError,KeyError):continue
         return result
+

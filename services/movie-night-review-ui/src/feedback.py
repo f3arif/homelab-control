@@ -49,8 +49,9 @@ class FeedbackStore:
             raise ValueError(f'Select {MIN_PICKS} to {MAX_PICKS} different movies to finalize.')
         if not set(ids)<=set(eligible):raise ValueError('A selected movie is no longer eligible. Refresh your picks.')
         with closing(self.connect()) as db,db:
-            db.execute('INSERT INTO movie_finalized VALUES(?,?,1,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,valid=1,updated=excluded.updated',(principal,json.dumps(ids),int(time.time())))
-            if on_saved is not None:on_saved(db)
+            db.execute('BEGIN IMMEDIATE')
+            if on_saved is None or on_saved(db) is not False:
+                db.execute('INSERT INTO movie_finalized VALUES(?,?,1,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,valid=1,updated=excluded.updated',(principal,json.dumps(ids),int(time.time())))
         return {'ids':ids,'valid':True,'queued':False}
 
     def refill_requested(self,principal):

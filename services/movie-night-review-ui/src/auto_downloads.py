@@ -31,7 +31,7 @@ class AutoDownloads:
         previous=db.execute('SELECT body FROM movie_download_requests WHERE principal=? AND id=?',(principal,request_id)).fetchone()
         if previous:
             if previous[0]!=body:raise ValueError('Download request ID was already used. Reload Movie Night.')
-            return
+            return False # an old replay must not overwrite a newer selection
         db.execute('INSERT INTO movie_download_requests VALUES(?,?,?)',(principal,request_id,body))
         now=int(self.c.clock())
         for imdb in ids:
@@ -39,6 +39,7 @@ class AutoDownloads:
                        (str(uuid4()),principal,imdb,rows[imdb]['name'],'queued','Waiting for a source check.',now))
             if imdb in retry:
                 db.execute("UPDATE movie_download_queue SET state='queued',message='Waiting for a source check.',updated=? WHERE principal=? AND imdb=? AND job_id IS NULL AND state IN ('unavailable','failed','cancelled')",(now,principal,imdb))
+        return True
 
     def start(self):
         with self.c.lock:
