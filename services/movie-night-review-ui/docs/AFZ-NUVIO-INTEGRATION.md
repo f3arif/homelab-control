@@ -1,3 +1,11 @@
+# Current Movie Night storage contract — 2026-10-24
+
+The shared Movie Night backend now targets the ZBook's 8 TB AFZ_MEDIA disk, `/srv/afzmedia/Media/MovieNight/Movies`, while retaining the owner entry at `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. New finalized server downloads require cached 1080p files of **5–15 GB inclusive**; unknown, smaller and larger sizes are excluded. `GET /movie-night/api/shortlist` exposes `downloadPolicy` with `minBytes`, `maxBytes`, `quality`, `storage`, and `host`. Nuvio should display that contract and distinguish “8 TB drive” from a separate “Save to this device” copy.
+
+This is the server contract and integration plan. No Android APK is changed here. The existing owner gateway, CSRF and exact-file binding remain. A missing/wrong/read-only 8 TB volume stops downloads; there is no Envy/internal-disk fallback. Completed historical files remain available even if below the newly requested minimum. Migration archives old cancelled attempts and allows a new bounded source choice rather than overwriting their partial files.
+
+The older plan below remains useful for shared-list/profile/API work, but references to HP Envy as the movie storage destination are superseded by the ZBook/8 TB destination above. Keep the Envy URL as the private front door; do not expose the backend relay port to Nuvio or embed its secret in an APK.
+
 # Movie Night and AFZ Nuvio integration plan
 
 Updated: 2026-10-24 UTC. Owner: AFZ Media. Access claim #282; automatic-finalization claim #288 / PR #289.

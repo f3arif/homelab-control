@@ -1,3 +1,19 @@
+# Movie Night — 8 TB storage and 5–15 GB downloads
+
+Owner policy, 2026-10-24: finalized movies download directly to the ZBook's **8 TB AFZ_MEDIA** drive. Each new movie must be a known-size cached **1080p file between 5,000,000,000 and 15,000,000,000 bytes inclusive**. Smaller or oversized files never become fallbacks. The existing 50 GiB free-space reserve and 100 GB transfer budget remain; archived attempts count toward that budget. File size is a selection constraint, not a guarantee of visual quality.
+
+The review/download backend runs on `afz-zbook`. Media root: `/srv/afzmedia/Media/MovieNight/Movies`. Exact mount `/srv/afzmedia`, NTFS3 UUID `A29E635A9E63264F`, writable status and 8 TB capacity are checked before transfer, during progress, before publication and when serving media. Missing/wrong/read-only storage fails closed without creating an internal-disk fallback.
+
+The existing owner URL remains `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. Envy keeps the owner gateway and a private Unix-socket relay; ZBook accepts the backend port only from Envy's tailnet address plus a private per-service secret. No billing credentials are forwarded. No Tailscale SSH policy changes are needed. New media bytes are written only on the 8 TB disk; state databases and application dependencies use the ZBook's internal disk.
+
+`deploy_8tb.py` implements guarded `export-envy`, `install-zbook`, and `connect-envy` steps. Transfer the private archive through the already-authorized H3 SSH connections, verify its SHA-256, and retain it owner-only. `migrate_storage.py` verifies copied media, preserves completed files, archives cancelled jobs and their original authorizations, retains preferences, and makes unfinished requests retryable as new jobs under the new policy. It never overwrites media or silently resumes a partial with a different source. The previously completed 3.96 GB file is retained as historical content, not treated as a new qualifying download.
+
+Emergency recovery: run `deploy_8tb.py pause-zbook` in the canonical ZBook checkout. It cancels active work and restarts the backend in review-only mode while preserving the latest preferences, jobs and all media. Do not restore an old Envy database or run a historical Envy apply/rollback script after cutover. Reconnecting to the old backend requires an explicit current-state migration; retained Envy files are recovery copies, not active storage.
+
+Tests cover inclusive size boundaries, bounded inventory, exact-volume refusal, relay peer/secret enforcement, migration preservation/rollback, and a generated-video browser transfer through the private relay onto the actual 8 TB volume. `tests/auto_qa.py` uses only fixture providers; `AFZ_QA_8TB=1 AFZ_BROWSER_SCRIPT=storage_browser.cjs` enables the real-volume fixture. Tests temporarily lower the size minimum for tiny generated media only; production has no CLI minimum override. The production 5–15 GB boundary is tested independently with metadata fixtures.
+
+The sections below describe prior releases and their original Envy destinations. They are historical; the policy above supersedes them.
+
 # AFZ Movie Night private service
 
 Canonical source: f3arif/homelab-control. This checkout preserves the current Seen, continuous-refill, genre and reserve fixes and adds the download workflow. It supersedes the older static-only PR #278 snapshot for future standalone service deployments.
