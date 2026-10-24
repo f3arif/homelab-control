@@ -8,7 +8,7 @@ from publish_reviewed import read_json,validate_rows,inspect_state
 from feedback import FeedbackStore,rank_reviewed
 from seen_policy import KNOWN_SEEN_IDS
 from metadata_discovery import DiscoveryUnavailable
-from movie_night import shortlist
+from movie_night import shortlist, excluded_genres
 
 def atomic_json(path,data):
     encoded=(json.dumps(data,ensure_ascii=False,indent=2)+'\n').encode()
@@ -112,6 +112,7 @@ class DiscoveryRefill(ReviewedRefill):
             if target.exists():
                 if target.is_symlink():raise ValueError('Symlink bank rejected')
                 oldraw,old=read_json(target)
+                if isinstance(old.get('movies'),list):old=dict(old,movies=[r for r in old['movies'] if not excluded_genres(r)])
                 try:validate_rows(old,now,minimum=1,max_age=7*86400);keep=old['movies']
                 except ValueError:pass
             merged={r['id']:r for r in keep+rows if r['id'] not in blocked}

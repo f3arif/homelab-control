@@ -2,9 +2,26 @@
 import re,time
 from datetime import datetime,timezone
 BASE='https://v3-cinemeta.strem.io'
-BLOCK=re.compile(r'\b(?:comed(?:y|ies)|dramed(?:y|ies))\b',re.I)
-# Owner choice 2026-10-21: thrillers, horror, creature/monster adventure, crime, action, sci-fi; Drama tag allowed; no Comedy.
+EXCLUDED_GENRES=('Animation','Drama','Comedy')
+BLOCK=re.compile(r'\b(?:animat(?:ion|ions|ed)|anime|cartoons?|dramas?|dramatic|comed(?:y|ies)|dramed(?:y|ies))\b',re.I)
+# Owner choice 2026-10-24: exclude Animation and Drama, including mixed genres; keep Comedy excluded.
 CORE_GENRES={'Thriller','Mystery','Mystery & Thriller','Crime','Action','Sci-Fi','Science Fiction','Adventure','Horror'}
+
+def excluded_genres(row):
+    """Use genre labels and aliases, never infer genre from a plot or title."""
+    if not isinstance(row,dict):return False # malformed rows are rejected by their caller
+    for data in (row,row.get('discoveryEvidence')):
+        if not isinstance(data,dict):continue
+        labels=[]
+        for key in ('genres','genre'):
+            values=data.get(key,[])
+            if isinstance(values,str):labels.append(values)
+            elif isinstance(values,list):labels.extend(values)
+        links=data.get('links',[])
+        if isinstance(links,list):
+            labels.extend(link.get('name','') for link in links if isinstance(link,dict) and str(link.get('category','')).casefold()=='genres')
+        if any(BLOCK.search(str(label)) for label in labels):return True
+    return False
 SCARY=re.compile(r'\b(?:horror|supernatural|paranormal|demon\w*|ghosts?|haunt\w*|possess\w*|exorcis\w*|zombies?|vampires?|monsters?|gore|gory|tortur\w*|sadist\w*|serial killer|ritual\w*|fright\w*|terrify\w*|nightmar\w*|slasher|occult|cannibal\w*)\b',re.I)
 # Independent evidence overrides incomplete provider labels. Never relabel a conflict.
 VETO={
@@ -16,7 +33,7 @@ VETO={
  'tt1634106','tt4693358','tt4196776','tt3640424','tt7456310','tt10183816',
  'tt8080204','tt1590193','tt1458169','tt11827628','tt5761544')}
 }
-ALLOWED_GENRES={'Drama','Horror','Fantasy','Action','Adventure','Animation','Biography','Crime','Documentary','Family','History','Music','Musical','Mystery','Mystery & Thriller','Romance','Sci-Fi','Science Fiction','Sport','Thriller','War','Western'}
+ALLOWED_GENRES={'Horror','Fantasy','Action','Adventure','Biography','Crime','Documentary','Family','History','Music','Musical','Mystery','Mystery & Thriller','Romance','Sci-Fi','Science Fiction','Sport','Thriller','War','Western'}
 GUIDE='Automatically screened metadata only. Intensity is not reviewed: horror, creature attacks and strong violence may occur.'
 def clean_text(value,maximum):
     return isinstance(value,str) and 1<=len(value)<=maximum and not any(ord(c)<32 for c in value)

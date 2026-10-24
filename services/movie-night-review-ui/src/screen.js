@@ -364,7 +364,7 @@ function render(data){
   $('download-step').textContent=autoDownloads?'Finalize & download saves your picks and starts their server downloads automatically.':'Review server download on a finalized movie. Confirm its exact file to start.';
   $('download-rule').textContent=autoDownloads?'The server chooses a suitable cached 1080p file. Downloads keep running after you close the page. Likes and Pick alone do not start downloads.':'Likes and finalized picks never start a download.';
   $('finalized-help').textContent=autoDownloads?'Server status updates on each card. Ready files are saved on the 8 TB drive; Save a copy downloads a separate copy to this device. View download details for retry or cancellation.':'Next, review each exact file, quality, codec, size, available storage and 8 TB drive destination before confirming its download.';
-  if(!initialized){selected=new Set(data.finalized?.valid?data.finalized.ids:[]);initialized=true;}
+  if(!initialized){selected=new Set(data.finalized?.ids||[]);initialized=true;}
   selected=new Set([...selected].filter(id=>(data.eligibleIds||[]).includes(id)));
   $('movies').replaceChildren();$('finalized-movies').replaceChildren();$('removed-movies').replaceChildren();pickCards.clear();cardDownloads.clear();
   for(const movie of [...data.movies,...(data.finalized?.movies||[])])titles.set(movie.id,movie.name);
@@ -411,8 +411,12 @@ function render(data){
   $('selection').hidden=!data.reviewEnabled;
   const f=data.finalized||{ids:[],valid:false,movies:[]};$('finalized').hidden=!f.ids.length;
   finalizedIds=f.ids||[];finalizedValid=!!f.valid;
-  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. ${autoDownloads?(f.ids.every(id=>downloadRequestedIds.has(id))?'Their server download requests are listed below.':'Press Finalize & download to start their server downloads.'):'No download starts until you confirm an exact file.'}`:f.reason==='genre-filter'?'Your saved selections are retained, but a title is ineligible under your no Comedy filter. Choose eligible replacements.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
-  for(const movie of f.movies){const card=cardBody(movie,'h3');if(f.valid&&data.actionsEnabled)card.append(watchButtons(movie,true));$('finalized-movies').append(card);}
+  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. ${autoDownloads?(f.ids.every(id=>downloadRequestedIds.has(id))?'Their server download requests are listed below.':'Press Finalize & download to start their server downloads.'):'No download starts until you confirm an exact file.'}`:f.reason==='genre-filter'?'Some saved picks are outside your Animation, Drama and Comedy filters. Review the remaining picks and finalize again. Existing server files are kept.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
+  const excluded=new Set(f.excludedIds||[]);
+  for(const movie of f.movies){
+    if(excluded.has(movie.id)){const note=document.createElement('p');note.className='genre-excluded muted';note.textContent=movie.name+' — outside your current filters. Any existing server file remains in downloads.';$('finalized-movies').append(note);continue;}
+    const card=cardBody(movie,'h3');if(data.actionsEnabled&&(f.valid||autoDownloads))card.append(watchButtons(movie,true));$('finalized-movies').append(card);
+  }
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
   updateCardDownloads();

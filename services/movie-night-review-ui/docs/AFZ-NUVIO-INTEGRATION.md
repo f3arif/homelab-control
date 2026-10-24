@@ -31,6 +31,8 @@ Current native paths under `composeApp/src/commonMain/kotlin/com/nuvio/app/featu
 
 `MovieNightSession.refresh()` currently returns empty when watched seeds are empty. A connected server list must not inherit that gate. Its `dismiss()` only changes the local cache, so merely swapping the candidate loader would still leave two different lists.
 
+Server policy update, 2026-10-24: connected Movie Night excludes Animation, Drama and Comedy, including mixed genres and aliases. Honor `excludedGenres` and `finalized.excludedIds`; excluded historical picks must not render as selectable movie cards. Preserve existing server downloads and show eligible remaining picks for explicit re-finalization. The native R48 local policy above is historical and has not been changed by this server release.
+
 ## Delivery sequence
 
 ### 1. Entry link, then an explicit connected mode
