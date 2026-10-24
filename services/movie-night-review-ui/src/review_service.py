@@ -21,7 +21,14 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
             raw = (state / 'reviewed-shortlist.json').read_bytes()
             if len(raw) > 262144: return {}
             result = json.loads(raw)
-            return with_cached_info(result,state/'movie-metadata.json') if isinstance(result, dict) else {}
+            if not isinstance(result,dict):return {}
+            # Re-enabled retained titles must also be available to exact source lookup.
+            rows=result.get('movies',[])+result.get('retainedIneligibleSelections',[])+result.get('genreFilteredMovies',[])
+            unique={}
+            for row in rows:
+                if isinstance(row,dict) and isinstance(row.get('id'),str):unique.setdefault(row['id'],row)
+            result=dict(result,movies=list(unique.values()))
+            return with_cached_info(result,state/'movie-metadata.json')
         except (OSError, ValueError): return {}
     def forbidden(*args, **kwargs):
         raise RuntimeError('Acquisition unavailable in review service')

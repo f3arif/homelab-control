@@ -4,7 +4,7 @@ import json
 import sqlite3
 import time
 from seen_policy import canonical_id
-from discovery_policy import CORE_GENRES
+from genre_settings import GENRES, genres_of, defaults
 
 MIN_PICKS = 3
 MAX_PICKS = 10
@@ -67,17 +67,19 @@ class FeedbackStore:
             if not row or row[0]<=published_epoch:
                 db.execute('INSERT INTO movie_refill_requests VALUES(?,?) ON CONFLICT(principal) DO UPDATE SET requested=excluded.requested',(principal,now))
 
-def rank_reviewed(rows,ratings,limit=VISIBLE_MOVIES):
+def rank_reviewed(rows,ratings,limit=VISIBLE_MOVIES,genre_settings=None):
+    settings=genre_settings or defaults()
+    preferred=set(settings['included']) if settings['included'] else set(GENRES)
     eligible=[r for r in rows if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')]
     liked_genres=set()
     for rating in ratings.values():
         if rating['value']=='like':
-            liked_genres.update(set(rating['metadata'].get('genres',[])) & CORE_GENRES)
+            liked_genres.update(genres_of(rating['metadata']) & preferred - set(settings['excluded']))
     def score(row):
         liked=ratings.get(row['id'],{}).get('value')=='like'
         # A genre match is enough; matching more themes/genres earns no extra boost.
         # Other eligible genres remain available in their reviewed order.
-        return (-int(liked),-int(bool(set(row.get('genres',[]))&liked_genres)))
+        return (-int(liked),-int(bool(genres_of(row)&liked_genres)))
     eligible=sorted(eligible,key=score) # preserve reviewed input order for ties
     result=[]
     for row in eligible[:limit]:

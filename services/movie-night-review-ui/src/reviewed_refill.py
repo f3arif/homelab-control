@@ -2,21 +2,22 @@
 import hashlib,json,os,sqlite3,tempfile,time
 from pathlib import Path
 from publish_reviewed import read_json,validate_rows,publish,preference_snapshot
-from movie_night import shortlist, excluded_genres
+from movie_night import shortlist
+from genre_settings import GenreSettingsStore, genre_match
 
 class ReviewedRefill:
-    def __init__(self,state):self.state=Path(state)
+    def __init__(self,state):self.state=Path(state);self.genre_settings=GenreSettingsStore(state)
     def candidates(self):
-        now=int(time.time())
+        now=int(time.time());settings=self.genre_settings.read()
         raw,current=read_json(self.state/'reviewed-shortlist.json')
         _,bank=read_json(self.state/'reviewed-refill-bank.json')
         # Keep eligible reserves usable after an owner changes genre preferences.
-        if isinstance(bank.get('movies'),list):bank=dict(bank,movies=[r for r in bank['movies'] if not excluded_genres(r)])
-        rows,known=validate_rows(bank,now,minimum=1,max_age=7*86400)
+        if isinstance(bank.get('movies'),list):bank=dict(bank,movies=[r for r in bank['movies'] if genre_match(r,settings)])
+        rows,known=validate_rows(bank,now,minimum=1,max_age=7*86400,genre_settings=settings)
         _,disliked=preference_snapshot(self.state/'preferences.sqlite3')
         used=set(current.get('publishedHistoryIds',[])) | {r['id'] for r in current.get('movies',[])}
         seen=known | set(current.get('knownSeenIds',[]))
-        eligible={r['id'] for r in shortlist(dict(bank,knownSeenIds=sorted(seen)),now,limit=None)}
+        eligible={r['id'] for r in shortlist(dict(bank,knownSeenIds=sorted(seen)),now,limit=None,genre_settings=settings)}
         fresh=[r for r in rows if r['id'] in eligible-used-disliked]
         return raw,current,bank,fresh,disliked,seen
     def status(self):
@@ -24,6 +25,7 @@ class ReviewedRefill:
         except (OSError,ValueError,sqlite3.Error):return {'available':0,'supply':'review-needed'}
     def fulfill(self,expected_hash=None):
         try:
+            settings=self.genre_settings.read()
             raw,current,bank,fresh,disliked,seen=self.candidates()
             if expected_hash and hashlib.sha256(raw).hexdigest()!=expected_hash:return {'fulfilled':False,'reason':'state-changed'}
             if not fresh:return {'fulfilled':False,'reason':'review-needed'}
@@ -31,10 +33,10 @@ class ReviewedRefill:
             from contextlib import closing
             with closing(sqlite3.connect('file:'+str(self.state/'preferences.sqlite3')+'?mode=ro',uri=True)) as db:
                 ratings={i:{'value':v,'metadata':json.loads(m)} for i,v,m in db.execute('SELECT imdb,value,metadata FROM movie_feedback WHERE principal=?',('billing-owner',))}
-            ordered=rank_reviewed(fresh,ratings,limit=len(fresh));order={r['id']:i for i,r in enumerate(ordered)}
+            ordered=rank_reviewed(fresh,ratings,limit=len(fresh),genre_settings=settings);order={r['id']:i for i,r in enumerate(ordered)}
             fresh.sort(key=lambda r:order[r['id']])
             now=int(time.time())
-            eligible={r['id'] for r in shortlist(current,now,limit=None)}-disliked-seen
+            eligible={r['id'] for r in shortlist(current,now,limit=None,genre_settings=settings)}-disliked-seen
             keep=[r for r in current.get('movies',[]) if r['id'] in eligible]
             # Fill five cards when depleted, otherwise add a five-title reserve batch.
             count=max(1,5-len(keep)) if len(keep)<5 else 5

@@ -60,7 +60,7 @@ class ExclusionPolicyTests(unittest.TestCase):
 
     def test_publisher_rejects_mixed_excluded_genres(self):
         for genre in EXCLUDED_GENRES:
-            with self.subTest(genre=genre),self.assertRaisesRegex(ValueError,'Animation, Drama and Comedy'):
+            with self.subTest(genre=genre),self.assertRaisesRegex(ValueError,'Excluded genres: Animation, Drama, Comedy'):
                 validate_rows({'generatedEpoch':100,'movies':[row(genres=['Thriller',genre])]},100,minimum=1)
 
     def test_publisher_accepts_genre_match_without_theme_tags(self):

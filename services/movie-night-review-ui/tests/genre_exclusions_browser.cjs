@@ -32,7 +32,7 @@ const root=path.resolve(__dirname,'..'),out=path.join(root,'qa/genre-exclusions'
   for(const id of excluded)assert.equal(await p.locator('.movie-card[data-movie="'+id+'"]').count(),0);
   assert.equal(await p.locator('#movies .pick-toggle[aria-pressed="true"]').count(),4);
   assert.equal(await p.locator('#finalized-movies .server-file:visible').count(),4);
-  assert.match(await p.locator('#finalized-status').innerText(),/Animation, Drama and Comedy filters/);
+  assert.match(await p.locator('#finalized-status').innerText(),/current genre filters/);
   assert.equal(await p.locator('#finalize').innerText(),'Finalize & download 4');
   assert.equal(await p.locator('#finalize').isDisabled(),false);
   const overflow=await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth);assert(!overflow);
