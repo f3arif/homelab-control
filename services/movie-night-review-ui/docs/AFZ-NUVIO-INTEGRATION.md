@@ -78,7 +78,7 @@ Keep separate actions: **Finalize & download to server** uses the owner-authoriz
 
 Automatic lookup checks existing completed TorBox inventory, then the existing Comet metadata and TorBox cache. It may add the chosen cached hash with cached-only enforcement; it never launches uncached acquisition or opens addon playback URLs. A fresh completed/safe account-file check binds exact identity, size, destination and codec before transfer. Show unavailable sources honestly and offer explicit retry. App restart resumes status observation; an uncertain request is reconciled by its idempotency key, never given a new key silently. No retroactive downloads on merely connecting a profile, opening the app or seeing previously finalized picks.
 
-For completed media, use the existing authenticated catalog/media paths and verify the selected player and native download engine keep access to the same Tailscale route. Test GET Range/206, seek, cancellation, source disappearance and device-local completion; add HEAD support only if the chosen client requires it. Keep “downloaded”, “available/indexed” and “playback tested” distinct. Jellyfin indexing and moving storage to the ZBook are separate work.
+For completed media, use the existing authenticated catalog/media paths and verify the selected player and native download engine keep access to the same Tailscale route. Test GET Range/206, seek, cancellation, source disappearance and device-local completion; add HEAD support only if the chosen client requires it. Keep “downloaded”, “available/indexed” and “playback tested” distinct. ZBook/8 TB storage is implemented by this server release. Jellyfin indexing remains separate work.
 
 ## Acceptance and rollout gates
 
