@@ -151,6 +151,7 @@ class ApprovalStore:
         self.db.execute('CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, principal TEXT, payload TEXT, expires INTEGER)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, title TEXT UNIQUE, destination TEXT UNIQUE, payload TEXT, state TEXT, bytes INTEGER, evidence TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS cancellations (id TEXT PRIMARY KEY)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS archived_jobs(id TEXT PRIMARY KEY,title TEXT,destination TEXT,payload TEXT,state TEXT,bytes INTEGER,evidence TEXT,reason TEXT,archived INTEGER)')
         self.db.commit()
 
     def propose(self, choice, principal, now, free, quota=QUOTA):
@@ -181,7 +182,7 @@ class ApprovalStore:
                 raise ValueError('download request no longer active')
             if not 0<=now-provider_checked_at<=300:raise ValueError('provider verification expired')
             reserved=sum(json.loads(x[0])['choice']['size']-x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
-            committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs'))
+            committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
             if free-reserved-choice.size<RESERVE or QUOTA-committed<choice.size+1:
                 raise ValueError('insufficient storage or quota')
             pid=str(uuid4())
@@ -217,7 +218,7 @@ class ApprovalStore:
             if existing or completed_present is not True:
                 raise ValueError('existing file or provider completion not verified')
             reserved = sum(json.loads(x[0])['choice']['size'] - x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
-            committed = sum(json.loads(x[0])['choice']['size'] + 1 for x in self.db.execute('SELECT payload FROM jobs'))
+            committed = sum(json.loads(x[0])['choice']['size'] + 1 for x in self.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
             if free - reserved - current_choice.size < RESERVE or quota - committed < current_choice.size + 1:
                 raise ValueError('insufficient storage or quota')
             self.db.execute('INSERT INTO jobs VALUES (?,?,?,?,?,?,?)', (pid, current_choice.imdb, current_choice.destination, p[1], 'approved', 0, '{}'))

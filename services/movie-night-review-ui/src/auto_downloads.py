@@ -104,7 +104,7 @@ class AutoDownloads:
                         with closing(ApprovalStore(self.c.db)) as store:
                             from movie_night import QUOTA
                             reserved=sum(json.loads(x[0])['choice']['size']-x[1] for x in store.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
-                            committed=sum(json.loads(x[0])['choice']['size']+1 for x in store.db.execute('SELECT payload FROM jobs'))
+                            committed=sum(json.loads(x[0])['choice']['size']+1 for x in store.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
                         if self.c.free()-reserved-size<RESERVE or QUOTA-committed<size+1:raise ValueError('insufficient storage or quota')
                     guard();choice=self.acquire(imdb,guard)
                 if not choice:
