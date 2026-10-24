@@ -18,8 +18,9 @@ const fs=require('fs'),assert=require('node:assert/strict');
     assert.equal(await p.$eval('#finalize',b=>b.textContent),'Finalize & download 5');
     await p.$$eval('#movies .pick-toggle',buttons=>buttons.slice(5).forEach(b=>b.click()));
     assert.equal(await p.$eval('#finalize',b=>b.textContent),'Finalize & download 10');
-    await p.click('#finalize');
-    await p.waitForSelector('#download-list [data-state="indexed"]',{timeout:25000});
+    const [finalizeResponse]=await Promise.all([p.waitForResponse(r=>r.url().endsWith('/api/finalize')&&r.request().method()==='POST'),p.click('#finalize')]);
+    assert.equal(finalizeResponse.status(),200,await finalizeResponse.text());
+    try{await p.waitForSelector('#download-list [data-state="indexed"]',{timeout:25000});}catch(e){console.error('FIXTURE_PAGE',await p.$eval('body',x=>x.innerText));throw e;}
     await p.waitForFunction(()=>document.querySelectorAll('#download-list [data-state="unavailable"]').length===9);
     assert(!await p.$eval('#confirmation',d=>d.open));
     assert(!writes.some(x=>/\/(approve|propose)$/.test(x)));
