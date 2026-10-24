@@ -1,13 +1,13 @@
 # Movie Night and AFZ Nuvio integration plan
 
-Date: 2026-10-23. Owner: AFZ Media. Claim: homelab-control #282.
+Updated: 2026-10-24 UTC. Owner: AFZ Media. Access claim #282; automatic-finalization claim #288 / PR #289.
 Scope: separate web access is implemented in this change. The Android integration below is a plan; no APK is changed or installed by this task.
 
 ## Starting point, verified from source
 
 The independent entry is `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. Tailscale Serve authenticates the caller; a private allowlist admits only the existing owner's exact account. The gateway binds to loopback and exposes only Movie Night routes. No billing password, cookie or billing endpoint is used. The old billing entry on 8447 remains available for compatibility. Both reach the same private review socket and stable internal principal, so existing feedback, finalized selections and jobs are preserved.
 
-Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, stacked on download PR #281 commit `7f5a84689840074462f58e5fe547d76a5d43d239`. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. Downloads require finalizing 3–10 eligible films, reviewing one exact file, then explicit yes. Files go to HP Envy, not the phone or ZBook.
+Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, automatic-finalization PR #289, stacked on source-feedback #287 and the access/download predecessors. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. The owner now authorizes **Finalize & download** to automatically acquire and download 3–10 selected eligible films. The web request saves finalization and a durable per-movie queue atomically; Pick/Like alone have no acquisition side effect. Old saved picks do not enqueue merely on activation. Files go to HP Envy, not the phone or ZBook.
 
 AFZ Nuvio PR #21 is an open draft at `579d79c81338eed7431127629744f9bba47a1ea5`. R48 build161 was built but its handoff reports no installation. Native source was independently read on H3, WSL **Ubuntu-24.04**, `/home/faiz/afz-nuvio-r48-movie-night-daily-20261023`, clean commit `6e79f7c4e1c256cd4fb9e87049254c3b9ef9bd5a`. Do not confuse that native commit with the GitHub receipts commit.
 
@@ -55,18 +55,20 @@ Current APIs to preserve:
 |---|---|---|
 | Feedback | `POST /movie-night/api/feedback`, `{imdb,value}` | Use existing backend values; explicit Like / Not for me / Seen / Undo semantics |
 | Refill | Same endpoint, `{action:"request-refill",requestId}` | Preserve existing deduplication; no download side effect |
-| Finalize | `POST /movie-night/api/finalize`, `{ids}` | 3–10 eligible IDs; extend with revision in the shared-draft phase |
+| Finalize & download | `POST /movie-night/api/finalize`, `{ids,startDownloads:true,requestId}` | Explicit action labelled with its download effect; 3–10 eligible IDs; durable idempotency key. Extend with draft revision later |
+| Retry unavailable source | Same endpoint, plus `{retryDownloads:[imdb]}` | Explicit retry only; retain the same requestId when checking/replaying an uncertain write |
 | Prepare source | `POST /movie-night/api/propose`, `{imdb}` | Poll returned `lookupId` at `/api/lookup/{id}` |
-| Approve exact file | `POST /movie-night/api/approve`, `{confirmationId,binding,reply:"yes"}` | Explicit review/confirmation; never auto-approve on Pick or Like |
-| Status / cancel | `GET /api/status/{confirmationId}`; `POST /api/cancel`, `{confirmationId}` | Preserve completed files and durable job state |
+| Legacy approve exact file | `POST /movie-night/api/approve`, `{confirmationId,binding,reply:"yes"}` | Compatibility path; connected automatic mode uses Finalize & download instead of manufacturing a yes reply |
+| Queue / jobs | `GET /api/downloads` returns `requests` and `jobs` | Merge requests by jobId; show source lookup, unavailable/failed, queued transfer, progress and completed states |
+| Status / cancel | `GET /api/status/{confirmationId}`; `POST /api/cancel`, `{requestId}` for automatic queue or `{confirmationId}` for jobs | Preserve completed files and durable state; cancellation never deletes media |
 
 All abbreviated `/api/` paths above are under `/movie-night`. Confirm exact current response DTOs in `webapp.py` and `movie_night.py` when implementing; add a schema version and contract tests before shipping native mutations. No arbitrary query parameters on exact asset/API routes.
 
 ### 4. Playback and downloads with clear destinations
 
-Keep separate actions: **Download to server** uses the confirmed server workflow; **Download to this device** uses Nuvio's existing concrete-file download manager or copies a completed authenticated server file. Never label a server transfer as a phone download. Phone preferences remain suitable cached 1080p around 3–5 GB; do not alter TV/large-original ranking as part of list integration.
+Keep separate actions: **Finalize & download to server** uses the owner-authorized automatic server workflow; **Download to this device** uses Nuvio's existing concrete-file download manager or copies a completed authenticated server file. Never label a server transfer as a phone download. Phone preferences remain suitable cached 1080p around 3–5 GB; do not alter TV/large-original ranking as part of list integration.
 
-Server lookup currently scans only bounded completed TorBox account inventory; it does not acquire arbitrary uncached titles or add torrents. Show “no matching source” honestly. Download approval remains bound to exact identity, size, destination, expiry and provider revalidation. An app restart resumes status observation, not a new approval or source substitution.
+Automatic lookup checks existing completed TorBox inventory, then the existing Comet metadata and TorBox cache. It may add the chosen cached hash with cached-only enforcement; it never launches uncached acquisition or opens addon playback URLs. A fresh completed/safe account-file check binds exact identity, size, destination and codec before transfer. Show unavailable sources honestly and offer explicit retry. App restart resumes status observation; an uncertain request is reconciled by its idempotency key, never given a new key silently. No retroactive downloads on merely connecting a profile, opening the app or seeing previously finalized picks.
 
 For completed media, use the existing authenticated catalog/media paths and verify the selected player and native download engine keep access to the same Tailscale route. Test GET Range/206, seek, cancellation, source disappearance and device-local completion; add HEAD support only if the chosen client requires it. Keep “downloaded”, “available/indexed” and “playback tested” distinct. Jellyfin indexing and moving storage to the ZBook are separate work.
 
@@ -76,8 +78,9 @@ Use disposable movies/provider/video for all write/download tests. Verify web/na
 
 Run the existing native Movie Night policy/session/catalog/UI tests plus new contract/profile-isolation tests and the full Android host suite. R48's recorded baseline is 1729 passing tests, not a claim about the future integration build. Verify phone layout, TalkBack and TV remote focus where supported. Preserve signing key/package and increment versionCode. Stage a signed build and exact source/receipt; obtain installation authorization, then verify on Pixel 10 Pro XL and OnePlus 13R. No physical-device acceptance is implied by desktop browser emulation.
 
-Roll out entry link → read-only connected row → shared drafts/feedback → confirmed transfers/playback, with independent flags and a retained local-picker mode. Rollback disables connected mode without erasing existing local data or server feedback/jobs. Android rollback after a version increase requires a forward-version rebuild, not an assumed in-place downgrade. Gateway rollback is `movie-night-access-20261023/deploy_access.py rollback`; it removes only the new entry and leaves the backend/download state intact.
+Roll out entry link → read-only connected row → shared drafts/feedback → automatic finalized transfers/playback, with independent flags and a retained local-picker mode. Rollback disables connected mode without erasing existing local data or server feedback/jobs. Android rollback after a version increase requires a forward-version rebuild, not an assumed in-place downgrade. Gateway rollback is `movie-night-access-20261023/deploy_access.py rollback`; it removes only the new entry and leaves the backend/download state intact.
 
-Next implementation task for AFZ Media: claim the Nuvio entry-link/connected-read phase, reconcile the exact native source and stage a reviewable APK. This plan does not authorize installation, new provider accounts or automatic downloads.
+Next implementation task for AFZ Media: claim the Nuvio entry-link/connected-read phase, reconcile the exact native source and stage a reviewable APK. This plan does not authorize APK installation or new provider accounts. The owner explicitly authorized the server Finalize & download workflow; native integration must preserve that visible action and must never trigger it on read, login or background sync.
 
 Identity reference: https://tailscale.com/docs/features/tailscale-serve#identity-headers (verified 2026-10-23). Serve strips supplied identity headers; loopback-only binding and an exact owner allowlist are essential to this deployment.
+

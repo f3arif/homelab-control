@@ -2,7 +2,7 @@ const puppeteer=require('/home/coolyo/afz-website-review-tools-20261010/node_mod
 const fs=require('fs'),assert=require('node:assert/strict');
 (async()=>{
  const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,results=[];
- const browser=await puppeteer.launch({headless:true,executablePath:'/home/coolyo/afz-website-review-tools-20261010/browser-with-zip/chrome/linux-155.0.8059.39/chrome-linux64/chrome',args:['--no-sandbox','--disable-dev-shm-usage']});
+ const browser=await puppeteer.launch({headless:true,timeout:60000,executablePath:'/home/coolyo/afz-website-review-tools-20261010/browser-with-zip/chrome/linux-155.0.8059.39/chrome-linux64/chrome',args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
  try{
   for(const width of [360,412,1280]){
    const p=await browser.newPage();await p.setViewport({width,height:860});
@@ -36,7 +36,8 @@ const fs=require('fs'),assert=require('node:assert/strict');
     smallButtons:[...document.querySelectorAll('button')].filter(b=>b.getClientRects().length&&b.getBoundingClientRect().height<40).map(b=>b.textContent)}));
    assert(!state.overflow);assert.equal(state.cards,10);assert.equal(state.jobs,10);assert.equal(state.button,'Downloads requested ✓');assert(state.buttonDisabled);
    assert.deepEqual(state.smallButtons,[]);assert.deepEqual(errors,[]);
-   await p.screenshot({path:process.env.AFZ_GATEWAY_QA_OUTPUT+'/auto-'+width+'.png',fullPage:true});results.push({width,...state,errors});await p.close();
+   await p.screenshot({path:process.env.AFZ_GATEWAY_QA_OUTPUT+'/auto-'+width+'.png',fullPage:true});if(width===360){await p.screenshot({path:process.env.AFZ_GATEWAY_QA_OUTPUT+'/auto-phone-top.png'});await p.$eval('#downloads',x=>x.scrollIntoView());await p.screenshot({path:process.env.AFZ_GATEWAY_QA_OUTPUT+'/auto-phone-downloads.png'});}
+   results.push({width,...state,errors});await p.close();
   }
   fs.writeFileSync(process.env.AFZ_GATEWAY_QA_OUTPUT+'/browser-results.json',JSON.stringify({passed:true,results},null,2));
   console.log('AUTO_DOWNLOAD_BROWSER_PASS');
