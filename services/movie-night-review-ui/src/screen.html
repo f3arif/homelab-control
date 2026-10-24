@@ -5,8 +5,10 @@
 <title>AFZ Movie Night</title><link rel="stylesheet" href="__BASE__/screen.css"><script defer src="__BASE__/screen.js"></script></head>
 <body><main>
 <header class="masthead"><p class="eyebrow">Your Wednesday shortlist</p><h1>Movie Night</h1>
-<p class="lede">Thrillers, horror, creature features, crime and action.</p>
-<ul class="chips" aria-label="Filters in use"><li>2016 onward</li><li>No Animation</li><li>No Drama</li><li>No Comedy</li></ul>
+<p class="lede">Your genres. Different stories, themes and styles.</p>
+<p id="genre-summary" class="muted">Loading your genre settings…</p>
+<ul id="genre-chips" class="chips" aria-label="Filters in use"><li>2016 onward</li></ul>
+<button id="edit-genres" type="button" class="secondary" disabled>Edit genres</button>
 <details class="how"><summary>How it works</summary><ol>
 <li id="genre-guidance"><strong>Like</strong> anything that interests you. Your likes help guide genres; stories, themes and styles can vary.</li>
 <li><strong>Not for me</strong> replaces a suggestion. You can restore it later.</li>
@@ -29,6 +31,21 @@
 <progress id="progress" value="0" max="1" aria-label="Downloaded bytes"></progress><p id="completion"></p>
 <button id="cancel" type="button">Cancel download</button></section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="genre-editor" aria-labelledby="genre-title" aria-describedby="genre-help">
+<h2 id="genre-title" tabindex="-1">Your movie genres</h2>
+<p id="genre-help" class="muted">Add or remove genres below. These settings are saved for Movie Night across your devices.</p>
+<fieldset><legend>Include genres</legend><p id="include-help" class="muted">Movies can match any one of these genres. Leave this empty for any genre.</p>
+<div id="included-tags" class="genre-tags" aria-label="Included genres"></div>
+<label for="include-add">Add an included genre</label><select id="include-add" aria-describedby="include-help"></select>
+<button id="include-clear" type="button" class="secondary">Use any genre</button></fieldset>
+<fieldset><legend>Exclude genres</legend><p id="exclude-help" class="muted">Hide movies with any of these genres, including mixed genres.</p>
+<div id="excluded-tags" class="genre-tags" aria-label="Excluded genres"></div>
+<label for="exclude-add">Add an excluded genre</label><select id="exclude-add" aria-describedby="exclude-help"></select>
+<button id="exclude-clear" type="button" class="secondary">Clear exclusions</button></fieldset>
+<p class="muted">Saving refreshes suggestions. It does not finalize picks or start downloads. Existing server files are kept.</p>
+<p id="genre-status" role="status" aria-live="polite"></p>
+<div class="buttons genre-actions"><button id="save-genres" type="button">Save genres</button><button id="cancel-genres" type="button" class="secondary">Cancel</button><button id="reload-genres" type="button" class="secondary" hidden>Reload saved settings</button></div>
+</dialog>
 <dialog id="confirmation" aria-labelledby="confirm-title" aria-describedby="source-status"><h2 id="confirm-title" tabindex="-1">Review server download</h2>
 <p id="source-status" role="status" aria-live="polite"></p>
 <div id="confirmation-details" hidden><p>Only this file will be requested. A changed source needs a new confirmation.</p><dl id="facts"></dl>

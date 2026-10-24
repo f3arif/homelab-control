@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from movie_night import ApprovalStore, Choice, QUOTA, ROOT, MIN_BYTES, CAP, select_compact, shortlist, stream_status, excluded_genres
 from movie_posters import PosterCache, image_mime
 from feedback import MIN_PICKS, MAX_PICKS, VISIBLE_MOVIES
-from discovery_policy import EXCLUDED_GENRES
+from genre_settings import GENRES, GenreSettingsStore, SettingsConflict, genre_match
 
 
 class Controller:
@@ -28,6 +28,7 @@ class Controller:
         from feedback import FeedbackStore
         self.seen_policy=seen_policy or SeenPolicy()
         self.feedback=FeedbackStore(self.db)
+        self.genre_settings=GenreSettingsStore(self.db.parent)
         self.review_enabled=review_enabled
         self.refill_provider=refill_provider
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
@@ -48,10 +49,10 @@ class Controller:
         self.lookup_pool.shutdown(wait=True)
         self.pool.shutdown(wait=True)
 
-    def rows(self): return shortlist(self.shortlist_payload(),int(self.clock()),self.seen_policy)
+    def rows(self): return shortlist(self.shortlist_payload(),int(self.clock()),self.seen_policy,genre_settings=self.genre_settings.read())
 
     def review_pool(self):
-        return shortlist(self.shortlist_payload(),int(self.clock()),self.seen_policy,limit=None)
+        return shortlist(self.shortlist_payload(),int(self.clock()),self.seen_policy,limit=None,genre_settings=self.genre_settings.read())
 
     def review(self,principal):
         from feedback import rank_reviewed
@@ -63,17 +64,18 @@ class Controller:
             payload=self.shortlist_payload(); now=int(self.clock())
             generated=payload.get('generatedEpoch')
             fresh=type(generated) is int and 0<=now-generated<=30*86400
-            pool=shortlist(payload,now,self.seen_policy,limit=None)
-            saved_pool=pool if fresh else shortlist(payload,generated if type(generated) is int else now,self.seen_policy,limit=None)
+            settings=self.genre_settings.read()
+            pool=shortlist(payload,now,self.seen_policy,limit=None,genre_settings=settings)
+            saved_pool=pool if fresh else shortlist(payload,generated if type(generated) is int else now,self.seen_policy,limit=None,genre_settings=settings)
             saved_rows={r['id']:r for r in saved_pool}
-            genre_blocked={r['id']:dict(r,releaseInfo=str(r.get('year',''))) for r in payload.get('movies',[])+payload.get('retainedIneligibleSelections',[]) if excluded_genres(r)}
+            genre_blocked={r['id']:dict(r,releaseInfo=str(r.get('year',''))) for r in payload.get('movies',[])+payload.get('retainedIneligibleSelections',[])+payload.get('genreFilteredMovies',[]) if not genre_match(r,settings)}
             saved_rows.update(genre_blocked)
             eligible={r['id']:r for r in pool if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')}
             saved=self.feedback.saved(principal)
             refill_at=self.feedback.refill_requested(principal)
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
             valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
-            return {'movies':rank_reviewed(pool,ratings),'reviewEnabled':self.review_enabled,
+            return {'movies':rank_reviewed(pool,ratings,genre_settings=settings),'reviewEnabled':self.review_enabled,
                     'downloadPolicy':{'minBytes':5_000_000_000,'maxBytes':CAP,'quality':'1080p','storage':'8 TB drive','host':'afz-zbook'},
                     'actionsEnabled':self.enabled,'autoDownloads':bool(self.auto_downloads and self.enabled),
                     'downloadRequestedIds':[x['imdb'] for x in self.auto_downloads.requests(principal)] if self.auto_downloads else [],'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
@@ -82,10 +84,18 @@ class Controller:
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
                     'finalized':{'ids':saved['ids'],'valid':valid,'excludedIds':[i for i in saved['ids'] if i in genre_blocked],'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
-                    'excludedGenres':list(EXCLUDED_GENRES),
+                    'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
                     'reserveCount':max(0,len(eligible)-VISIBLE_MOVIES),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
                     'replacementAvailable':len(eligible)>VISIBLE_MOVIES}
+
+    def save_genres(self,principal,data):
+        if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
+        self.feedback.principal(principal)
+        with self.lock, (self.refill_provider.lock if hasattr(self.refill_provider,'lock') else nullcontext()):
+            self.genre_settings.save(data)
+            # A settings save can refresh metadata, but never finalize or enqueue media.
+            return self.review(principal)
 
     def request_refill(self,principal,request_id=None):
         if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
@@ -324,6 +334,11 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
+        if data.get('action')=='set-genre-settings':
+            try:return controller.save_genres(principal,data.get('settings'))
+            except SettingsConflict as exc:raise HTTPException(409,str(exc))
+            except ValueError as exc:raise HTTPException(400,str(exc))
+            except OSError:raise HTTPException(503,'Genre settings could not be saved. Reload to check before trying again.')
         if data.get('action')=='request-refill':return safe(lambda:controller.request_refill(principal,data.get('requestId')))
         return safe(lambda:controller.rate(principal,str(data.get('imdb','')),str(data.get('value',''))))
     @app.post(prefix+'/api/finalize')

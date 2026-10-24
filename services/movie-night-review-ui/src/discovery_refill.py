@@ -8,7 +8,8 @@ from publish_reviewed import read_json,validate_rows,inspect_state
 from feedback import FeedbackStore,rank_reviewed
 from seen_policy import KNOWN_SEEN_IDS
 from metadata_discovery import DiscoveryUnavailable
-from movie_night import shortlist, excluded_genres
+from movie_night import shortlist
+from genre_settings import genre_match
 
 def atomic_json(path,data):
     encoded=(json.dumps(data,ensure_ascii=False,indent=2)+'\n').encode()
@@ -44,12 +45,16 @@ class DiscoveryRefill(ReviewedRefill):
     def visible_count(self):
         _,current=read_json(self.state/'reviewed-shortlist.json');snap=inspect_state(self.state)
         blocked={r['id'] for r in snap['ratings'] if r['value'] in ('dislike','seen')}|set(snap['knownSeenIds'])
-        return len({r['id'] for r in shortlist(current,int(time.time()),limit=None)}-blocked)
+        return len({r['id'] for r in shortlist(current,int(time.time()),limit=None,genre_settings=self.genre_settings.read())}-blocked)
     def maintain(self):
         """Keep five cards from the local bank at once; top up the bank in the background when low."""
         with self.lock:
             if self.future and not self.future.done():return
             saved=self.saved_status()
+            revision=self.genre_settings.read()['revision']
+            if saved.get('genreRevision',0)!=revision:
+                saved.update(genreRevision=revision,cursor=0,retryAt=0,outcome='ready')
+                atomic_json(self.path,saved)
             try:
                 if self.visible_count()<5:
                     result=super().fulfill()
@@ -83,15 +88,18 @@ class DiscoveryRefill(ReviewedRefill):
             with self.lock:
                 saved=self.saved_status();saved.update(outcome='provider-unavailable',retryAt=time.time()+60);atomic_json(self.path,saved)
     def _run(self):
+        settings=self.genre_settings.read()
         raw,current=read_json(self.state/'reviewed-shortlist.json');expected=hashlib.sha256(raw).hexdigest()
         snapshot=inspect_state(self.state)
         blocked=set(current.get('publishedHistoryIds',[])) | {r['id'] for r in current.get('movies',[])} | set(snapshot['knownSeenIds']) | set(KNOWN_SEEN_IDS)
         blocked.update(r['id'] for r in snapshot['ratings'] if r['value'] in ('dislike','seen'))
         ratings={r['id']:{'value':r['value'],'metadata':r['metadata']} for r in snapshot['ratings']}
-        saved=self.saved_status();result=self.discoverer.discover(blocked,ratings,saved.get('cursor',0))
+        saved=self.saved_status();result=self.discoverer.discover(blocked,ratings,saved.get('cursor',0),genre_settings=settings)
         now=int(time.time());rows=result['movies']
-        if rows:validate_rows({'generatedEpoch':now,'movies':rows},now,minimum=1)
+        if rows:validate_rows({'generatedEpoch':now,'movies':rows},now,minimum=1,genre_settings=settings)
         with self.lock:
+            if self.genre_settings.read()!=settings:
+                saved=self.saved_status();saved.update(outcome='settings-changed',retryAt=0);atomic_json(self.path,saved);return
             # Publication must never overwrite a newer weekly/manual update.
             if hashlib.sha256((self.state/'reviewed-shortlist.json').read_bytes()).hexdigest()!=expected:
                 saved=self.saved_status();saved.update(outcome='state-changed',retryAt=0);atomic_json(self.path,saved);return
@@ -103,8 +111,10 @@ class DiscoveryRefill(ReviewedRefill):
                 cursor=result['cursor'],scanned=result['scanned'],added=receipt.get('added',0),retryAt=0)
             atomic_json(self.path,saved)
     def _publish_bank(self,rows,now,expected):
+        settings=self.genre_settings.read()
         target=self.state/'reviewed-refill-bank.json'
-        with (self.state/'.publisher.lock').open('a') as lock:
+        with self.genre_settings.guard(), (self.state/'.publisher.lock').open('a') as lock:
+            if self.genre_settings.read()!=settings:raise ValueError('Genre settings changed')
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             if hashlib.sha256((self.state/'reviewed-shortlist.json').read_bytes()).hexdigest()!=expected:raise ValueError('Concurrent shortlist change')
             current=inspect_state(self.state);blocked=set(current['knownSeenIds']) | {r['id'] for r in current['ratings'] if r['value'] in ('dislike','seen')}
@@ -112,8 +122,8 @@ class DiscoveryRefill(ReviewedRefill):
             if target.exists():
                 if target.is_symlink():raise ValueError('Symlink bank rejected')
                 oldraw,old=read_json(target)
-                if isinstance(old.get('movies'),list):old=dict(old,movies=[r for r in old['movies'] if not excluded_genres(r)])
-                try:validate_rows(old,now,minimum=1,max_age=7*86400);keep=old['movies']
+                if isinstance(old.get('movies'),list):old=dict(old,movies=[r for r in old['movies'] if genre_match(r,settings)])
+                try:validate_rows(old,now,minimum=1,max_age=7*86400,genre_settings=settings);keep=old['movies']
                 except ValueError:pass
             merged={r['id']:r for r in keep+rows if r['id'] not in blocked}
             # Preserve already published IDs in shortlist history; they need not occupy bank space.
@@ -121,7 +131,7 @@ class DiscoveryRefill(ReviewedRefill):
             used=set(payload.get('publishedHistoryIds',[])) | {r['id'] for r in payload.get('movies',[])}
             merged=[r for i,r in merged.items() if i not in used][:100]
             bank={'generatedEpoch':min(now,old['generatedEpoch']) if keep else now,'knownSeenIds':sorted(set(current['knownSeenIds'])|set(old.get('knownSeenIds',[]))),'movies':merged}
-            validate_rows(bank,now,minimum=1,max_age=7*86400)
+            validate_rows(bank,now,minimum=1,max_age=7*86400,genre_settings=settings)
             if oldraw:
                 backups=self.state/'publication-backups';backups.mkdir(mode=0o700,exist_ok=True)
                 backup=backups/('bank-'+hashlib.sha256(oldraw).hexdigest()+'.json')

@@ -1,13 +1,16 @@
 """Bounded public metadata reads. No keys, accounts, streams or acquisition endpoints."""
 import json,re,time
 from discovery_policy import BASE,normalize
+from genre_settings import GENRES, defaults
+from urllib.parse import quote
 from feedback import rank_reviewed
 from movie_presentation import normalize_info
 class DiscoveryUnavailable(Exception):pass
 class CinemetaDiscovery:
     def __init__(self,transport=None):self.transport=transport
     def get(self,path,deadline):
-        if not re.fullmatch(r'/(?:catalog/movie/top/genre=(?:Thriller|Mystery|Action|Sci-Fi|Crime|Adventure|Horror)(?:&skip=\d{1,4})?|meta/movie/tt\d{5,12})\.json',path):raise DiscoveryUnavailable('Invalid metadata path')
+        catalog_genres='|'.join(re.escape(quote(g,safe='')) for g in GENRES)
+        if not re.fullmatch(r'/(?:catalog/movie/top/genre=(?:'+catalog_genres+r')(?:&skip=\d{1,4})?|meta/movie/tt\d{5,12})\.json',path):raise DiscoveryUnavailable('Invalid metadata path')
         if self.transport:return self.transport(path)
         import requests
         remaining=deadline-time.monotonic()
@@ -34,18 +37,20 @@ class CinemetaDiscovery:
                 if not isinstance(result,dict):raise DiscoveryUnavailable('Invalid metadata response')
                 return result
         except (requests.RequestException,ValueError) as exc:raise DiscoveryUnavailable('Metadata provider unavailable') from exc
-    def discover(self,blocked,ratings,cursor=0):
+    def discover(self,blocked,ratings,cursor=0,genre_settings=None):
+        settings=genre_settings or defaults()
+        genres=[g for g in (settings['included'] or GENRES) if g not in settings['excluded']]
         deadline=time.monotonic()+45;raw={};scanned=0
         for _ in range(4):
-            genre=('Thriller','Horror','Action','Sci-Fi','Adventure','Mystery','Crime')[cursor%7];skip=(cursor//7%20)*50
-            path='/catalog/movie/top/genre='+genre+('&skip='+str(skip) if skip else '')+'.json'
+            genre=genres[cursor%len(genres)];skip=(cursor//len(genres)%20)*50
+            path='/catalog/movie/top/genre='+quote(genre,safe='')+('&skip='+str(skip) if skip else '')+'.json'
             data=self.get(path,deadline);metas=data.get('metas')
             if not isinstance(metas,list):raise DiscoveryUnavailable('Invalid catalog')
-            cursor=(cursor+1)%140
+            cursor=(cursor+1)%(len(genres)*20)
             for m in metas[:100]:
-                scanned+=1;row=normalize(m)
+                scanned+=1;row=normalize(m,genre_settings=settings)
                 if row and row['id'] not in blocked:raw[row['id']]=row
-        ordered=rank_reviewed(list(raw.values()),ratings,limit=24);rows=[];verified=0;failed=0
+        ordered=rank_reviewed(list(raw.values()),ratings,limit=24,genre_settings=settings);rows=[];verified=0;failed=0
         for candidate in ordered:
             if time.monotonic()>deadline:break
             imdb=candidate['id']
@@ -53,12 +58,12 @@ class CinemetaDiscovery:
             except DiscoveryUnavailable:
                 failed+=1;continue # one slow/cold title must not sink the whole search
             verified+=1
-            row=normalize(data.get('meta'))
+            row=normalize(data.get('meta'),genre_settings=settings)
             if row and row['id']==imdb and imdb not in blocked:
                 # Catalog and detail are both evidence: conflicting excluded labels veto above.
                 row['genres']=list(dict.fromkeys(candidate['genres']+row['genres']))
                 row['discoveryEvidence']['genres']=row['genres']
-                row=normalize(row['discoveryEvidence'],row['discoveryEvidence']['fetchedEpoch'])
+                row=normalize(row['discoveryEvidence'],row['discoveryEvidence']['fetchedEpoch'],settings)
                 if row:
                     info=normalize_info(data.get('meta'),imdb)
                     if info:row['presentation']=info

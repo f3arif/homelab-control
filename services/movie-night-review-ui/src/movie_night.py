@@ -10,6 +10,7 @@ from uuid import uuid4
 from trailer_policy import reviewed_trailer
 from discovery_policy import screened, CORE_GENRES, excluded_genres
 from movie_presentation import display_fields
+from genre_settings import genre_match, genres_of, defaults
 
 MIN_BYTES = 5_000_000_000
 CAP = 15_000_000_000
@@ -93,18 +94,19 @@ def stream_status(choice, proof, now, device_id):
         return {'status':'validation-required','playbackTested':False,'revalidateBeforePlay':True}
 
 
-def shortlist(payload, now, seen_policy=None, limit=12):
+def shortlist(payload, now, seen_policy=None, limit=12, genre_settings=None):
     """Consume a reviewed weekly artifact; do not invent likes or stream checks."""
+    genre_settings = genre_settings or defaults()
     generated = payload.get('generatedEpoch')
     if type(generated) is not int or not 0 <= now - generated <= 30 * 86400:
         return []
     result, ids = [], set()
     from seen_policy import SeenPolicy
-    for row in (seen_policy or SeenPolicy()).filter(payload.get('movies', [])):
+    for row in (seen_policy or SeenPolicy()).filter(payload.get('movies', []) + payload.get('retainedIneligibleSelections', []) + payload.get('genreFilteredMovies', [])):
         if not isinstance(row, dict):
             continue
         imdb, name = row.get('id', ''), row.get('name', '')
-        if imdb in payload.get('knownSeenIds', []) or excluded_genres(row):continue
+        if imdb in payload.get('knownSeenIds', []) or not genre_match(row,genre_settings):continue
         if not isinstance(imdb, str) or not re.fullmatch(r'tt\d+', imdb) or imdb in ids:
             continue
         if str(name).strip().casefold() in SEEN_TITLES or row.get('seen') is True:
@@ -112,13 +114,13 @@ def shortlist(payload, now, seen_policy=None, limit=12):
         if type(row.get('year')) is not int or not 2016 <= row['year'] <= 2100:
             continue
         # Broad "Horror" or similarity is insufficient evidence about intensity.
-        if not screened(row,now) and (row.get('scareLevel') not in {'low', 'moderate'} or row.get('intensityReviewed') is not True):
+        if not screened(row,now,genre_settings) and (row.get('scareLevel') not in {'low', 'moderate'} or row.get('intensityReviewed') is not True):
             continue
         tags = set(row.get('fitTags') or []) & PREFERRED_TAGS
-        genres = set(row.get('genres') or []) & CORE_GENRES
+        genres = genres_of(row) & set(genre_settings['included']) if genre_settings['included'] else genres_of(row)
         # Genre-qualified films need not share the old obsession/tension/twist tags.
         # Retain the existing editorial fallback for legacy rows without genre metadata.
-        if (not tags and not genres) or (row.get('intenseSupernatural') is not False and not screened(row,now)):
+        if row.get('intenseSupernatural') is not False and not screened(row,now,genre_settings):
             continue
         reason = 'Matches your preferred genres: ' + ', '.join(sorted(genres)) if genres else 'Reviewed Movie Night suggestion.'
         result.append({'id': imdb, 'type': 'movie', 'name': str(name),

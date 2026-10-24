@@ -359,7 +359,73 @@ function togglePick(movie){
   else selected.add(movie.id);
   selectionCount();
 }
+let savedGenres=null,genreDraft=null,genreSaving=false;
+function renderGenreSummary(data){
+  const settings=data.genreSettings;
+  if(settings){
+    savedGenres={included:[...settings.included],excluded:[...settings.excluded],revision:settings.revision,options:[...settings.options]};
+    if($('genre-editor').open&&genreDraft&&genreDraft.revision!==settings.revision&&!genreSaving){
+      $('genre-status').textContent='Saved settings changed on another device. Reload them before saving.';$('reload-genres').hidden=false;
+    }
+  }
+  const included=settings?.included||[];
+  $('genre-summary').textContent=settings?(included.length?'Include: '+included.join(', '):'Include: any genre'):'Genre settings are unavailable. Refresh Movie Night.';
+  const chips=['2016 onward',...(settings?.excluded||data.excludedGenres||[]).map(g=>'No '+g)];
+  if(settings&&!settings.excluded.length)chips.push('No genre exclusions');
+  $('genre-chips').replaceChildren(...chips.map(label=>{const li=document.createElement('li');li.textContent=label;return li;}));
+  $('edit-genres').disabled=!settings||!data.reviewEnabled||genreSaving;
+}
+function fillGenreDraft(){
+  for(const [key,prefix,empty] of [['included','include','Any genre'],['excluded','exclude','No genres excluded']]){
+    const container=$(key+'-tags');container.replaceChildren();
+    for(const genre of genreDraft[key]){
+      const button=document.createElement('button');button.type='button';button.textContent=genre+' ×';
+      button.setAttribute('aria-label','Remove '+genre+' from '+key+' genres');button.disabled=genreSaving;
+      button.onclick=()=>{genreDraft[key]=genreDraft[key].filter(g=>g!==genre);fillGenreDraft();$(prefix+'-add').focus();};container.append(button);
+    }
+    if(!genreDraft[key].length){const note=document.createElement('span');note.className='empty';note.textContent=empty;container.append(note);}
+    const select=$(prefix+'-add');select.replaceChildren();
+    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a genre to add…';select.append(placeholder);
+    for(const genre of savedGenres.options.filter(g=>!genreDraft[key].includes(g))){const option=document.createElement('option');option.value=genre;option.textContent=genre;select.append(option);}
+    select.disabled=genreSaving;$(prefix+'-clear').disabled=genreSaving||!genreDraft[key].length;
+  }
+  $('save-genres').disabled=genreSaving;$('cancel-genres').disabled=genreSaving;$('reload-genres').disabled=genreSaving;
+}
+function newGenreDraft(){
+  genreDraft={included:[...savedGenres.included],excluded:[...savedGenres.excluded],revision:savedGenres.revision};
+  $('genre-status').textContent='';$('reload-genres').hidden=true;fillGenreDraft();
+}
+$('edit-genres').onclick=()=>{if(!savedGenres||genreSaving)return;newGenreDraft();$('genre-editor').showModal();$('genre-title').focus();};
+for(const [key,prefix,other] of [['included','include','excluded'],['excluded','exclude','included']]){
+  $(prefix+'-add').onchange=event=>{
+    const genre=event.target.value;if(!genre||genreSaving)return;
+    const moved=genreDraft[other].includes(genre);genreDraft[other]=genreDraft[other].filter(g=>g!==genre);
+    genreDraft[key].push(genre);fillGenreDraft();$(prefix+'-add').focus();
+    $('genre-status').textContent=moved?genre+' moved from '+other+' to '+key+'.':'';
+  };
+  $(prefix+'-clear').onclick=()=>{genreDraft[key]=[];fillGenreDraft();$(prefix+'-add').focus();};
+}
+$('cancel-genres').onclick=()=>{$('genre-editor').close();genreDraft=null;};
+$('genre-editor').addEventListener('cancel',event=>{if(genreSaving)event.preventDefault();else genreDraft=null;});
+$('reload-genres').onclick=async()=>{
+  if(genreSaving)return;genreSaving=true;fillGenreDraft();
+  try{const data=await api('shortlist');render(data);newGenreDraft();$('genre-status').textContent='Loaded saved settings.';}
+  catch(error){$('genre-status').textContent=error.message+' Your draft has been kept.';}
+  finally{genreSaving=false;fillGenreDraft();}
+};
+$('save-genres').onclick=async()=>{
+  if(genreSaving||reviewBusy)return;
+  genreSaving=true;reviewBusy=true;++loadGeneration;fillGenreDraft();selectionCount();$('genre-status').textContent='Saving…';
+  try{
+    const data=await api('feedback',{action:'set-genre-settings',settings:genreDraft});
+    $('genre-editor').close();genreDraft=null;render(data);toast('Genres saved. Suggestions updated.');
+  }catch(error){
+    $('genre-status').textContent=error.message+(error.kind==='connection'?' Reload saved settings to check whether the save completed.':'');
+    $('reload-genres').hidden=false;if(error.kind==='session'||error.kind==='page')showFailure(error);
+  }finally{genreSaving=false;reviewBusy=false;if(genreDraft)fillGenreDraft();$('edit-genres').disabled=!savedGenres;selectionCount();}
+};
 function render(data){
+  renderGenreSummary(data);
   autoDownloads=!!data.autoDownloads;downloadRequestedIds=new Set(data.downloadRequestedIds||[]);
   $('download-step').textContent=autoDownloads?'Finalize & download saves your picks and starts their server downloads automatically.':'Review server download on a finalized movie. Confirm its exact file to start.';
   $('download-rule').textContent=autoDownloads?'The server chooses a suitable cached 1080p file. Downloads keep running after you close the page. Likes and Pick alone do not start downloads.':'Likes and finalized picks never start a download.';
@@ -401,6 +467,7 @@ function render(data){
     searching:'Finding new movies and checking your filters. This can take up to a minute. This search does not start downloads.',
     'provider-unavailable':'The metadata provider is unavailable. Your choices are safe. Try Request more again in a minute.',
     'no-match':'No new eligible matches in this search batch. Your filters are unchanged. Try the next batch in a minute.',
+    'settings-changed':'Genre settings changed during the search. Finding matches for your saved settings.',
     'state-changed':'Your shortlist changed during the search. Refresh, then request more again.',
     interrupted:'The last search was interrupted. Request more to retry.',
     refilled:`Added ${refill.added||0} matching movies. This search does not start downloads.`
@@ -411,7 +478,7 @@ function render(data){
   $('selection').hidden=!data.reviewEnabled;
   const f=data.finalized||{ids:[],valid:false,movies:[]};$('finalized').hidden=!f.ids.length;
   finalizedIds=f.ids||[];finalizedValid=!!f.valid;
-  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. ${autoDownloads?(f.ids.every(id=>downloadRequestedIds.has(id))?'Their server download requests are listed below.':'Press Finalize & download to start their server downloads.'):'No download starts until you confirm an exact file.'}`:f.reason==='genre-filter'?'Some saved picks are outside your Animation, Drama and Comedy filters. Review the remaining picks and finalize again. Existing server files are kept.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
+  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. ${autoDownloads?(f.ids.every(id=>downloadRequestedIds.has(id))?'Their server download requests are listed below.':'Press Finalize & download to start their server downloads.'):'No download starts until you confirm an exact file.'}`:f.reason==='genre-filter'?'Some saved picks are outside your current genre filters. Review the remaining picks and finalize again. Existing server files are kept.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
   const excluded=new Set(f.excludedIds||[]);
   for(const movie of f.movies){
     if(excluded.has(movie.id)){const note=document.createElement('p');note.className='genre-excluded muted';note.textContent=movie.name+' — outside your current filters. Any existing server file remains in downloads.';$('finalized-movies').append(note);continue;}

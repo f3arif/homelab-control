@@ -155,3 +155,19 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 .server-file{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:9px 16px;border:1px solid var(--accent);border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:650;text-align:center;text-decoration:none}
 
 #source-status{overflow-wrap:anywhere}#source-status:empty,#confirm-error:empty{display:none}#source-reload{display:inline-flex;align-items:center;min-height:44px;padding:9px 16px;border:1px solid var(--line);border-radius:10px;font-weight:650}dialog[aria-busy="true"] #source-status{border-left:3px solid var(--accent);padding-left:12px}
+
+/* Server-backed genre choices. Native selects and removable tags work on phones. */
+#genre-summary{margin:8px 0;overflow-wrap:anywhere}
+#edit-genres{margin-top:10px}
+#genre-editor{padding:20px;scroll-padding-block:16px}
+#genre-editor fieldset{min-width:0;border:1px solid var(--line);border-radius:12px;margin:16px 0;padding:12px}
+#genre-editor legend{font-weight:700;padding:0 5px}
+#genre-editor fieldset p{margin:0 0 10px}
+#genre-editor label{font-size:.85rem;margin:12px 0 6px}
+#genre-editor select{font:inherit;min-height:44px;width:100%;max-width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);color:var(--text)}
+#genre-editor fieldset>button{margin-top:10px;font-size:.85rem}
+.genre-tags{display:flex;flex-wrap:wrap;gap:8px;min-height:25px}
+.genre-tags button{min-height:44px;padding:8px 12px;background:var(--accent-soft);border-color:var(--accent);color:var(--text);font-size:.88rem}
+.genre-tags .empty{font-size:.9rem;color:var(--muted);padding:4px 0}
+#genre-status{color:var(--warn);font-size:.9rem;overflow-wrap:anywhere}
+.genre-actions{position:sticky;bottom:-20px;background:var(--surface);padding:12px 0;border-top:1px solid var(--line)}

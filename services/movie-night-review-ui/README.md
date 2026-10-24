@@ -1,3 +1,13 @@
+## Editable genre settings — 2026-10-24
+
+Use **Edit genres** on Movie Night to add or remove included/excluded genres, then **Save genres**. An empty include list means any genre; an empty exclusion list permits all genres. A title matches any included genre, and any excluded genre vetoes mixed-genre matches. Moving a genre between the lists removes it from the other list. Cancel discards the draft.
+
+Initial choices preserve the current seven preferred genres and Animation, Drama and Comedy exclusions. These are migration defaults, not enforced permanent exclusions. Settings live in the instance's private `genre-settings.json`; they persist across restarts and devices. Revision checks reject stale saves. Corrupt settings fail closed rather than silently resetting preferences. The current single-owner access boundary, origin and CSRF requirements apply. Settings saves refresh metadata only; finalization remains the explicit download trigger.
+
+The API returns `genreSettings: {included, excluded, revision, options}` in the shortlist. Save through the existing `POST /movie-night/api/feedback` route with `{action:"set-genre-settings", settings:{included,excluded,revision}}`. Unknown genres, duplicates, overlap and excluding every genre are rejected; an old revision gets 409. The stable genre taxonomy is an input allowlist, not a hardcoded preference list. Discovery catalogs, metadata screening, publication/refill, ranking and new finalize/source eligibility all use saved preferences. Historical fixed title vetoes for genres have been removed; supplied genre evidence remains authoritative. Seen/disliked and year/intensity rules remain.
+
+An excluded saved title remains a history note and its completed media stays accessible. Eligible retained titles can return when filters are relaxed. Saving filters never silently rewrites finalized IDs, likes, media jobs or files. The 3–10 pick limit and 5–15 GB 1080p downloads to the 8 TB drive are unchanged.
+
 # Movie Night — 8 TB storage and 5–15 GB downloads
 
 Owner policy, 2026-10-24: finalized movies download directly to the ZBook's **8 TB AFZ_MEDIA** drive. Each new movie must be a known-size cached **1080p file between 5,000,000,000 and 15,000,000,000 bytes inclusive**. Smaller or oversized files never become fallbacks. The existing 50 GiB free-space reserve and 100 GB transfer budget remain; archived attempts count toward that budget. File size is a selection constraint, not a guarantee of visual quality.

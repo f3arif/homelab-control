@@ -13,7 +13,8 @@ import time
 from urllib.parse import urlsplit
 from movie_night import shortlist, excluded_genres
 from trailer_policy import reviewed_trailer
-from discovery_policy import screened, EXCLUDED_GENRES, CORE_GENRES
+from discovery_policy import screened
+from genre_settings import GenreSettingsStore, defaults, genre_match, excluded_genres
 from seen_policy import SeenPolicy, canonical_id, KNOWN_SEEN_IDS
 
 MAX_BYTES=262144
@@ -26,7 +27,8 @@ def read_json(path):
     if not isinstance(data,dict):raise ValueError('Object required')
     return raw,data
 
-def validate_rows(payload,now,minimum=10,max_age=86400):
+def validate_rows(payload,now,minimum=10,max_age=86400,genre_settings=None):
+    settings=genre_settings or defaults()
     generated=payload.get('generatedEpoch')
     if type(generated) is not int or not 0<=now-generated<=max_age:
         raise ValueError('Input must be reviewed within the past 24 hours')
@@ -50,11 +52,11 @@ def validate_rows(payload,now,minimum=10,max_age=86400):
             if not isinstance(source,str):raise ValueError('Invalid source link')
             url=urlsplit(source)
             if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment:raise ValueError('Plain HTTPS source links required')
-        if excluded_genres(row):raise ValueError('Animation, Drama and Comedy genres are excluded, including mixed genres')
+        if excluded_genres(row,settings):raise ValueError('Excluded genres: '+', '.join(settings['excluded'])+' (including mixed genres)')
         # Reject malformed policy fields; intentionally excluded seen/high-scare entries may be omitted.
-        if not screened(row,now) and (type(row.get('year')) is not int or row['year']<2016 or row.get('intensityReviewed') is not True or row.get('intenseSupernatural') is not False or row.get('scareLevel') not in ('low','moderate')):
+        if not screened(row,now,settings) and (type(row.get('year')) is not int or row['year']<2016 or row.get('intensityReviewed') is not True or row.get('intenseSupernatural') is not False or row.get('scareLevel') not in ('low','moderate')):
             raise ValueError('Outside reviewed 2016+ low/moderate policy')
-        if not (set(row.get('genres',[])) & CORE_GENRES or set(row.get('fitTags',[])) & {'obsession','relationship tension','twists','suspense'}):raise ValueError('Preference fit required')
+        if not genre_match(row,settings):raise ValueError('Outside selected genre preferences')
     return rows,set(seen_ids)
 
 def preference_snapshot(db):
@@ -67,14 +69,16 @@ def preference_snapshot(db):
 def publish(state,input_path,expected_hash,dry_run=False,now=None,*,refill=False):
     now=int(time.time()) if now is None else now
     state=Path(state)
+    settings_store=GenreSettingsStore(state);settings=settings_store.read()
     info=state.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode & 0o077:raise ValueError('Private owned state directory required')
     target=state/'reviewed-shortlist.json'
     if target.is_symlink():raise ValueError('Symlink target rejected')
-    _,incoming=read_json(input_path);rows,new_seen=validate_rows(incoming,now,minimum=1 if refill else 10,max_age=7*86400 if refill else 86400)
+    _,incoming=read_json(input_path);rows,new_seen=validate_rows(incoming,now,minimum=1 if refill else 10,max_age=7*86400 if refill else 86400,genre_settings=settings)
     # Separate publishers serialize; the live reader always sees complete old/new JSON.
-    with (state/'.publisher.lock').open('a') as lock, closing(sqlite3.connect('file:'+str(state/'preferences.sqlite3')+'?mode=ro',uri=True,timeout=5)) as guard_db:
+    with settings_store.guard(), (state/'.publisher.lock').open('a') as lock, closing(sqlite3.connect('file:'+str(state/'preferences.sqlite3')+'?mode=ro',uri=True,timeout=5)) as guard_db:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if settings_store.read()!=settings:raise ValueError('Genre settings changed; retry publication')
         if guard_db.execute('PRAGMA journal_mode').fetchone()[0] not in ('delete','truncate','persist'):
             raise ValueError('Unsupported preference journal; no publication performed')
         guard_db.execute('BEGIN')
@@ -87,18 +91,19 @@ def publish(state,input_path,expected_hash,dry_run=False,now=None,*,refill=False
         known.discard(None)
         incoming_ids={r['id'] for r in rows}
         # Keep eligible existing choices, never re-add a disliked or known-seen title.
-        carry=[r for r in current.get('movies',[])+current.get('retainedIneligibleSelections',[]) if canonical_id(r) in retained and canonical_id(r) not in incoming_ids]
+        carry=[r for r in current.get('movies',[])+current.get('retainedIneligibleSelections',[])+current.get('genreFilteredMovies',[]) if canonical_id(r) in retained and canonical_id(r) not in incoming_ids]
         merged=rows+carry
         policy=SeenPolicy(lambda:{'states':{i:True for i in known},'complete':False})
-        eligible={r['id'] for r in shortlist({'generatedEpoch':now,'movies':merged},now,policy,limit=None)}
+        eligible={r['id'] for r in shortlist({'generatedEpoch':now,'movies':merged},now,policy,limit=None,genre_settings=settings)}
         accepted=[r for r in merged if canonical_id(r) in eligible and canonical_id(r) not in disliked]
         if len(accepted)<(1 if refill else 10):raise ValueError('Fewer than 10 eligible candidates after exclusions; add reviewed reserves')
         payload={'generatedEpoch':incoming['generatedEpoch'],'publishedEpoch':time.time() if refill else now,'movies':accepted,'knownSeenIds':sorted(known),
                  'publishedHistoryIds':sorted(set(current.get('publishedHistoryIds',[])) | {r['id'] for r in current.get('movies',[])} | {r['id'] for r in accepted}),
                  'seenCoverage':'Known exclusions only; complete history is not available.',
                  'retainedSelectionIds':sorted(retained & eligible - disliked),
-                 'excludedGenres':list(EXCLUDED_GENRES),
-                 'retainedIneligibleSelections':[r for r in merged if canonical_id(r) in retained and excluded_genres(r)]}
+                 'excludedGenres':settings['excluded'],
+                 'genreFilteredMovies':list({r['id']:r for r in current.get('movies',[])+current.get('genreFilteredMovies',[]) if r['id'] not in retained and not genre_match(r,settings)}.values())[:100],
+                 'retainedIneligibleSelections':[r for r in merged if canonical_id(r) in retained and not genre_match(r,settings)]}
         data=(json.dumps(payload,ensure_ascii=False,indent=2)+'\n').encode()
         if len(data)>MAX_BYTES:raise ValueError('Published JSON too large')
         receipt={'dryRun':dry_run,'eligiblePool':len(accepted),'reservesAtFiveVisible':max(0,len(accepted)-5),'retainedSelections':len(retained & eligible - disliked),'previousSha256':expected_hash,'sha256':hashlib.sha256(data).hexdigest(),'preferencesWritten':False,'downloadsEnabled':False}

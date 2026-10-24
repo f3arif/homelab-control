@@ -1,3 +1,9 @@
+## Editable Movie Night genres — 2026-10-24
+
+Movie Night now owns persistent include/exclude genre settings. A future connected Nuvio editor must render the server's `genreSettings.options` and save the `included`, `excluded`, and `revision` fields through the existing authenticated/CSRF-protected feedback endpoint with `action: "set-genre-settings"`. Handle 409 by loading current settings and letting the owner review their draft. Do not embed Animation/Drama/Comedy or the previous preferred genres as immutable client rules. No included genres means any; no exclusions means none. Exclusions override mixed-genre matches. Keep `finalized.excludedIds` as history notes and retain existing server-file access.
+
+These settings belong to the current single-owner Movie Night instance and persist across devices. Multi-profile integration must explicitly introduce profile-scoped state and discovery; do not expose this shared owner editor to unrelated profiles. Settings saves do not finalize or enqueue downloads. This change updates the web server and integration contract only; no native APK was changed.
+
 # Current Movie Night storage contract — 2026-10-24
 
 The shared Movie Night backend now targets the ZBook's 8 TB AFZ_MEDIA disk, `/srv/afzmedia/Media/MovieNight/Movies`, while retaining the owner entry at `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. New finalized server downloads require cached 1080p files of **5–15 GB inclusive**; unknown, smaller and larger sizes are excluded. `GET /movie-night/api/shortlist` exposes `downloadPolicy` with `minBytes`, `maxBytes`, `quality`, `storage`, and `host`. Nuvio should display that contract and distinguish “8 TB drive” from a separate “Save to this device” copy.
