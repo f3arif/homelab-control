@@ -20,7 +20,7 @@ const out=path.resolve(__dirname,'../qa/similar-search-live');fs.mkdirSync(out,{
   await p.locator('#similar-query').pressSequentially('Inception',{delay:70});
   await p.getByRole('option',{name:'Inception · 2010',exact:true}).waitFor({timeout:30000});
   assert.equal(await p.locator('#similar-query').getAttribute('aria-expanded'),'true');
-  const popup=await p.locator('#title-popup').boundingBox();assert(popup.x>=0&&popup.x+popup.width<=width+1&&popup.y>=0&&popup.y+popup.height<=860);
+  const popup=await p.locator('#title-popup').boundingBox();assert(popup.x>=0&&popup.x+popup.width<=width+1&&popup.y>=0&&popup.y+popup.height<=(await p.locator('#selection').boundingBox()).y+1);
   await p.screenshot({path:path.join(out,'popup-'+width+'.png')});
   await p.getByRole('option',{name:'Inception · 2010',exact:true}).click();await p.locator('#similar-results').waitFor({state:'visible',timeout:80000});
   assert(await p.locator('#title-popup').isHidden());

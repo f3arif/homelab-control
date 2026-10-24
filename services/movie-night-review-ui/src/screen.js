@@ -499,10 +499,21 @@ async function findSimilar(title,titleJob){
 }
 // One debounced title lookup at a time; newer typing replaces pending work.
 function titleQuery(){return $('similar-query').value.trim().replace(/\s+/g,' ');}
+function titleViewBounds(){
+  const view=window.visualViewport,top=view?.offsetTop||0;
+  let bottom=top+(view?.height||innerHeight);
+  if(!$('selection').hidden){const tray=$('selection').getBoundingClientRect();if(tray.height&&tray.top>top)bottom=Math.min(bottom,tray.top);}
+  return {top,bottom};
+}
+function keepTitleVisible(){
+  if(document.activeElement!==$('similar-query'))return;
+  const rect=$('similar-query').getBoundingClientRect(),{top,bottom}=titleViewBounds();
+  if(rect.bottom>bottom-12||rect.top<top+12)
+    window.scrollBy({top:rect.top-(top+Math.max(12,(bottom-top-rect.height)/2)),behavior:'instant'});
+}
 function positionTitlePopup(){
   if($('title-popup').hidden)return;
-  const rect=$('similar-query').getBoundingClientRect(),view=window.visualViewport;
-  const top=view?.offsetTop||0,bottom=top+(view?.height||innerHeight);
+  const rect=$('similar-query').getBoundingClientRect(),{top,bottom}=titleViewBounds();
   const below=bottom-rect.bottom-12,above=rect.top-top-12,useAbove=below<160&&above>below;
   $('title-popup').style.width=$('similar-form').querySelector('.similar-input').clientWidth+'px';
   $('title-popup').classList.toggle('above',useAbove);
@@ -584,6 +595,7 @@ $('similar-query').addEventListener('input',titleEdited);
 $('similar-query').addEventListener('compositionstart',()=>{titleComposing=true;invalidateTitles();});
 $('similar-query').addEventListener('compositionend',()=>{titleComposing=false;titleEdited();});
 $('similar-query').addEventListener('focus',()=>{
+  keepTitleVisible();
   if(titleComposing||titleQuery().length<2||similarBusy)return;
   titleWantsPopup=true;
   if(titleResponse?.query===titleQuery()&&Date.now()-titleResponse.receivedAt<600000)renderTitles(titleResponse);
@@ -609,9 +621,10 @@ $('similar-query').addEventListener('keydown',event=>{
 });
 $('title-picker').addEventListener('focusout',event=>{if(!$('title-picker').contains(event.relatedTarget))closeTitlePopup();});
 document.addEventListener('pointerdown',event=>{if(!$('title-picker').contains(event.target))closeTitlePopup();});
-window.addEventListener('resize',positionTitlePopup);
+const resizeTitlePopup=()=>{keepTitleVisible();positionTitlePopup();};
+window.addEventListener('resize',resizeTitlePopup);
 window.addEventListener('scroll',positionTitlePopup,true);
-window.visualViewport?.addEventListener('resize',positionTitlePopup);
+window.visualViewport?.addEventListener('resize',resizeTitlePopup);
 window.visualViewport?.addEventListener('scroll',positionTitlePopup);
 $('similar-form').onsubmit=event=>{
   event.preventDefault();if(!similarEnabled||titleComposing)return;

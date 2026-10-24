@@ -18,7 +18,9 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   assert.equal(requests.filter(r=>r.action==='search-titles').length,1);assert.equal(await input.getAttribute('aria-expanded'),'true');
   assert.equal(await p.getByRole('option',{name:'Original · 2020',exact:true}).count(),1);
   const bounds=await p.locator('#title-popup').boundingBox();assert(bounds.x>=0&&bounds.x+bounds.width<=width+1);
-  assert(bounds.y>=0&&bounds.y+bounds.height<=860);
+  const tray=await p.locator('#selection').boundingBox();
+  assert(bounds.y>=0&&bounds.y+bounds.height<=tray.y);
+  const inputBounds=await input.boundingBox();assert(inputBounds.y+inputBounds.height<=tray.y);
   await p.screenshot({path:path.join(out,'popup-'+width+'.png')});
   await input.press('ArrowDown');assert.equal(await input.getAttribute('aria-activedescendant'),'movie-title-option-0');
   await input.press('ArrowDown');assert.equal(await input.getAttribute('aria-activedescendant'),'movie-title-option-1');
@@ -33,6 +35,12 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   if(width<600)await p.getByRole('option',{name:'Original · 2008',exact:true}).tap();else await p.getByRole('option',{name:'Original · 2008',exact:true}).click();
   await p.locator('#similar-results').waitFor({state:'visible'});assert(await p.locator('#title-popup').isHidden());
   // New typing waits behind the old metadata job, but only the newest result can display.
+  if(width<600){
+   await p.setViewportSize({width,height:540});await input.focus();await input.fill('Original');await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
+   const popup=await p.locator('#title-popup').boundingBox(),bar=await p.locator('#selection').boundingBox();
+   assert(popup.y>=0&&popup.y+popup.height<=bar.y+1);
+   await p.setViewportSize({width,height:860});
+  }
   await input.fill('Slow '+width);await p.waitForTimeout(450);await input.fill('Latest '+width);
   await p.getByRole('option',{name:'Latest result · 2008',exact:true}).waitFor();assert.equal(await p.getByRole('option',{name:'Slow result · 2008',exact:true}).count(),0);
   assert.equal(requests.filter(r=>r.action==='search-titles'&&r.query==='Latest '+width).length,1);

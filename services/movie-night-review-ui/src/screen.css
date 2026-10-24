@@ -177,6 +177,7 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 .title-picker{flex:1 1 140px;min-width:0;position:relative}
 .similar-input input{width:100%;margin:0;padding-right:48px}
 .similar-input>button{padding-inline:12px}
+#similar-query::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}
 .title-clear{position:absolute;right:3px;top:3px;min-height:40px;width:40px;padding:0;border:0;background:transparent;color:var(--text);font-size:24px}
 #similar-search label{margin:12px 0 6px}
 #similar-status{overflow-wrap:anywhere}
