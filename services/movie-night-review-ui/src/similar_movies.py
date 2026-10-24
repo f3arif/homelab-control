@@ -35,14 +35,15 @@ def reference(meta):
 
 
 # Generic synopsis words do not count as evidence of a similar story.
-STOP = set('about after again against also another around away back becomes before being between both come comes could days does during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young'.split())
+STOP = set('about after again against also another around away back becomes before being between both come comes could days does during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young team project task plan idea work tragic dangerous mission'.split())
 
 
 def words(meta):
     text = meta.get('description', '')
     if not isinstance(text, str) or len(text) > 3000:
         return set()
-    return {w.rstrip('s') for w in re.findall(r'[^\W\d_]{4,}', text.casefold()) if w not in STOP}
+    return {w[:-1] if len(w) > 5 and w.endswith('s') and not w.endswith(('ss', 'us', 'is')) else w
+            for w in re.findall(r'[^\W\d_]{4,}', text.casefold()) if w not in STOP}
 
 
 def people(meta, key):
@@ -70,7 +71,7 @@ def related_score(seed, meta, frequency=None, total=1):
     if not distinctive and not directors and not cast:
         reasons.append('Genre match only; no closer story connection found.')
     genre_score = len(common) / len(genres_of(seed) | genres_of(meta))
-    return genre_score + narrative + 4 * bool(directors) + min(2, len(cast)), reasons
+    return 3 * genre_score + min(4, narrative) + 6 * bool(directors) + min(2, len(cast)), reasons
 
 
 class CinemetaSimilar:

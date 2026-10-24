@@ -6,7 +6,7 @@ from urllib.parse import quote
 from discovery_policy import normalize
 from genre_settings import defaults
 from metadata_discovery import CinemetaDiscovery,DiscoveryUnavailable
-from similar_movies import CinemetaSimilar,SuggestionStore,query_text,reference,related_score
+from similar_movies import CinemetaSimilar,SuggestionStore,query_text,reference,related_score,words
 from test_downloads import Harness
 
 def movie(i=1,**kw):
@@ -52,6 +52,12 @@ class SimilarMetadataTests(unittest.TestCase):
   a,ar=related_score(movie(0),movie(1));b,br=related_score(movie(0),self.transport.movies[1])
   self.assertGreater(a,b);self.assertIn('Genre match only',br[-1]);self.assertTrue(any('Same director' in r for r in ar))
   self.assertEqual((0,[]),related_score(movie(0),movie(genres=['Romance'])))
+ def test_generic_words_do_not_beat_shared_director(self):
+  seed=movie(0,description='A team steals corporate technology on a secret mission.')
+  weak=movie(1,genres=['Thriller'],description='A team steals corporate technology.',director=[],cast=[])
+  strong=movie(2,description='Dream espionage with inverted chronology.',cast=[])
+  self.assertGreater(related_score(seed,strong,{},100)[0],related_score(seed,weak,{},100)[0])
+  self.assertNotIn('team',words(seed));self.assertIn('business',words({'description':'Business engineers encounter a dangerous virus.'}))
  def test_network_path_allowlist(self):
   for p in ['https://evil.test/x','/meta/movie/../x.json','/catalog/movie/top/search=a&url=https://evil.test.json','/catalog/movie/top/search=abc%XX.json']:
    with self.subTest(path=p),self.assertRaises(DiscoveryUnavailable):self.source.metadata.get(p,time.monotonic()+10)
