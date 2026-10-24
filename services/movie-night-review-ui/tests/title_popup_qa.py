@@ -16,6 +16,12 @@ with tempfile.TemporaryDirectory(prefix='afz-title-popup-qa-') as td:
     from metadata_discovery import CinemetaDiscovery
     metadata=MetadataFixture()
     def lookup(path):
+        if '/search=Holid' in path:
+            return {'metas':[dict(metadata.seed,id='tt80000'+str(i).zfill(2),name='Holiday Touchdown '+str(i)) for i in range(18)] +
+                    [dict(metadata.seed,id='tt2556308',name='Holiday',releaseInfo='2014'),
+                     dict(metadata.seed,id='tt0030241',name='Holiday',releaseInfo='1938')]}
+        if path=='/meta/movie/tt2556308.json':
+            return {'meta':dict(metadata.seed,id='tt2556308',name='Holiday',releaseInfo='2014')}
         if '/search=Slow' in path:
             time.sleep(1.2)
             return {'metas':[dict(metadata.seed,name='Slow result')]}

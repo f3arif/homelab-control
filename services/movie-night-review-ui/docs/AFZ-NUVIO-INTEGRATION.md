@@ -2,7 +2,7 @@
 
 The web owner entry offers a title/year autocomplete popup while typing and explicit related-movie search. Type at least two characters; tap an option or use arrows/Enter. Client title lookups are debounced and serialized, and stale responses cannot replace newer typing. Dismissal, IME composition and keyboard selection are handled in the web frontend; the API contract is unchanged. Nuvio may reuse the existing authenticated feedback endpoint contract:
 
-- `search-titles` with `query` → `jobId`; poll `similar-status` with that ID until `titles` is returned.
+- `search-titles` with `query` → `jobId`; poll `similar-status` with that ID until `titles` is returned. Up to 40 unique validated options are ranked from a bounded provider pool. Exact titles and shorter prefixes lead; an optional year disambiguates names. Preserve the returned order and do not truncate to the previous 12 options. This affects reference lookup only; older/watched reference movies are allowed.
 - `find-similar` with the title-search `jobId` and a returned `imdb` → a new job; poll for `reference`, screened `movies`, `similarReasons`, and `partial`.
 - `add-similar` with the result job ID and returned movie ID → refreshed normal review payload. This does not pick, finalize or download.
 

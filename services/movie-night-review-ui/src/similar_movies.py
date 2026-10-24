@@ -34,6 +34,39 @@ def reference(meta):
     return {'id': meta['id'], 'name': meta['name'], 'releaseInfo': year if re.fullmatch(r'\d{4}', year) else ''}
 
 
+def title_key(value):
+    value = ''.join(c for c in unicodedata.normalize('NFKD', value.casefold())
+                    if not unicodedata.combining(c))
+    return ' '.join(re.findall(r'[^\W_]+', value))
+
+
+def rank_titles(items, query):
+    # Rank the bounded provider pool before limiting it. Provider popularity alone
+    # can bury a short title under many longer titles that share its prefix.
+    year = ''
+    dated = re.fullmatch(r'(.+?)\s+[\[(]?((?:18|19|20|21)\d{2})[\])]?', query)
+    if dated:
+        query, year = dated.groups()
+    key = title_key(query)
+
+    def score(item):
+        name = title_key(item['name'])
+        if key and name == key:
+            match = 0
+        elif key and name.startswith(key):
+            match = 1
+        elif key and (' ' + key) in name:
+            match = 2
+        else:
+            match = 3
+        # Preserve provider order for equally relevant titles, including aliases
+        # whose displayed title does not contain the query.
+        return (match, bool(year and item['releaseInfo'] != year),
+                len(name) - len(key) if match == 1 else 0)
+
+    return sorted(items, key=score)
+
+
 # Generic synopsis words do not count as evidence of a similar story.
 STOP = set('about after again against also another around away back becomes before being between both come comes could days does during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young team project task plan idea work tragic dangerous mission'.split())
 
@@ -79,18 +112,17 @@ class CinemetaSimilar:
         self.metadata = metadata or CinemetaDiscovery()
 
     def search(self, query):
-        data = self.metadata.get('/catalog/movie/top/search=' + quote(query_text(query), safe='') + '.json', time.monotonic() + 20)
+        query = query_text(query)
+        data = self.metadata.get('/catalog/movie/top/search=' + quote(query, safe='') + '.json', time.monotonic() + 20)
         metas = data.get('metas')
         if not isinstance(metas, list):
             raise DiscoveryUnavailable('Invalid title search')
         result = {}
-        for meta in metas[:40]:
+        for meta in metas[:100]:
             item = reference(meta)
             if item:
                 result.setdefault(item['id'], item)
-            if len(result) >= 12:
-                break
-        return list(result.values())
+        return rank_titles(result.values(), query)[:40]
 
     def find(self, imdb, settings):
         deadline = time.monotonic() + 55

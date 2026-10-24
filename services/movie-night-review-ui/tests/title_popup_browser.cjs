@@ -58,6 +58,19 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   await input.fill('Error');await p.locator('#title-popup-retry').waitFor({state:'visible'});await p.unroute('**/api/feedback');
   await p.locator('#title-popup-retry').click();await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
   await input.press('Escape');await input.focus();await p.locator('#search-titles').click();await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
+  // Real backend ranking must recover a short title beyond the former 12-result cutoff.
+  for(const query of ['Holid','Holiday','Holiday 2014']){
+   await input.fill(query);await p.getByRole('option',{name:'Holiday · 2014',exact:true}).waitFor();
+   assert.equal(await p.getByRole('option').count(),20);
+   assert.equal(await p.getByRole('option').first().innerText(),'Holiday · 2014');
+   const box=await p.locator('#title-popup').boundingBox(),bar=await p.locator('#selection').boundingBox();
+   assert(box.x>=0&&box.x+box.width<=width+1&&box.y>=0&&box.y+box.height<=bar.y+1);
+  }
+  await p.screenshot({path:path.join(out,'holiday-'+width+'.png')});
+  if(width<600)await p.getByRole('option',{name:'Holiday · 2014',exact:true}).tap();else await p.getByRole('option',{name:'Holiday · 2014',exact:true}).click();
+  await p.locator('#similar-results').waitFor({state:'visible'});
+  assert.equal(await input.inputValue(),'Holiday');assert(await p.locator('#title-popup').isHidden());
+  assert(requests.some(r=>r.action==='find-similar'&&r.imdb==='tt2556308'));
   const overflow=await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
   const small=await p.locator('#similar-search button:visible,#similar-search input:visible').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().height<40).length);
   assert(!overflow);assert.equal(small,0);assert.deepEqual(errors,[]);

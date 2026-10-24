@@ -36,6 +36,39 @@ class SimilarMetadataTests(unittest.TestCase):
   self.assertEqual(['2008','2020'],[r['releaseInfo'] for r in self.source.search('Original')])
   self.assertEqual('',reference(movie(releaseInfo='unknown'))['releaseInfo'])
   self.assertIsNone(reference(movie(imdb_id='tt12345')))
+ def title_search(self,query,rows):
+  return CinemetaSimilar(CinemetaDiscovery(lambda _: {'metas':rows})).search(query)
+ def test_partial_title_beyond_old_cutoff_is_prominent(self):
+  rows=[movie(i,name='Holiday Touchdown '+str(i)) for i in range(18)]
+  rows += [movie(91,id='tt2556308',name='Holiday',releaseInfo='2014'),movie(92,name='Holiday',releaseInfo='1938')]
+  found=self.title_search('Holid',rows)
+  self.assertEqual(['tt2556308',rows[-1]['id']],[r['id'] for r in found[:2]])
+  self.assertEqual(20,len(found))
+ def test_exact_title_and_optional_year_disambiguation(self):
+  rows=[movie(1,name='Holiday',releaseInfo='1938'),movie(2,name='The Holiday',releaseInfo='2006'),movie(3,name='Holiday',releaseInfo='2014')]
+  for query in ['Holiday 2014','Holiday (2014)','Holiday [2014]']:
+   with self.subTest(query=query):self.assertEqual(rows[2]['id'],self.title_search(query,rows)[0]['id'])
+  self.assertEqual([rows[0]['id'],rows[2]['id'],rows[1]['id']],[r['id'] for r in self.title_search('Holiday',rows)])
+  self.assertEqual('1917',self.title_search('1917',[movie(name='1917')])[0]['name'])
+ def test_ranking_precedes_limit_and_keeps_nonliteral_alias_matches(self):
+  rows=[movie(i,name='Dreamland Adventure '+str(i)) for i in range(99)]
+  rows += [movie(100,name='Dreamland')]
+  found=self.title_search('Dreamland',rows)
+  self.assertEqual(40,len(found));self.assertEqual('Dreamland',found[0]['name'])
+  alias=movie(name='Another Display Title');self.assertEqual(alias['id'],self.title_search('Original Language Title',[alias])[0]['id'])
+ def test_title_normalization_without_rewriting_display(self):
+  rows=[movie(1,name='Amelie Returns'),movie(2,name='Amélie')]
+  self.assertEqual('Amélie',self.title_search('AMELIE',rows)[0]['name'])
+  rows=[movie(1,name='Spider Man Returns'),movie(2,name='Spider-Man')]
+  self.assertEqual('Spider-Man',self.title_search('Spider Man',rows)[0]['name'])
+ def test_lookup_bounds_deduplication_and_invalid_rows(self):
+  good=movie(1,name='Unique')
+  invalid=[None,{},dict(good,type='series'),dict(good,imdb_id='tt99999')]
+  rows=invalid+[good,good]+[movie(i) for i in range(2,110)]
+  found=self.title_search('Dream Mission',rows)
+  self.assertEqual(40,len(found));self.assertEqual(40,len({r['id'] for r in found}))
+  self.assertEqual([reference(good)],self.title_search('Unique',invalid+[good,good]))
+  rows=[None]*100+[good];self.assertEqual([],self.title_search('Unique',rows))
  def test_results_screened_old_reference_allowed(self):
   r=self.source.find('tt90000000',defaults());self.assertEqual('2008',r['reference']['releaseInfo'])
   self.assertEqual({'tt90000001','tt90000002'},{x['id'] for x in r['rows']})
