@@ -49,10 +49,19 @@ with tempfile.TemporaryDirectory(prefix='afz-auto-qa-') as td:
     app=create_app(h.controller,lambda r:'billing-owner' if r.headers.get('x-afz-review-principal')=='billing-owner' else None,allowed_origin=backend_origin)
     from private_relay import RelayAuth,RelayServer,RelayHandler
     tcp=socket.socket();tcp.bind(('127.0.0.1',0));tcp.listen(128)
+    uds=socket.socket(socket.AF_UNIX);uds.bind(str(endpoint));endpoint.chmod(0o600);uds.listen(128)
     relay=RelayServer(str(relay_endpoint),RelayHandler);relay.host='127.0.0.1';relay.port=tcp.getsockname()[1];relay.secret='a'*64
     relay_endpoint.chmod(0o600)
-    server=uvicorn.Server(uvicorn.Config(RelayAuth(app,relay.secret,peer='127.0.0.1'),access_log=False,log_level='error',lifespan='off',proxy_headers=False))
-    backend=threading.Thread(target=lambda:server.run(sockets=[tcp]),daemon=True);backend.start()
+    server=uvicorn.Server(uvicorn.Config(RelayAuth(app,relay.secret,peer='127.0.0.1',unix_path=endpoint),access_log=False,log_level='error',lifespan='off',proxy_headers=False))
+    backend=threading.Thread(target=lambda:server.run(sockets=[tcp,uds]),daemon=True);backend.start()
+    from movie_transport import UnixConnection
+    def verify_index(imdb,size):
+        c=UnixConnection(endpoint)
+        try:
+            c.request('HEAD','/movie-night/media/'+imdb,headers={'X-AFZ-Review-Principal':'billing-owner'});r=c.getresponse()
+            return r.status==200 and int(r.getheader('Content-Length','-1'))==size
+        finally:c.close()
+    h.worker.verify_route=verify_index
     relay_thread=threading.Thread(target=relay.serve_forever,daemon=True);relay_thread.start()
     frontend=threading.Thread(target=front.serve_forever,daemon=True);frontend.start()
     try:
@@ -68,5 +77,5 @@ with tempfile.TemporaryDirectory(prefix='afz-auto-qa-') as td:
         print('AUTO_FINALIZE_CACHE_TRANSFER_RANGE_RELOAD_PASS_360_412_1280')
         print('PRIVATE_RELAY_PASS', 'REAL_8TB_VOLUME' if disk_fixture else 'DISPOSABLE_VOLUME')
     finally:
-        front.shutdown();front.server_close();relay.shutdown();relay.server_close();server.should_exit=True;backend.join(10);tcp.close();h.close()
+        front.shutdown();front.server_close();relay.shutdown();relay.server_close();server.should_exit=True;backend.join(10);tcp.close();uds.close();h.close()
         if disk_fixture:disk_fixture.cleanup()

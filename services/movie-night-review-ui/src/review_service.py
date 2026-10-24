@@ -108,7 +108,7 @@ def main():
     listeners=[listener]
     if args.listen:
         from private_relay import RelayAuth, read_secret
-        app=RelayAuth(app,read_secret(args.relay_secret))
+        app=RelayAuth(app,read_secret(args.relay_secret),unix_path=endpoint)
         tcp=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         tcp.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
         tcp.bind((args.listen,args.port));tcp.listen(128);listeners.append(tcp)

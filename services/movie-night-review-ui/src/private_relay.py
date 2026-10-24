@@ -29,11 +29,14 @@ def read_secret(path):
 
 class RelayAuth:
     """Unix socket is owner-only. TCP requires a fixed peer and secret."""
-    def __init__(self, app, secret, peer='100.71.26.69'):
+    def __init__(self, app, secret, peer='100.71.26.69', unix_path=None):
         self.app, self.secret, self.peer = app, secret, peer
+        self.unix_path = str(unix_path) if unix_path is not None else None
 
     async def __call__(self, scope, receive, send):
-        if scope['type'] == 'http' and scope.get('server') is not None:
+        local_unix = (self.unix_path is not None and scope.get('server') == (self.unix_path, None)
+                      and scope.get('client') is None)
+        if scope['type'] == 'http' and not local_unix:
             client = scope.get('client') or ('', 0)
             values = [v for k, v in scope.get('headers', []) if k.lower() == HEADER.encode()]
             allowed = (client[0] == self.peer and len(values) == 1 and

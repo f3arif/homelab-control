@@ -69,7 +69,7 @@ class RelayAuthTests(unittest.TestCase):
         async def receive():return {'type':'http.request','body':b''}
         headers=[] if secret is None else [(b'x-movie-night-relay',secret.encode())]
         if extra:headers.append((b'x-movie-night-relay',extra.encode()))
-        asyncio.run(RelayAuth(app,'a'*64)({'type':'http','server':server,'client':(peer,123),'headers':headers},receive,send))
+        asyncio.run(RelayAuth(app,'a'*64,unix_path='/private/review.sock')({'type':'http','server':server,'client':None if peer is None else (peer,123),'headers':headers},receive,send))
         return called,events
     def test_peer_and_secret_both_required(self):
         for peer,token in [('100.71.26.69',None),('100.71.26.69','b'*64),('100.1.2.3','a'*64),('127.0.0.1','a'*64)]:
@@ -79,7 +79,10 @@ class RelayAuthTests(unittest.TestCase):
     def test_duplicate_secret_denied(self):
         called,events=self.request('100.71.26.69','a'*64,extra='a'*64);self.assertFalse(called);self.assertEqual(403,events[0]['status'])
     def test_private_unix_socket_keeps_existing_local_verification(self):
-        called,_=self.request('',None,server=None);self.assertEqual(1,len(called))
+        called,_=self.request(None,None,server=('/private/review.sock',None));self.assertEqual(1,len(called))
+    def test_unrecognized_socket_scope_does_not_bypass_auth(self):
+        for server in (None,('/other.sock',None)):
+            called,events=self.request(None,None,server=server);self.assertFalse(called);self.assertEqual(403,events[0]['status'])
     def test_secret_requires_private_regular_file(self):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td)/'secret';p.write_text('a'*64);p.chmod(0o600)
