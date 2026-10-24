@@ -8,7 +8,7 @@ import re
 import sqlite3
 from uuid import uuid4
 from trailer_policy import reviewed_trailer
-from discovery_policy import screened, CORE_GENRES
+from discovery_policy import screened, CORE_GENRES, excluded_genres
 from movie_presentation import display_fields
 
 MIN_BYTES = 5_000_000_000
@@ -18,11 +18,6 @@ QUOTA = 100_000_000_000
 ROOT = '/srv/afzmedia/Media/MovieNight/Movies'
 PREFERRED_TAGS = {'obsession', 'relationship tension', 'twists', 'suspense'}
 SEEN_TITLES = {'heretic', 'companion'}
-
-def excluded_genres(row):
-    return any(re.search(r'\b(?:comed(?:y|ies)|dramed(?:y|ies))\b',str(g),re.I) for g in row.get('genres',[]) or [])
-
-
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)

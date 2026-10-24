@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from movie_night import ApprovalStore, Choice, QUOTA, ROOT, MIN_BYTES, CAP, select_compact, shortlist, stream_status, excluded_genres
 from movie_posters import PosterCache, image_mime
 from feedback import MIN_PICKS, MAX_PICKS, VISIBLE_MOVIES
+from discovery_policy import EXCLUDED_GENRES
 
 
 class Controller:
@@ -79,9 +80,9 @@ class Controller:
                     'eligibleIds':list(eligible),'selectionLimits':{'min':MIN_PICKS,'max':MAX_PICKS,'visible':VISIBLE_MOVIES},
                     'disliked':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='dislike'],
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
-                    'finalized':{'ids':saved['ids'],'valid':valid,'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
+                    'finalized':{'ids':saved['ids'],'valid':valid,'excludedIds':[i for i in saved['ids'] if i in genre_blocked],'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
-                    'excludedGenres':['Comedy'],
+                    'excludedGenres':list(EXCLUDED_GENRES),
                     'reserveCount':max(0,len(eligible)-VISIBLE_MOVIES),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
                     'replacementAvailable':len(eligible)>VISIBLE_MOVIES}

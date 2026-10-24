@@ -13,7 +13,7 @@ import time
 from urllib.parse import urlsplit
 from movie_night import shortlist, excluded_genres
 from trailer_policy import reviewed_trailer
-from discovery_policy import screened
+from discovery_policy import screened, EXCLUDED_GENRES, CORE_GENRES
 from seen_policy import SeenPolicy, canonical_id, KNOWN_SEEN_IDS
 
 MAX_BYTES=262144
@@ -50,11 +50,11 @@ def validate_rows(payload,now,minimum=10,max_age=86400):
             if not isinstance(source,str):raise ValueError('Invalid source link')
             url=urlsplit(source)
             if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment:raise ValueError('Plain HTTPS source links required')
-        if excluded_genres(row):raise ValueError('Drama and Comedy genres are excluded, including mixed genres')
+        if excluded_genres(row):raise ValueError('Animation, Drama and Comedy genres are excluded, including mixed genres')
         # Reject malformed policy fields; intentionally excluded seen/high-scare entries may be omitted.
         if not screened(row,now) and (type(row.get('year')) is not int or row['year']<2016 or row.get('intensityReviewed') is not True or row.get('intenseSupernatural') is not False or row.get('scareLevel') not in ('low','moderate')):
             raise ValueError('Outside reviewed 2016+ low/moderate policy')
-        if not set(row.get('fitTags',[])) & {'obsession','relationship tension','twists','suspense'}:raise ValueError('Preference fit required')
+        if not (set(row.get('genres',[])) & CORE_GENRES or set(row.get('fitTags',[])) & {'obsession','relationship tension','twists','suspense'}):raise ValueError('Preference fit required')
     return rows,set(seen_ids)
 
 def preference_snapshot(db):
@@ -97,7 +97,7 @@ def publish(state,input_path,expected_hash,dry_run=False,now=None,*,refill=False
                  'publishedHistoryIds':sorted(set(current.get('publishedHistoryIds',[])) | {r['id'] for r in current.get('movies',[])} | {r['id'] for r in accepted}),
                  'seenCoverage':'Known exclusions only; complete history is not available.',
                  'retainedSelectionIds':sorted(retained & eligible - disliked),
-                 'excludedGenres':['Drama','Comedy'],
+                 'excludedGenres':list(EXCLUDED_GENRES),
                  'retainedIneligibleSelections':[r for r in merged if canonical_id(r) in retained and excluded_genres(r)]}
         data=(json.dumps(payload,ensure_ascii=False,indent=2)+'\n').encode()
         if len(data)>MAX_BYTES:raise ValueError('Published JSON too large')

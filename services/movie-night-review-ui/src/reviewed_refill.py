@@ -2,7 +2,7 @@
 import hashlib,json,os,sqlite3,tempfile,time
 from pathlib import Path
 from publish_reviewed import read_json,validate_rows,publish,preference_snapshot
-from movie_night import shortlist
+from movie_night import shortlist, excluded_genres
 
 class ReviewedRefill:
     def __init__(self,state):self.state=Path(state)
@@ -10,6 +10,8 @@ class ReviewedRefill:
         now=int(time.time())
         raw,current=read_json(self.state/'reviewed-shortlist.json')
         _,bank=read_json(self.state/'reviewed-refill-bank.json')
+        # Keep eligible reserves usable after an owner changes genre preferences.
+        if isinstance(bank.get('movies'),list):bank=dict(bank,movies=[r for r in bank['movies'] if not excluded_genres(r)])
         rows,known=validate_rows(bank,now,minimum=1,max_age=7*86400)
         _,disliked=preference_snapshot(self.state/'preferences.sqlite3')
         used=set(current.get('publishedHistoryIds',[])) | {r['id'] for r in current.get('movies',[])}

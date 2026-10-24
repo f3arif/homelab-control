@@ -14,6 +14,8 @@ Tests cover inclusive size boundaries, bounded inventory, exact-volume refusal, 
 
 ## Daily use
 
+Owner filter, 2026-10-24: exclude Animation and Drama, including mixed genres, alongside the existing Comedy exclusion. The same policy applies to reviewed suggestions, discovery, refill banks, publication and new finalize/download eligibility. Previously saved excluded picks are shown as compact history notes; remaining eligible picks stay selected for review. Completed server files and feedback are preserved.
+
 Owner preference, 2026-10-24: match the preferred genres without requiring every recommendation to resemble a liked movie. Explicit likes remain first; other eligible movies receive a simple genre-match preference, with reviewed order preserved for ties. Shared obsession, relationship-tension, suspense or twist tags no longer boost ranking, and extra matching genre labels earn no additional boost. Already-screened preferred-genre films can qualify without those theme tags. The old similarity badge is removed. Existing genre/year/intensity screening, watched/disliked exclusions and saved choices remain in force. This change applies to the shortlist, reviewed refills and discovery candidate ranking through their shared ranker.
 
 Turn on Tailscale and open the dedicated Movie Night URL. Pick 3–10 movies, then press **Finalize & download**. Pick and Like alone start nothing. Server downloads show source checking, queued/downloading progress, unavailable/failed results, cancellation and completion. Missing source checks can be retried; completed files offer a separate copy to the current device. A completed historical file is preserved even if it predates the new minimum.
