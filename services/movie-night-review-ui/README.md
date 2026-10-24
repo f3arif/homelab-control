@@ -24,12 +24,17 @@ The owner gateway and CSRF/origin protections are unchanged. The 8 TB guard and 
 
 ## Verification and recovery
 
+The Python 3.12 runtime must install all direct dependencies from `requirements-runtime.txt`. In particular, `requests` is needed for uncached posters and Cinemeta discovery, even if cached posters and the rest of the page work. The 2026-10-24 poster repair restored this omitted dependency without changing application files or restarting services. Keep the qualified existing package versions when repairing an environment; record the before/after package inventories and constrain existing versions during installation.
+
 From the project checkout:
 
 ```sh
+uv pip install --python /path/to/venv/bin/python -r requirements-runtime.txt
 PYTHONPATH=src:tests:.test-deps python -m unittest discover -s tests -v
 AFZ_QA_8TB=1 AFZ_BROWSER_SCRIPT=storage_browser.cjs python tests/auto_qa.py
 ```
+
+`tests/test_posters.py` exercises the default HTTP client, cache misses/hits, timeout recovery and existing format/size/redirect/path limits. `tests/posters_live.cjs` visits the actual owner page with writes blocked, scrolls every lazy poster into view at 360/412/1280px, and checks successful image decoding rather than treating a placeholder as success. Also qualify a real uncached fetch in a disposable poster cache on the target runtime; fixture injection alone does not test optional imports.
 
 The fixture test must use the documented target runtime, browser, fonts and library paths from the deployment handoff. Never substitute real provider credentials or real user finalization as QA.
 
