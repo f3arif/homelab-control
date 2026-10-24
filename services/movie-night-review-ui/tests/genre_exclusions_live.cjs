@@ -21,15 +21,21 @@ const out=path.resolve(__dirname,'../qa/genre-exclusions-live');fs.mkdirSync(out
   for(const id of api.finalized.excludedIds||[])assert.equal(await p.locator('.movie-card[data-movie="'+id+'"]').count(),0);
   assert.deepEqual(await p.locator('.chips li').allTextContents(),['2016 onward','No Animation','No Drama','No Comedy']);
   assert.deepEqual(api.selectionLimits,{min:3,max:10,visible:10});assert.equal(api.autoDownloads,true);
-  const cards=p.locator('.movie-card');await cards.first().waitFor();const count=await cards.count();assert(count>0);
-  for(let i=0;i<count;i++){
-   const card=cards.nth(i);await card.scrollIntoViewIfNeeded();
-   await p.waitForFunction(index=>{const card=document.querySelectorAll('.movie-card')[index],img=card.querySelector('.movie-poster img');return img&&img.complete&&img.naturalWidth>0&&card.querySelector('.poster-fallback').hidden;},i,{timeout:12000});
+  const cards=p.locator('.movie-card');await cards.first().waitFor();let state;
+  // Background refill can replace the DOM while preserving the reviewed list.
+  // Resolve each card in the page at the time of scrolling, then verify a complete current snapshot.
+  for(let pass=0;pass<3;pass++){
+   const count=await cards.count();assert(count>0);
+   for(let i=0;i<count;i++){
+    await p.evaluate(index=>document.querySelectorAll('.movie-card')[index]?.scrollIntoView({block:'center'}),i);
+    await p.waitForFunction(index=>{const card=document.querySelectorAll('.movie-card')[index];if(!card)return true;const img=card.querySelector('.movie-poster img');return img&&img.complete&&img.naturalWidth>0&&card.querySelector('.poster-fallback').hidden;},i,{timeout:12000});
+   }
+   state=await p.evaluate(()=>({cards:document.querySelectorAll('.movie-card').length,loaded:[...document.querySelectorAll('.movie-poster img')].filter(x=>x.complete&&x.naturalWidth>0).length,missing:[...document.querySelectorAll('.poster-fallback')].filter(x=>!x.hidden).length,ready:document.querySelectorAll('#finalized-movies .card-download[data-state="ready"]').length,overflow:document.documentElement.scrollWidth>innerWidth}));
+   if(state.cards===state.loaded&&state.missing===0)break;
   }
-  const state=await p.evaluate(()=>({cards:document.querySelectorAll('.movie-card').length,loaded:[...document.querySelectorAll('.movie-poster img')].filter(x=>x.complete&&x.naturalWidth>0).length,missing:[...document.querySelectorAll('.poster-fallback')].filter(x=>!x.hidden).length,ready:document.querySelectorAll('#finalized-movies .card-download[data-state="ready"]').length,overflow:document.documentElement.scrollWidth>innerWidth}));
   assert.equal(state.cards,state.loaded);assert.equal(state.missing,0);assert(!state.overflow);assert(state.ready>0);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);
   assert(posters.length>0&&posters.every(r=>r.status===200&&/^image\/(jpeg|webp)/.test(r.mime)));
-  await cards.nth(Math.min(4,count-1)).scrollIntoViewIfNeeded();await p.screenshot({path:path.join(out,'posters-'+width+'.png')});
+  await p.evaluate(()=>document.querySelectorAll('.movie-card')[4]?.scrollIntoView({block:'center'}));await p.screenshot({path:path.join(out,'posters-'+width+'.png')});
   results.push({width,...state,responses:posters.length,errors,blocked});await p.close();
  }}finally{await browser.close();}
  fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({passed:true,results},null,2));
