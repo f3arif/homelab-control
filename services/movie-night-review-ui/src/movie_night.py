@@ -8,7 +8,7 @@ import re
 import sqlite3
 from uuid import uuid4
 from trailer_policy import reviewed_trailer
-from discovery_policy import screened
+from discovery_policy import screened, CORE_GENRES
 from movie_presentation import display_fields
 
 MIN_BYTES = 5_000_000_000
@@ -120,9 +120,12 @@ def shortlist(payload, now, seen_policy=None, limit=12):
         if not screened(row,now) and (row.get('scareLevel') not in {'low', 'moderate'} or row.get('intensityReviewed') is not True):
             continue
         tags = set(row.get('fitTags') or []) & PREFERRED_TAGS
-        if not tags or (row.get('intenseSupernatural') is not False and not screened(row,now)):
+        genres = set(row.get('genres') or []) & CORE_GENRES
+        # Genre-qualified films need not share the old obsession/tension/twist tags.
+        # Retain the existing editorial fallback for legacy rows without genre metadata.
+        if (not tags and not genres) or (row.get('intenseSupernatural') is not False and not screened(row,now)):
             continue
-        reason = 'Fits your stated preference: ' + ', '.join(sorted(tags))
+        reason = 'Matches your preferred genres: ' + ', '.join(sorted(genres)) if genres else 'Reviewed Movie Night suggestion.'
         result.append({'id': imdb, 'type': 'movie', 'name': str(name),
                        'releaseInfo': str(row.get('year', '')),
                        'description': reason + '\nFinalize your picks to request their server downloads. Source availability and playback are not yet verified.',

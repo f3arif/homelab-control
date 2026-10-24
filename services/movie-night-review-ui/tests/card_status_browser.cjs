@@ -4,7 +4,7 @@ const fs=require('fs'),path=require('path'),assert=require('node:assert/strict')
 const root=path.resolve(__dirname,'..'),out=path.join(root,'qa/card-status');fs.mkdirSync(out,{recursive:true});
 const states=['queued','checking','approved','downloading','downloaded','indexed','playback-tested','unavailable','failed','cancelled'];
 const labels=['Queued','Finding a source','Queued for transfer','Downloading','Downloaded · checking availability','✓ Ready on server','✓ Ready on server','No ready source','Needs attention','Cancelled'];
-const movies=states.map((_,i)=>({id:'tt'+(12345+i),name:'Fixture Movie '+(i+1),releaseInfo:'2024',genres:['Thriller'],synopsis:'A fixture synopsis.',movieInfo:{runtimeMinutes:110,cast:['Fixture actor']}}));
+const movies=states.map((_,i)=>({id:'tt'+(12345+i),name:'Fixture Movie '+(i+1),releaseInfo:'2024',genres:['Thriller'],similarToLiked:true,synopsis:'A fixture synopsis.',movieInfo:{runtimeMinutes:110,cast:['Fixture actor']}}));
 const ids=movies.map(m=>m.id);
 const shortlist={movies,reviewEnabled:true,actionsEnabled:true,autoDownloads:true,downloadRequestedIds:ids,eligibleIds:ids,seenStateComplete:true,shortlistFresh:true,finalized:{valid:true,ids,movies},refillRequest:{},selectionLimits:{min:3,max:10,visible:10}};
 function item(i,state){return {id:'job-'+i,imdb:ids[i],name:movies[i].name,state,size:6000000000,bytesReceived:['downloaded','indexed','playback-tested'].includes(state)?6000000000:state==='downloading'?3000000000:0,downloaded:['downloaded','indexed','playback-tested'].includes(state),indexed:['indexed','playback-tested'].includes(state)};}
@@ -29,6 +29,8 @@ function item(i,state){return {id:'job-'+i,imdb:ids[i],name:movies[i].name,state
   await p.goto('http://localhost/movie-night/',{waitUntil:'networkidle'});
   const cards=p.locator('#finalized-movies .movie-card');await cards.nth(0).locator('.card-download[data-state="queued"]').waitFor();
   assert.deepEqual(await cards.locator('.card-download-status').allTextContents(),labels);
+  assert.equal(await p.locator('.liked-note').count(),0);
+  assert.match(await p.locator('#genre-guidance').textContent(),/genres; stories, themes and styles can vary/);
   assert.equal(await cards.locator('.server-file:visible').count(),2);
   assert.equal(await cards.nth(3).locator('progress').getAttribute('value'),'3000000000');
   assert.match(await cards.nth(3).locator('.card-download-detail').innerText(),/3.00 of 6.00 GB/);

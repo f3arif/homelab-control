@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 from seen_policy import canonical_id
+from discovery_policy import CORE_GENRES
 
 MIN_PICKS = 3
 MAX_PICKS = 10
@@ -68,17 +69,20 @@ class FeedbackStore:
 
 def rank_reviewed(rows,ratings,limit=VISIBLE_MOVIES):
     eligible=[r for r in rows if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')]
-    liked_tags=set();liked_genres=set()
+    liked_genres=set()
     for rating in ratings.values():
         if rating['value']=='like':
-            liked_tags.update(rating['metadata'].get('fitTags',[]));liked_genres.update(rating['metadata'].get('genres',[]))
+            liked_genres.update(set(rating['metadata'].get('genres',[])) & CORE_GENRES)
     def score(row):
         liked=ratings.get(row['id'],{}).get('value')=='like'
-        return (-int(liked),-len(set(row.get('fitTags',[]))&liked_tags),-len(set(row.get('genres',[]))&liked_genres))
+        # A genre match is enough; matching more themes/genres earns no extra boost.
+        # Other eligible genres remain available in their reviewed order.
+        return (-int(liked),-int(bool(set(row.get('genres',[]))&liked_genres)))
     eligible=sorted(eligible,key=score) # preserve reviewed input order for ties
     result=[]
     for row in eligible[:limit]:
         value=ratings.get(row['id'],{}).get('value')
-        result.append(dict(row,feedback=value,similarToLiked=bool(liked_tags & set(row.get('fitTags',[])))))
+        # Keep the legacy field false for older clients; genre overlap is not plot similarity.
+        result.append(dict(row,feedback=value,similarToLiked=False))
     return result
 
