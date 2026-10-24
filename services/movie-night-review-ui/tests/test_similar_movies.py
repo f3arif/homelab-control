@@ -1,0 +1,143 @@
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import json,sqlite3,tempfile,threading,time,unittest
+from unittest.mock import patch
+from urllib.parse import quote
+from discovery_policy import normalize
+from genre_settings import defaults
+from metadata_discovery import CinemetaDiscovery,DiscoveryUnavailable
+from similar_movies import CinemetaSimilar,SuggestionStore,query_text,reference,related_score
+from test_downloads import Harness
+
+def movie(i=1,**kw):
+ return dict({'id':'tt9000000'+str(i),'name':'Dream Mission '+str(i),'type':'movie','releaseInfo':'2024','released':'2024-02-01T00:00:00Z','genres':['Sci-Fi','Thriller'],'description':'Engineers enter a shared dream to prevent a dangerous mission.','director':['Fixture Director'],'cast':['Fixture Actor'],'runtime':'118 min'},**kw)
+class MetadataFixture:
+ def __init__(self):
+  self.seed=movie(0,name='Original',releaseInfo='2008',released='2008-02-01T00:00:00Z')
+  self.movies=[movie(1),movie(2,description='Detectives pursue a criminal across the city.',director=['Another Director'],cast=[]),movie(3,genres=['Thriller','Drama']),movie(4,releaseInfo='2010'),movie(5,type='series')]
+  self.calls=[];self.fail=False;self.delay=0
+ def __call__(self,path):
+  self.calls.append(path)
+  if self.delay:time.sleep(self.delay)
+  if self.fail:raise DiscoveryUnavailable('private upstream detail must not leak')
+  if '/search=' in path:
+   if 'Nothing' in path:return {'metas':[]}
+   return {'metas':[self.seed,dict(self.seed,id='tt90000009',releaseInfo='2020'),dict(self.seed,type='series')]}
+  if '/catalog/' in path:return {'metas':self.movies}
+  return {'meta':next((r for r in [self.seed]+self.movies if r['id'] in path),None)}
+class SimilarMetadataTests(unittest.TestCase):
+ def setUp(self):self.transport=MetadataFixture();self.source=CinemetaSimilar(CinemetaDiscovery(self.transport))
+ def test_query_validation_and_encoding(self):
+  for value in ['', 'a', None, 'a'*121, 'abc\n', '\u202eTitle']:
+   with self.subTest(value=value),self.assertRaises(ValueError):query_text(value)
+  q='Amélie & The / Return? #1';self.source.search(q)
+  self.assertEqual('/catalog/movie/top/search='+quote(q,safe='')+'.json',self.transport.calls[0])
+ def test_disambiguation_and_reference_identity(self):
+  self.assertEqual(['2008','2020'],[r['releaseInfo'] for r in self.source.search('Original')])
+  self.assertEqual('',reference(movie(releaseInfo='unknown'))['releaseInfo'])
+  self.assertIsNone(reference(movie(imdb_id='tt12345')))
+ def test_results_screened_old_reference_allowed(self):
+  r=self.source.find('tt90000000',defaults());self.assertEqual('2008',r['reference']['releaseInfo'])
+  self.assertEqual({'tt90000001','tt90000002'},{x['id'] for x in r['rows']})
+  self.assertTrue(all(x.get('presentation') for x in r['rows']))
+ def test_saved_filters_enable_drama(self):
+  r=self.source.find('tt90000000',dict(defaults(),excluded=['Comedy','Animation']))
+  self.assertIn('tt90000003',[x['id'] for x in r['rows']])
+ def test_conflicting_catalog_and_detail_filters(self):
+  def transport(path):
+   if '/catalog/' in path:return {'metas':[dict(movie(1),genre=['Drama'])]}
+   return self.transport(path)
+  self.assertEqual([],CinemetaSimilar(CinemetaDiscovery(transport)).find('tt90000000',defaults())['rows'])
+ def test_story_connections_and_honest_genre_only_label(self):
+  a,ar=related_score(movie(0),movie(1));b,br=related_score(movie(0),self.transport.movies[1])
+  self.assertGreater(a,b);self.assertIn('Genre match only',br[-1]);self.assertTrue(any('Same director' in r for r in ar))
+  self.assertEqual((0,[]),related_score(movie(0),movie(genres=['Romance'])))
+ def test_network_path_allowlist(self):
+  for p in ['https://evil.test/x','/meta/movie/../x.json','/catalog/movie/top/search=a&url=https://evil.test.json','/catalog/movie/top/search=abc%XX.json']:
+   with self.subTest(path=p),self.assertRaises(DiscoveryUnavailable):self.source.metadata.get(p,time.monotonic()+10)
+ def test_search_uses_correct_host_no_redirects(self):
+  class Response:
+   status_code=200;headers={'Content-Type':'application/json'}
+   def __enter__(self):return self
+   def __exit__(self,*a):pass
+   def iter_content(self,*a):yield b'{"metas":[]}'
+  with patch('requests.get',return_value=Response()) as get:
+   CinemetaSimilar().search('Original');self.assertEqual('https://v3-cinemeta.strem.io/catalog/movie/top/search=Original.json',get.call_args.args[0]);self.assertFalse(get.call_args.kwargs['allow_redirects'])
+class SimilarWorkflowTests(unittest.TestCase):
+ def setUp(self):
+  self.tmp=tempfile.TemporaryDirectory();self.h=Harness(self.tmp.name);self.h.clock=int(time.time());self.h.payload['generatedEpoch']=self.h.clock
+  self.c=self.h.controller;self.c.clock=time.time;self.transport=MetadataFixture();self.c.similar.source=CinemetaSimilar(CinemetaDiscovery(self.transport))
+ def tearDown(self):self.h.close();self.tmp.cleanup()
+ def act(self,action,**kw):return self.c.similar.action('fixture',dict(action=action,**kw))
+ def wait(self,r):self.c.similar.jobs[r['jobId']]['future'].result(5);return self.act('similar-status',jobId=r['jobId'])
+ def find(self):
+  r=self.wait(self.act('search-titles',query='Original'));return self.wait(self.act('find-similar',jobId=r['jobId'],imdb='tt90000000'))
+ def dump(self):
+  with sqlite3.connect(self.h.db) as db:return '\n'.join(db.iterdump())
+ def test_search_add_persistence_idempotency_no_download_or_choice_mutation(self):
+  before=self.dump();r=self.find();self.assertEqual(before,self.dump());self.assertFalse(self.c.similar.store.path.exists())
+  data=self.act('add-similar',jobId=r['jobId'],imdb='tt90000001',movie=movie(9))
+  self.assertEqual('tt90000001',data['movies'][0]['id']);self.assertEqual(before,self.dump())
+  self.assertEqual(0,self.h.provider.resolves);self.assertEqual(0,self.h.provider.verifies);self.assertFalse(list(self.h.media.rglob('*.mkv')))
+  self.assertEqual(['tt90000001'],[x['id'] for x in SuggestionStore(self.tmp.name).read()]);self.assertEqual(0o600,self.c.similar.store.path.stat().st_mode&0o777)
+  self.act('add-similar',jobId=r['jobId'],imdb='tt90000001');self.assertEqual(1,len(self.c.similar.store.read()))
+ def test_add_then_existing_finalize(self):
+  r=self.find();self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
+  self.assertTrue(self.c.finalize('fixture',['tt12345','tt12346','tt90000001'])['finalized']['valid']);self.assertEqual(0,self.h.provider.resolves)
+ def test_seen_and_payload_exclusions_rechecked(self):
+  r=self.find();self.c.feedback.rate('fixture',r['movies'][0],'seen')
+  with self.assertRaisesRegex(ValueError,'no longer eligible'):self.act('add-similar',jobId=r['jobId'],imdb=r['movies'][0]['id'])
+  self.h.payload['knownSeenIds']=['tt90000002'];self.assertEqual([],self.act('similar-status',jobId=r['jobId'])['movies'])
+ def test_changed_settings_invalidate_cached_results(self):
+  r=self.find();s=defaults();s['included']=['Thriller'];s['excluded']=['Sci-Fi'];self.c.genre_settings.save(s)
+  with self.assertRaisesRegex(ValueError,'genres changed'):self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
+  self.assertFalse(self.c.similar.store.path.exists())
+ def test_foreign_job_and_unoffered_ids(self):
+  r=self.wait(self.act('search-titles',query='Original'))
+  with self.assertRaisesRegex(ValueError,'expired'):self.c.similar.action('another',dict(action='similar-status',jobId=r['jobId']))
+  with self.assertRaisesRegex(ValueError,'Choose a movie'):self.act('find-similar',jobId=r['jobId'],imdb='tt99999')
+  with self.assertRaises(ValueError):self.act('add-similar',jobId=r['jobId'],imdb='tt90000000')
+ def test_http_csrf_origin_and_validation(self):
+  p='/movie-night/api/feedback';b={'action':'search-titles','query':'Original'}
+  self.assertEqual(403,self.h.client.post(p,json=b).status_code)
+  self.assertEqual(403,self.h.client.post(p,json=b,headers=dict(self.h.headers,origin='https://evil.test')).status_code)
+  self.assertEqual(200,self.h.post('feedback',b).status_code);self.assertEqual(400,self.h.post('feedback',dict(b,query='x')).status_code)
+ def test_duplicate_search_and_failure_retry(self):
+  a=self.act('search-titles',query='Original');b=self.act('search-titles',query='ORIGINAL');self.assertEqual(a['jobId'],b['jobId']);self.wait(a)
+  self.transport.fail=True;r=self.act('search-titles',query='broken')
+  with self.assertRaises(DiscoveryUnavailable):self.c.similar.jobs[r['jobId']]['future'].result(5)
+  with self.assertRaisesRegex(ValueError,'temporarily unavailable'):self.act('similar-status',jobId=r['jobId'])
+  self.transport.fail=False;self.assertNotEqual(r['jobId'],self.act('search-titles',query='broken')['jobId'])
+ def test_bounded_concurrency(self):
+  event=threading.Event()
+  try:
+   for k in ['one','two']:self.c.similar.start('fixture','titles',k,lambda:event.wait(5))
+   with self.assertRaisesRegex(ValueError,'already running'):self.act('search-titles',query='another')
+  finally:event.set()
+ def test_expiry_prevents_admission(self):
+  r=self.find();self.c.similar.jobs[r['jobId']]['created']-=901
+  with self.assertRaisesRegex(ValueError,'expired'):self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
+ def test_fresh_added_title_does_not_revive_stale_weekly_rows(self):
+  r=self.find();self.act('add-similar',jobId=r['jobId'],imdb='tt90000001');self.h.payload['generatedEpoch']-=31*86400
+  self.assertEqual(['tt90000001'],[x['id'] for x in self.c.review_pool()])
+ def test_expired_saved_metadata_can_be_refreshed(self):
+  stale=normalize(movie(),int(time.time())-31*86400);self.c.similar.store.add(stale)
+  fresh=normalize(movie());self.c.similar.store.add(fresh)
+  self.assertEqual([fresh],self.c.similar.store.read())
+ def test_concurrent_store_writers(self):
+  with ThreadPoolExecutor(2) as pool:list(pool.map(self.c.similar.store.add,[normalize(movie(i)) for i in (1,2)]))
+  self.assertEqual({'tt90000001','tt90000002'},{x['id'] for x in self.c.similar.store.read()})
+ def test_corrupt_or_symlink_store_fails_closed(self):
+  s=self.c.similar.store;s.path.write_text('{}')
+  with self.assertRaises(ValueError):s.read()
+  s.path.unlink();t=Path(self.tmp.name)/'target';t.write_text('{"movies":[]}');s.path.symlink_to(t)
+  with self.assertRaises(ValueError):s.add(normalize(movie()))
+  self.assertEqual('{"movies":[]}',t.read_text())
+ def test_exact_source_provider_reads_added_metadata(self):
+  from review_service import build_app
+  root=Path(self.tmp.name)/'separate';root.mkdir();(root/'reviewed-shortlist.json').write_text(json.dumps(self.h.payload))
+  _,c=build_app(root,'http://testserver',downloads=True,provider=self.h.provider,media_root=root/'media')
+  try:
+   c.similar.store.add(normalize(movie()));self.assertIn('tt90000001',[r['id'] for r in c.choices.payload()['movies']])
+  finally:c.close()
+if __name__=='__main__':unittest.main()

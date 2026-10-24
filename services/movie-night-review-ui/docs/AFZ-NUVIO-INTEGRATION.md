@@ -1,3 +1,13 @@
+## Movie Night reference-title discovery
+
+The web owner entry offers title/year disambiguation and explicit related-movie search. Nuvio may reuse the existing authenticated feedback endpoint contract:
+
+- `search-titles` with `query` → `jobId`; poll `similar-status` with that ID until `titles` is returned.
+- `find-similar` with the title-search `jobId` and a returned `imdb` → a new job; poll for `reference`, screened `movies`, `similarReasons`, and `partial`.
+- `add-similar` with the result job ID and returned movie ID → refreshed normal review payload. This does not pick, finalize or download.
+
+Use the current `genreSettings.revision`; a later revision makes existing results inadmissible. Show reasons honestly, including genre-only matches. Clear/reference changes must ignore stale responses. Preserve the existing current-filter, seen/dislike, 3–10-pick, auto-finalize, 1080p 5–15 GB and 8 TB storage contracts. The API is private owner access, not a new public endpoint. No APK changes are included.
+
 ## Editable Movie Night genres — 2026-10-24
 
 Movie Night now owns persistent include/exclude genre settings. A future connected Nuvio editor must render the server's `genreSettings.options` and save the `included`, `excluded`, and `revision` fields through the existing authenticated/CSRF-protected feedback endpoint with `action: "set-genre-settings"`. Handle 409 by loading current settings and letting the owner review their draft. Do not embed Animation/Drama/Comedy or the previous preferred genres as immutable client rules. No included genres means any; no exclusions means none. Exclusions override mixed-genre matches. Keep `finalized.excludedIds` as history notes and retain existing server-file access.

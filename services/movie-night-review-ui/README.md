@@ -1,3 +1,15 @@
+## Reference-movie search
+
+Type a title in **Find movies like…**, choose the correct title/year, then review related suggestions. **Add to shortlist** persists a screened result; use the normal Pick and Finalize controls afterward. Clear search removes only the temporary search display. Searching and adding do not finalize or start downloads.
+
+Cinemeta supplies public title and movie metadata. Explicit similarity ranks shared genres, distinctive synopsis words, directors and cast across a bounded catalog sample, with visible reasons; genre-only matches are labelled. This is not a provider-curated recommendation list or an exhaustive semantic search. Regular recommendations retain genre variety. A reference may be older or already watched; suggested results still obey the current saved genre exclusions, 2016 onward, intensity screening, and known seen/disliked filters. There may be no matches.
+
+The existing owner-authenticated, Origin/CSRF-protected feedback endpoint accepts `search-titles`, `find-similar`, `similar-status`, and `add-similar`. Jobs are principal-bound, expire after 15 minutes, permit at most two active reads, and retain at most 24 job records. Title queries are 2–120 characters; network requests are allowlisted and bounded. Changing genres invalidates in-flight/cached result admission. Only server-verified result IDs can be added. Current screening is checked again before saving and finalizing.
+
+Added metadata lives privately in `state/movie-night-review/similar-suggestions.json` (atomic mode 0600, at most 100 rows/750 KB), independently of editorial publication and saved choices. Added titles appear first and remain available to exact download-source lookup. Not for me/Seen use existing removal and Undo controls. Source-only rollback preserves this metadata and all saved state; the previous code will not display added search titles until this feature is restored. No APK or gateway route changes.
+
+Qualification/deployment is tracked in claim #302 and its stacked PR; this paragraph documents the feature contract, not deployment evidence. `deploy_similar_search.py` is the idle-only source swap/rollback helper.
+
 ## Editable genre settings — 2026-10-24
 
 Use **Edit genres** on Movie Night to add or remove included/excluded genres, then **Save genres**. An empty include list means any genre; an empty exclusion list permits all genres. A title matches any included genre, and any excluded genre vetoes mixed-genre matches. Moving a genre between the lists removes it from the other list. Cancel discards the draft.

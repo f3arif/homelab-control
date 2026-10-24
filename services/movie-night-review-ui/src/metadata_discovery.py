@@ -10,16 +10,17 @@ class CinemetaDiscovery:
     def __init__(self,transport=None):self.transport=transport
     def get(self,path,deadline):
         catalog_genres='|'.join(re.escape(quote(g,safe='')) for g in GENRES)
-        if not re.fullmatch(r'/(?:catalog/movie/top/genre=(?:'+catalog_genres+r')(?:&skip=\d{1,4})?|meta/movie/tt\d{5,12})\.json',path):raise DiscoveryUnavailable('Invalid metadata path')
+        if not re.fullmatch(r'/(?:catalog/movie/top(?:/genre=(?:'+catalog_genres+r')(?:&skip=\d{1,4})?|/search=(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2}){2,720})?|meta/movie/tt\d{5,12})\.json',path):raise DiscoveryUnavailable('Invalid metadata path')
         if self.transport:return self.transport(path)
         import requests
         remaining=deadline-time.monotonic()
         if remaining<=0:raise DiscoveryUnavailable('Metadata time budget reached')
         try:
             # Catalogs: request the pinned redirect target directly; the v3 host only issues a 307 and can stall.
-            url='https://cinemeta-catalogs.strem.io/top'+path if path.startswith('/catalog/') else BASE+path
+            catalog=path.startswith('/catalog/') and '/search=' not in path
+            url='https://cinemeta-catalogs.strem.io/top'+path if catalog else BASE+path
             r=requests.get(url,timeout=(min(3,remaining),min(10,remaining)),stream=True,allow_redirects=False)
-            if r.status_code in (301,302,307,308) and path.startswith('/catalog/'):
+            if r.status_code in (301,302,307,308) and catalog:
                 target='https://cinemeta-catalogs.strem.io/top'+path
                 location=r.headers.get('Location');r.close()
                 if location!=target:raise DiscoveryUnavailable('Unexpected metadata redirect')
