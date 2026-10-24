@@ -47,6 +47,14 @@ class GenreSettingsDeployTests(unittest.TestCase):
         self.assertEqual(b'unchanged unit', self.unit.read_bytes())
         self.assertEqual(2, len(list(self.stage.glob('*/preferences.sqlite3'))))
 
+    def test_rollback_preserves_preferences_saved_after_deployment(self):
+        self.run_action('apply')
+        saved=b'{"included":["Drama"],"excluded":[],"revision":1}'
+        (self.state/'genre-settings.json').write_bytes(saved)
+        self.run_action('rollback')
+        self.assertEqual(saved,(self.state/'genre-settings.json').read_bytes())
+        self.assertFalse((self.live/'genre_settings.py').exists())
+
     def test_live_drift_refused_before_stopping_service(self):
         (self.live/'screen.js').write_bytes(b'other agent')
         with patch.object(sys, 'argv', ['deploy', 'apply']), patch.object(release, 'service') as service:

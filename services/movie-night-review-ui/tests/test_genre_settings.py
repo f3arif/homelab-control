@@ -40,6 +40,13 @@ class EditableGenreTests(unittest.TestCase):
             self.assertEqual(0o600, store.path.stat().st_mode & 0o777)
             self.assertEqual(saved, store.save(saved))
 
+    def test_explicit_save_of_defaults_is_durable(self):
+        with tempfile.TemporaryDirectory() as td:
+            store=GenreSettingsStore(td);result=store.save(defaults())
+            self.assertEqual(1,result['revision'])
+            self.assertTrue(store.path.is_file())
+            self.assertEqual(result,GenreSettingsStore(td).read())
+
     def test_concurrent_saves_have_one_winner(self):
         with tempfile.TemporaryDirectory() as td:
             def attempt(genre):

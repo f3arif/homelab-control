@@ -131,7 +131,7 @@ class GenreSettingsStore:
             current = self.read()
             if wanted['revision'] != current['revision']:
                 raise SettingsConflict('Genre settings changed on another device. Reload settings and try again.')
-            if all(set(wanted[k]) == set(current[k]) for k in ('included', 'excluded')):
+            if self.path.exists() and all(set(wanted[k]) == set(current[k]) for k in ('included', 'excluded')):
                 return current
             wanted['revision'] += 1
             fd, temp = tempfile.mkstemp(prefix='.genre-settings-', dir=self.path.parent)
