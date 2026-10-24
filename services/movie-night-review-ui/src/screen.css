@@ -171,3 +171,16 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 .genre-tags .empty{font-size:.9rem;color:var(--muted);padding:4px 0}
 #genre-status{color:var(--warn);font-size:.9rem;overflow-wrap:anywhere}
 .genre-actions{position:sticky;bottom:-20px;background:var(--surface);padding:12px 0;border-top:1px solid var(--line)}
+
+/* Explicit reference-title search; the shortlist remains independent. */
+.similar-input{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.similar-input input{flex:1 1 220px;min-width:0;width:100%;margin:0}
+#similar-search label{margin:12px 0 6px}
+#similar-status{overflow-wrap:anywhere}
+#similar-status:empty,.similar-titles:empty{display:none}
+.similar-titles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:8px;padding:0;list-style:none}
+.similar-titles button{width:100%;text-align:left;min-height:48px;white-space:normal;overflow-wrap:anywhere}
+#similar-movies{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;margin-top:16px}
+#similar-movies .movie-card{margin:0}
+.similar-reasons{padding-left:20px;font-size:.86rem;color:var(--muted)}
+#similar-results-title{overflow-wrap:anywhere}

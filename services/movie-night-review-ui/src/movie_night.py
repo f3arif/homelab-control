@@ -98,14 +98,17 @@ def shortlist(payload, now, seen_policy=None, limit=12, genre_settings=None):
     """Consume a reviewed weekly artifact; do not invent likes or stream checks."""
     genre_settings = genre_settings or defaults()
     generated = payload.get('generatedEpoch')
-    if type(generated) is not int or not 0 <= now - generated <= 30 * 86400:
-        return []
+    fresh = type(generated) is int and 0 <= now - generated <= 30 * 86400
+    requested = set(payload.get('requestedSuggestionIds', []))
     result, ids = [], set()
     from seen_policy import SeenPolicy
     for row in (seen_policy or SeenPolicy()).filter(payload.get('movies', []) + payload.get('retainedIneligibleSelections', []) + payload.get('genreFilteredMovies', [])):
         if not isinstance(row, dict):
             continue
         imdb, name = row.get('id', ''), row.get('name', '')
+        # An explicitly added, freshly screened title does not refresh stale weekly rows.
+        if not fresh and (imdb not in requested or not screened(row, now, genre_settings)):
+            continue
         if imdb in payload.get('knownSeenIds', []) or not genre_match(row,genre_settings):continue
         if not isinstance(imdb, str) or not re.fullmatch(r'tt\d+', imdb) or imdb in ids:
             continue

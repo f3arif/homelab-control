@@ -31,6 +31,10 @@ class Controller:
         self.genre_settings=GenreSettingsStore(self.db.parent)
         self.review_enabled=review_enabled
         self.refill_provider=refill_provider
+        from similar_movies import SimilarMovies
+        self.similar=SimilarMovies(self)
+        original_payload=self.shortlist_payload
+        self.shortlist_payload=lambda:self.similar.store.merge(original_payload())
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
         self.csrf={}; self.lock=threading.RLock();self.futures={}
         self.auto_downloads=None
@@ -44,6 +48,7 @@ class Controller:
         self.auto_downloads.recover()
 
     def close(self):
+        self.similar.close()
         if self.auto_downloads:self.auto_downloads.close()
         if self.refill_provider and hasattr(self.refill_provider,'close'):self.refill_provider.close()
         self.lookup_pool.shutdown(wait=True)
@@ -75,7 +80,10 @@ class Controller:
             refill_at=self.feedback.refill_requested(principal)
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
             valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
-            return {'movies':rank_reviewed(pool,ratings,genre_settings=settings),'reviewEnabled':self.review_enabled,
+            ranked=rank_reviewed(pool,ratings,limit=len(pool),genre_settings=settings)
+            added=set(payload.get('requestedSuggestionIds',[]))
+            visible=[r for r in ranked if r['id'] in added]+[r for r in ranked if r['id'] not in added][:VISIBLE_MOVIES]
+            return {'movies':visible,'reviewEnabled':self.review_enabled,'similarSearchEnabled':self.review_enabled,
                     'downloadPolicy':{'minBytes':5_000_000_000,'maxBytes':CAP,'quality':'1080p','storage':'8 TB drive','host':'afz-zbook'},
                     'actionsEnabled':self.enabled,'autoDownloads':bool(self.auto_downloads and self.enabled),
                     'downloadRequestedIds':[x['imdb'] for x in self.auto_downloads.requests(principal)] if self.auto_downloads else [],'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
@@ -85,7 +93,7 @@ class Controller:
                     'finalized':{'ids':saved['ids'],'valid':valid,'excludedIds':[i for i in saved['ids'] if i in genre_blocked],'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
                     'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
-                    'reserveCount':max(0,len(eligible)-VISIBLE_MOVIES),
+                    'reserveCount':max(0,len(eligible)-len(visible)),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
                     'replacementAvailable':len(eligible)>VISIBLE_MOVIES}
 
@@ -334,6 +342,10 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
+        if data.get('action') in ('search-titles','find-similar','similar-status','add-similar'):
+            try:return controller.similar.action(principal,data)
+            except ValueError as exc:raise HTTPException(400,str(exc))
+            except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')
         if data.get('action')=='set-genre-settings':
             try:return controller.save_genres(principal,data.get('settings'))
             except SettingsConflict as exc:raise HTTPException(409,str(exc))

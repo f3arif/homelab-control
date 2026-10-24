@@ -16,6 +16,14 @@
 <li><strong>Pick</strong> __MIN_PICKS__–__MAX_PICKS__ movies, then finalize.</li><li id="download-step"><strong>Review server download</strong> on a finalized movie. Confirm its exact file to start.</li></ol>
 <p>Horror, creature and crime movies can include frightening scenes and strong violence. <span id="download-rule">Likes and finalized picks never start a download.</span></p></details></header>
 <div id="notice" role="status" aria-live="polite"></div>
+<section id="similar-search" class="panel" aria-labelledby="similar-title">
+<h2 id="similar-title">Find movies like…</h2>
+<p class="muted" id="similar-help">Enter a movie you enjoyed, then choose its title and year. Suggestions follow your saved genres and watched filters.</p>
+<form id="similar-form" role="search"><label for="similar-query">Movie title</label><div class="similar-input"><input id="similar-query" type="search" placeholder="e.g. Inception" minlength="2" maxlength="120" required autocomplete="off" aria-describedby="similar-help"><button id="search-titles" type="submit" disabled>Find movie</button><button id="clear-similar" class="secondary" type="button" hidden>Clear search</button></div></form>
+<p id="similar-status" role="status" aria-live="polite"></p>
+<ul id="similar-titles" class="similar-titles" aria-label="Choose the reference movie"></ul>
+<div id="similar-results" hidden><h3 id="similar-results-title" tabindex="-1"></h3><p class="muted">Related by genres, synopsis words, or shared cast and directors. Add a result to your shortlist, then use Pick. Downloads start only when you finalize.</p><div id="similar-movies"></div></div>
+</section>
 <section id="movies" aria-label="Movie suggestions"></section>
 <section id="selection" class="tray" hidden aria-label="Finalize your picks"><div class="tray-inner">
 <div class="tray-text"><p id="selection-count" role="status"></p><p id="selection-names" class="tray-names"></p></div>

@@ -56,13 +56,13 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
         free=volume.check if volume else lambda:shutil.disk_usage(root).free
         adapter=WorkerAdapter(state/'preferences.sqlite3',root,transfer_state,provider,index,enabled=True,
                               free=lambda _root:free(),storage_guard=volume.check if volume else None,verify_route=lambda imdb,size:verify_local_route(state,imdb,size))
-        controller.choices=InventoryChoices(provider,payload)
+        controller.choices=InventoryChoices(provider,controller.shortlist_payload)
         controller.inventory=ProviderInventory(provider);controller.worker=adapter;controller.index=index
         controller.free=free;controller.enabled=True
         controller.recover_jobs()
         if auto_downloads:
             from cached_sources import CachedSources
-            controller.enable_auto_downloads(CachedSources(provider,payload).acquire)
+            controller.enable_auto_downloads(CachedSources(provider,controller.shortlist_payload).acquire)
     app = create_app(controller, authorize=lambda r: PRINCIPAL if r.headers.get('x-afz-review-principal') == PRINCIPAL else None,
                      allowed_origin=origin)
     app.router.routes = [r for r in app.routes if

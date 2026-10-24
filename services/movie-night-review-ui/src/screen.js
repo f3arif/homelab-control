@@ -424,6 +424,95 @@ $('save-genres').onclick=async()=>{
     $('reload-genres').hidden=false;if(error.kind==='session'||error.kind==='page')showFailure(error);
   }finally{genreSaving=false;reviewBusy=false;if(genreDraft)fillGenreDraft();$('edit-genres').disabled=!savedGenres;selectionCount();}
 };
+let similarGeneration=0,similarBusy=false,similarEnabled=false,similarRevision=null;
+function searchControls(){
+  $('search-titles').disabled=!similarEnabled||similarBusy;
+  for(const b of $('similar-titles').querySelectorAll('button'))b.disabled=similarBusy;
+  $('similar-search').setAttribute('aria-busy',String(similarBusy));
+}
+function clearSimilar(message=''){
+  ++similarGeneration;similarBusy=false;similarRevision=null;
+  $('similar-titles').replaceChildren();$('similar-movies').replaceChildren();$('similar-results').hidden=true;
+  $('similar-status').textContent=message;$('clear-similar').hidden=!message;searchControls();
+}
+function syncSimilar(data){
+  similarEnabled=!!data.similarSearchEnabled;
+  if(similarRevision!==null&&data.genreSettings?.revision!==similarRevision)
+    clearSimilar('Your genres changed. Search again to use your latest settings.');
+  for(const b of $('similar-movies').querySelectorAll('[data-similar-add]'))
+    b.textContent=pickCards.has(b.dataset.similarAdd)?'Show in shortlist':'Add to shortlist';
+  searchControls();
+}
+async function searchJob(data,generation){
+  let result=await api('feedback',data);const deadline=performance.now()+75000;
+  while(result.state==='searching'){
+    if(generation!==similarGeneration)return null;
+    if(performance.now()>deadline)throw new Error('This search is taking too long. Please try again shortly.');
+    await new Promise(resolve=>setTimeout(resolve,750));
+    if(generation!==similarGeneration)return null;
+    result=await api('feedback',{action:'similar-status',jobId:result.jobId});
+  }
+  return generation===similarGeneration?result:null;
+}
+function similarError(error){
+  $('similar-status').textContent=error.message+' Your picks have been kept.';
+  if(error.kind==='session'||error.kind==='page')showFailure(error);
+}
+async function findSimilar(title,titleJob){
+  if(similarBusy)return;
+  const generation=++similarGeneration;similarBusy=true;similarRevision=savedGenres?.revision??null;searchControls();
+  $('similar-movies').replaceChildren();$('similar-results').hidden=true;
+  $('similar-status').textContent=`Finding movies related to ${title.name}${title.releaseInfo?' ('+title.releaseInfo+')':''}… This can take about a minute.`;
+  try{
+    const result=await searchJob({action:'find-similar',jobId:titleJob,imdb:title.id},generation);
+    if(!result)return;
+    const name=result.reference.name+(result.reference.releaseInfo?' ('+result.reference.releaseInfo+')':'');
+    $('similar-results-title').textContent='Movies related to '+name;
+    $('similar-status').textContent=result.movies.length?`${result.movies.length} suggestions match your current filters.${result.partial?' Some metadata was unavailable; these are the verified matches.':''}`:
+      'No related movies matched your saved genres and watched filters. Try another title or use Edit genres.';
+    $('similar-results').hidden=!result.movies.length;
+    for(const movie of result.movies){
+      const card=cardBody(movie,'h4'),reasons=document.createElement('ul');reasons.className='similar-reasons';
+      for(const text of movie.similarReasons||[]){const li=document.createElement('li');li.textContent=text;reasons.append(li);}
+      const add=document.createElement('button');add.type='button';add.dataset.similarAdd=movie.id;
+      add.textContent=pickCards.has(movie.id)?'Show in shortlist':'Add to shortlist';
+      add.onclick=async()=>{
+        if(reviewBusy)return;
+        if(!pickCards.has(movie.id)){
+          reviewBusy=true;++loadGeneration;add.disabled=true;selectionCount();
+          try{
+            render(await api('feedback',{action:'add-similar',jobId:result.jobId,imdb:movie.id}));
+            toast('Added “'+movie.name+'” to your shortlist. Use Pick to select it.');
+          }catch(error){similarError(error);if(error.kind==='connection')load();return;}
+          finally{reviewBusy=false;add.disabled=false;selectionCount();}
+        }
+        const target=pickCards.get(movie.id)?.card;
+        if(target){target.tabIndex=-1;target.scrollIntoView({block:'center'});target.focus({preventScroll:true});}
+      };
+      card.append(reasons,add);$('similar-movies').append(card);
+    }
+    if(result.movies.length)$('similar-results-title').focus({preventScroll:true});
+  }catch(error){if(generation===similarGeneration)similarError(error);}
+  finally{if(generation===similarGeneration){similarBusy=false;searchControls();}}
+}
+$('similar-form').onsubmit=async event=>{
+  event.preventDefault();if(similarBusy||!similarEnabled)return;
+  clearSimilar();const generation=++similarGeneration;similarBusy=true;similarRevision=savedGenres?.revision??null;
+  $('clear-similar').hidden=false;$('similar-status').textContent='Looking up movie titles…';searchControls();
+  try{
+    const result=await searchJob({action:'search-titles',query:$('similar-query').value},generation);
+    if(!result)return;
+    $('similar-status').textContent=result.titles.length?'Choose the movie you mean to find related suggestions.':'No movie titles found. Check the spelling or try a shorter title.';
+    for(const title of result.titles){
+      const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.className='secondary';
+      button.textContent=title.name+' · '+(title.releaseInfo||'Year unavailable');
+      button.onclick=()=>findSimilar(title,result.jobId);li.append(button);$('similar-titles').append(li);
+    }
+  }catch(error){if(generation===similarGeneration)similarError(error);}
+  finally{if(generation===similarGeneration){similarBusy=false;searchControls();}}
+};
+$('clear-similar').onclick=()=>{clearSimilar();$('similar-query').value='';$('similar-query').focus();};
+
 function render(data){
   renderGenreSummary(data);
   autoDownloads=!!data.autoDownloads;downloadRequestedIds=new Set(data.downloadRequestedIds||[]);
@@ -486,6 +575,7 @@ function render(data){
   }
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
+  syncSimilar(data);
   updateCardDownloads();
 }
 $('request-refill').onclick=()=>reviewWrite('feedback',{action:'request-refill',requestId:crypto.randomUUID()});
@@ -502,7 +592,7 @@ async function load(){
   try{const data=await api('shortlist');if(generation===loadGeneration){recoveryAttempts=0;render(data);if(data.actionsEnabled)loadDownloads();if(uncertainWrite){uncertainWrite=false;say('Connection recovered. Saved choices reloaded; check them before repeating your last action.');}}}
   catch(error){if(generation===loadGeneration)showFailure(error);}
 }
-window.addEventListener('pagehide',()=>{if(timer)clearTimeout(timer);if(downloadTimer)clearTimeout(downloadTimer);if(refillTimer)clearTimeout(refillTimer);hideToast();stopRecovery();});
+window.addEventListener('pagehide',()=>{++similarGeneration;if(timer)clearTimeout(timer);if(downloadTimer)clearTimeout(downloadTimer);if(refillTimer)clearTimeout(refillTimer);hideToast();stopRecovery();});
 window.addEventListener('focus',load);
 window.addEventListener('online',()=>{recoveryAttempts=0;load();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
