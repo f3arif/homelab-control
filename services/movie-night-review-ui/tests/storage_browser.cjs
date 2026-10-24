@@ -33,6 +33,9 @@ const fs=require('fs'),assert=require('node:assert/strict');
     await p.reload({waitUntil:'networkidle'});await p.waitForSelector('#download-list [data-state="indexed"]');
    }
    await p.waitForSelector('#download-list [data-state="indexed"]');
+   await p.waitForSelector('#finalized-movies .card-download[data-state="ready"]');
+   assert.equal(await p.locator('#finalized-movies .server-file:visible').count(),1);
+   assert.equal(await p.locator('#finalized-movies .server-file:visible').getAttribute('href'),await p.locator('#download-list [data-state="indexed"] a').getAttribute('href'));
    const state=await p.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,cards:document.querySelectorAll('#movies .movie-card').length,
     jobs:document.querySelectorAll('#download-list article').length,button:document.querySelector('#finalize').textContent,buttonDisabled:document.querySelector('#finalize').disabled,
     smallButtons:[...document.querySelectorAll('button')].filter(b=>b.getClientRects().length&&b.getBoundingClientRect().height<40).map(b=>b.textContent)}));

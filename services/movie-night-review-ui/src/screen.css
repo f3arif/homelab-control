@@ -144,4 +144,14 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 
 .download-row{padding:16px 0;border-top:1px solid #334155}.download-row progress{width:100%}#download-list a{display:inline-flex;padding:12px;min-height:44px;align-items:center}#facts dd{overflow-wrap:anywhere}
 
+/* Availability belongs with each finalized movie, and updates without replacing its controls. */
+.card-download{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.card-download-status{margin:0;font-weight:750}
+.card-download[data-state="ready"] .card-download-status{color:var(--accent)}
+.card-download[data-state="failed"] .card-download-status,.card-download[data-state="unavailable"] .card-download-status{color:var(--warn)}
+.card-download-detail{margin:4px 0 0}
+.card-download progress{width:100%;margin-top:8px}
+.card-download .buttons{margin-top:10px}
+.server-file{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:9px 16px;border:1px solid var(--accent);border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:650;text-align:center;text-decoration:none}
+
 #source-status{overflow-wrap:anywhere}#source-status:empty,#confirm-error:empty{display:none}#source-reload{display:inline-flex;align-items:center;min-height:44px;padding:9px 16px;border:1px solid var(--line);border-radius:10px;font-weight:650}dialog[aria-busy="true"] #source-status{border-left:3px solid var(--accent);padding-left:12px}
