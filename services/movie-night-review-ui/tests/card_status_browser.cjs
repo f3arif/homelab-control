@@ -58,7 +58,7 @@ function item(i,state){return {id:'job-'+i,imdb:ids[i],name:movies[i].name,state
   fail=false;jobs=states.map((_,i)=>item(i,'indexed'));
   await cards.nth(0).getByRole('button',{name:'Check status',exact:true}).click();
   await p.waitForFunction(()=>document.querySelectorAll('#finalized-movies .server-file:not([hidden])').length===10);
-  assert.equal(await p.locator('#finalize').innerText(),'All ready on server ✓');
+  assert.equal(await p.locator('#finalize').innerText(),'All ready ✓');
   assert.match(await p.locator('#finalized-status').innerText(),/10 of 10 ready on server/);
   await p.reload({waitUntil:'networkidle'});await p.waitForFunction(()=>document.querySelectorAll('#finalized-movies .server-file:not([hidden])').length===10);
   const layout=await p.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,smallControls:[...document.querySelectorAll('button,.server-file')].filter(x=>x.getClientRects().length&&x.getBoundingClientRect().height<40).length}));

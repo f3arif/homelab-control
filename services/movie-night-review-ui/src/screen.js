@@ -172,10 +172,10 @@ function selectionCount(){
   const ready=downloadDataState==='current'?[...selected].filter(id=>serverReady(downloadItems.get(id))).length:0;
   const dots=document.createElement('span');dots.className='dots';dots.setAttribute('aria-hidden','true');
   for(let i=0;i<maxPicks;i++){const d=document.createElement('i');if(i<n)d.className='on';dots.append(d);}
-  const label=done?(autoDownloads&&ready?`${ready} of ${n} ready on server`:`${n} picks ${autoDownloads?'sent to downloads':'finalized'}`):n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
+  const label=done?(autoDownloads&&ready?`${ready} of ${n} ready`:`${n} picks ${autoDownloads?'sent to downloads':'finalized'}`):n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
   $('selection-count').replaceChildren(dots,document.createTextNode(label));
   $('selection-names').textContent=n?[...selected].map(id=>titles.get(id)||'').filter(Boolean).join(' · '):`Use Pick on ${minPicks}–${maxPicks} movies.`;
-  $('finalize').textContent=autoDownloads?(done?(n>0&&ready===n?'All ready on server ✓':'Downloads requested ✓'):`Finalize & download${n>=minPicks?' '+n:''}`):(done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks');
+  $('finalize').textContent=autoDownloads?(done?(n>0&&ready===n?'All ready ✓':'Downloads requested ✓'):`Finalize & download${n>=minPicks?' '+n:''}`):(done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks');
   $('finalize').disabled=reviewBusy||done||n<minPicks||n>maxPicks;
   for(const [id,ui] of pickCards)paintPick(id,ui);
 }
