@@ -43,13 +43,15 @@ class FeedbackStore:
         with closing(self.connect()) as db:
             row=db.execute('SELECT ids,valid FROM movie_finalized WHERE principal=?',(principal,)).fetchone()
         return {'ids':json.loads(row[0]),'valid':bool(row[1])} if row else {'ids':[],'valid':False}
-    def finalize(self,principal,ids,eligible):
+    def finalize(self,principal,ids,eligible,on_saved=None):
         self.principal(principal)
         if not isinstance(ids,list) or not MIN_PICKS<=len(ids)<=MAX_PICKS or any(not isinstance(x,str) for x in ids) or len(set(ids))!=len(ids):
             raise ValueError(f'Select {MIN_PICKS} to {MAX_PICKS} different movies to finalize.')
         if not set(ids)<=set(eligible):raise ValueError('A selected movie is no longer eligible. Refresh your picks.')
         with closing(self.connect()) as db,db:
-            db.execute('INSERT INTO movie_finalized VALUES(?,?,1,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,valid=1,updated=excluded.updated',(principal,json.dumps(ids),int(time.time())))
+            db.execute('BEGIN IMMEDIATE')
+            if on_saved is None or on_saved(db) is not False:
+                db.execute('INSERT INTO movie_finalized VALUES(?,?,1,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,valid=1,updated=excluded.updated',(principal,json.dumps(ids),int(time.time())))
         return {'ids':ids,'valid':True,'queued':False}
 
     def refill_requested(self,principal):
@@ -79,3 +81,4 @@ def rank_reviewed(rows,ratings,limit=VISIBLE_MOVIES):
         value=ratings.get(row['id'],{}).get('value')
         result.append(dict(row,feedback=value,similarToLiked=bool(liked_tags & set(row.get('fitTags',[])))))
     return result
+

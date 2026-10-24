@@ -1,5 +1,5 @@
 """Reviewed one-shot acquisition candidate. Default CLI is offline validation.
-Execution requires separate approval; credentials and signed URLs remain RAM-only.
+Execution requires recorded owner authorization; credentials and signed URLs remain RAM-only.
 """
 import argparse, base64, contextlib, fcntl, hashlib, http.client, ipaddress
 import json, os, re, shutil, socket, ssl, time
@@ -36,7 +36,7 @@ def validate_manifest(m):
     return rows,cost
 
 def existing_key(path=CONFIG):
-    # Not invoked by dry-run, tests, installer or import. Access approval pending.
+    # Not invoked by dry-run, tests, installer or import.
     keys=set()
     for a in json.loads(path.read_text()).get('addons',[]):
         u=urlsplit(a.get('transportUrl') or a.get('transportURL') or '')
@@ -50,7 +50,7 @@ def existing_key(path=CONFIG):
     return keys.pop()
 
 @contextlib.contextmanager
-def https_get(url,headers=None,allowed_statuses=(200,)):
+def https_request(url,headers=None,allowed_statuses=(200,),method="GET",body=None):
     u=urlsplit(url)
     if u.scheme!='https' or not u.hostname or u.username or u.password or u.fragment or u.port not in (None,443): raise Rejected('unsafe-provider-url')
     addresses={x[4][0] for x in socket.getaddrinfo(u.hostname,443,type=socket.SOCK_STREAM)}
@@ -60,12 +60,15 @@ def https_get(url,headers=None,allowed_statuses=(200,)):
     raw=socket.create_connection((sorted(addresses)[0],443),timeout=15)
     try:
         conn.sock=conn._context.wrap_socket(raw,server_hostname=u.hostname)
-        conn.request('GET',u.path+('?' +u.query if u.query else ''),headers={'Accept-Encoding':'identity',**(headers or {})})
+        conn.request(method,u.path+('?' +u.query if u.query else ''),body=body,headers={'Accept-Encoding':'identity',**(headers or {})})
         response=conn.getresponse()
         if response.status not in allowed_statuses: raise Rejected('provider-http-status') # no redirects/retries
         yield response
     finally:
         conn.close();raw.close()
+
+def https_get(url,headers=None,allowed_statuses=(200,)):
+    return https_request(url,headers,allowed_statuses)
 
 class Provider:
     def __init__(self,key): self.__key=key
@@ -77,6 +80,21 @@ class Provider:
             obj=json.loads(data)
             if obj.get('success') is not True: raise Rejected('provider-api-failure')
             return obj.get('data')
+    def add_cached(self,info_hash):
+        if not isinstance(info_hash,str) or not re.fullmatch('[a-f0-9]{40}',info_hash):raise Rejected('invalid-source-hash')
+        from uuid import uuid4
+        boundary='afz-'+uuid4().hex
+        fields={'magnet':'magnet:?xt=urn:btih:'+info_hash,'seed':'3','allow_zip':'false','add_only_if_cached':'true'}
+        body=(''.join('--'+boundary+'\r\nContent-Disposition: form-data; name="'+k+'"\r\n\r\n'+v+'\r\n' for k,v in fields.items())+'--'+boundary+'--\r\n').encode()
+        headers={'Authorization':'Bearer '+self.__key,'Content-Type':'multipart/form-data; boundary='+boundary}
+        with https_request('https://api.torbox.app/v1/api/torrents/createtorrent',headers,method='POST',body=body) as response:
+            raw=response.read(2_000_001)
+            if len(raw)>2_000_000:raise Rejected('api-response-limit')
+            result=json.loads(raw)
+            if result.get('success') is not True:raise Rejected('cached-source-add-failed')
+            data=result.get('data') or {};tid=data.get('torrent_id')
+            if type(tid) is not int or tid<0:raise Rejected('provider-identity-missing')
+            return tid
     def resolve(self,row):
         data=self._api('mylist',{'id':row['torrentId']},True)
         torrents=data if isinstance(data,list) else [data]
@@ -187,3 +205,4 @@ def main():
     except Exception as e:
         print(json.dumps({'ok':False,'code':str(e) if isinstance(e,Rejected) else 'sanitized-failure'}));raise SystemExit(1)
 if __name__=='__main__': main()
+

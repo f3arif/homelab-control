@@ -5,6 +5,7 @@ const minPicks = Number(document.querySelector('meta[name="mn-min-picks"]').cont
 const maxPicks = Number(document.querySelector('meta[name="mn-max-picks"]').content);
 const $ = id => document.getElementById(id);
 let pending = null, job = null, timer = null, loadGeneration = 0;
+let autoDownloads=false,downloadRequestedIds=new Set(),downloadGeneration=0;
 let sourceBusy=false,sourceGeneration=0,sourceMovie=null,downloadTimer=null;
 let selected=new Set(), initialized=false, reviewBusy=false;let refillTimer=null, recoveryTimer=null, recoveryAttempts=0, uncertainWrite=false;
 let toastTimer=null, finalizedIds=[], finalizedValid=false;const titles=new Map(), pickCards=new Map();
@@ -164,13 +165,13 @@ $('back').onclick=dismissSource;
 $('cancel').onclick=async()=>{if(job)try{await api('cancel',{confirmationId:job});say('Cancellation requested. Partial files will be preserved.');await poll();}catch(e){say(e.message);}};
 function sameAsFinalized(){return finalizedValid&&finalizedIds.length===selected.size&&finalizedIds.every(id=>selected.has(id));}
 function selectionCount(){
-  const n=selected.size, done=sameAsFinalized();
+  const n=selected.size, done=sameAsFinalized()&&(!autoDownloads||[...selected].every(id=>downloadRequestedIds.has(id)));
   const dots=document.createElement('span');dots.className='dots';dots.setAttribute('aria-hidden','true');
   for(let i=0;i<maxPicks;i++){const d=document.createElement('i');if(i<n)d.className='on';dots.append(d);}
-  const label=done?`${n} picks finalized`:n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
+  const label=done?`${n} picks ${autoDownloads?'sent to downloads':'finalized'}`:n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
   $('selection-count').replaceChildren(dots,document.createTextNode(label));
   $('selection-names').textContent=n?[...selected].map(id=>titles.get(id)||'').filter(Boolean).join(' · '):`Use Pick on ${minPicks}–${maxPicks} movies.`;
-  $('finalize').textContent=done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks';
+  $('finalize').textContent=autoDownloads?(done?'Downloads requested ✓':`Finalize & download${n>=minPicks?' '+n:''}`):(done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks');
   $('finalize').disabled=reviewBusy||done||n<minPicks||n>maxPicks;
   for(const [id,ui] of pickCards)paintPick(id,ui);
 }
@@ -191,34 +192,50 @@ async function reviewWrite(path,data){
 function watchButtons(movie,enabled){
   const actions=document.createElement('div');actions.className='buttons';
   if(!enabled){actions.hidden=true;return actions;}
-  const download=document.createElement('button');download.textContent='Review server download';
-  download.onclick=()=>propose(movie.id,movie.name);
+  const download=document.createElement('button');download.textContent=autoDownloads?'View server downloads':'Review server download';
+  download.onclick=()=>autoDownloads?$('downloads').scrollIntoView({block:'start'}):propose(movie.id,movie.name);
   actions.append(download);return actions;
 }
 async function loadDownloads(){
   if(downloadTimer)clearTimeout(downloadTimer);
+  const generation=++downloadGeneration;
   try{
-    const data=await api('downloads');const panel=$('downloads'),list=$('download-list');list.replaceChildren();panel.hidden=false;
-    if(!data.jobs.length){const p=document.createElement('p');p.textContent='No downloads started. Finalize your picks, then review each server download.';list.append(p);}
-    for(const item of data.jobs){
-      const row=document.createElement('article');row.className='download-row';
+    const data=await api('downloads');if(generation!==downloadGeneration)return;
+    const panel=$('downloads'),list=$('download-list');list.replaceChildren();panel.hidden=false;
+    const requests=data.requests||[],jobs=new Map(data.jobs.map(j=>[j.id,j]));
+    const linked=new Set(requests.map(r=>r.jobId).filter(Boolean));
+    downloadRequestedIds=new Set(requests.map(r=>r.imdb));selectionCount();
+    const items=[...requests.map(r=>({...r,...(jobs.get(r.jobId)||{}),requestId:r.id})),...data.jobs.filter(j=>!linked.has(j.id))];
+    for(const item of items)if(item.state==='linked'){item.state='checking';item.message='Refreshing transfer status.';}
+    const priority={downloading:0,approved:1,checking:2,queued:3,indexed:4,'playback-tested':4,downloaded:4,unavailable:6,failed:6,cancelled:7};
+    items.sort((a,b)=>(priority[a.state]??5)-(priority[b.state]??5));
+    if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to HP Envy.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
+    const labels={queued:'Queued',checking:'Finding a source',unavailable:'No ready source',failed:'Needs attention',cancelled:'Cancelled',approved:'Queued for transfer',downloading:'Downloading',downloaded:'Downloaded',indexed:'Ready on server','playback-tested':'Ready on server'};
+    for(const item of items){
+      const row=document.createElement('article');row.className='download-row';row.dataset.imdb=item.imdb;row.dataset.state=item.state;
       const title=document.createElement('h3');title.textContent=item.name;
-      const state=document.createElement('p');state.textContent=item.state+' ? '+(item.bytesReceived/1e9).toFixed(2)+' of '+(item.size/1e9).toFixed(2)+' GB';
-      const progress=document.createElement('progress');progress.max=item.size;progress.value=item.bytesReceived;progress.setAttribute('aria-label',item.name+' downloaded bytes');
+      const state=document.createElement('p');state.setAttribute('role','status');
+      state.textContent=(autoDownloads?(labels[item.state]||item.state):item.state)+(item.size?' · '+((item.bytesReceived||0)/1e9).toFixed(2)+' of '+(item.size/1e9).toFixed(2)+' GB':'');
+      row.append(title,state);
+      if(item.size){const progress=document.createElement('progress');progress.max=item.size;progress.value=item.bytesReceived||0;progress.setAttribute('aria-label',item.name+' downloaded bytes');row.append(progress);}
       const detail=document.createElement('p');detail.className='muted';
-      detail.textContent=item.downloaded?(item.indexed?'Verified file available on HP Envy. Playback has not been tested.':'Verified file preserved on HP Envy; library availability needs checking.'):(['failed','cancelled'].includes(item.state)?'Transfer stopped. Any partial file is preserved; it will not be overwritten.':'Downloading to HP Envy. This does not save a copy on your phone.');
-      row.append(title,state,progress,detail);
-      if(['approved','downloading'].includes(item.state)){
+      detail.textContent=item.downloaded?(item.indexed?'Verified file available on HP Envy. Playback has not been tested.':'Verified file preserved on HP Envy; library availability needs checking.'):
+        item.jobId||item.size?(['failed','cancelled'].includes(item.state)?'Transfer stopped. Any partial file is preserved; it will not be overwritten.':'Saving to HP Envy. You can close this page and return to check progress.'):
+        item.message||'Waiting for the server.';
+      row.append(detail);
+      if(['queued','checking','approved','downloading'].includes(item.state)){
         const cancel=document.createElement('button');cancel.className='secondary';cancel.textContent='Cancel download';
-        cancel.onclick=async()=>{cancel.disabled=true;try{await api('cancel',{confirmationId:item.id});await loadDownloads();}catch(e){showFailure(e);}finally{cancel.disabled=false;}};row.append(cancel);
+        cancel.onclick=async()=>{cancel.disabled=true;try{await api('cancel',item.requestId?{requestId:item.requestId}:{confirmationId:item.id});toast('Cancellation requested.');await loadDownloads();}catch(e){showFailure(e);}finally{cancel.disabled=false;}};row.append(cancel);
       }
-      if(item.indexed){
-        const link=document.createElement('a');link.href=base+'/media/'+encodeURIComponent(item.imdb);link.textContent='Save a copy to this device';link.className='secondary';row.append(link);
+      if(item.canRetry&&finalizedValid&&finalizedIds.includes(item.imdb)){
+        const retry=document.createElement('button');retry.className='secondary';retry.textContent='Retry download';
+        retry.onclick=async()=>{retry.disabled=true;if(await reviewWrite('finalize',{ids:finalizedIds,startDownloads:true,requestId:crypto.randomUUID(),retryDownloads:[item.imdb]})){toast('Download requested again.');await loadDownloads();}else retry.disabled=false;};row.append(retry);
       }
+      if(item.indexed){const link=document.createElement('a');link.href=base+'/media/'+encodeURIComponent(item.imdb);link.textContent='Save a copy to this device';link.className='secondary';row.append(link);}
       list.append(row);
     }
-    if(data.jobs.some(x=>['approved','downloading'].includes(x.state)))downloadTimer=setTimeout(loadDownloads,3000);
-  }catch(error){showFailure(error);}
+    if(items.some(x=>['queued','checking','approved','downloading'].includes(x.state)))downloadTimer=setTimeout(loadDownloads,3000);
+  }catch(error){if(generation===downloadGeneration)showFailure(error);}
 }
 function movieOverview(movie,heading='h2'){
   const overview=document.createElement('div');overview.className='movie-overview';
@@ -295,6 +312,10 @@ function togglePick(movie){
   selectionCount();
 }
 function render(data){
+  autoDownloads=!!data.autoDownloads;downloadRequestedIds=new Set(data.downloadRequestedIds||[]);
+  $('download-step').textContent=autoDownloads?'Finalize & download saves your picks and starts their server downloads automatically.':'Review server download on a finalized movie. Confirm its exact file to start.';
+  $('download-rule').textContent=autoDownloads?'The server chooses a suitable cached 1080p file. Downloads keep running after you close the page. Likes and Pick alone do not start downloads.':'Likes and finalized picks never start a download.';
+  $('finalized-help').textContent=autoDownloads?'See Server downloads for progress, unavailable sources, retry and cancellation. Files are saved on HP Envy.':'Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.';
   if(!initialized){selected=new Set(data.finalized?.valid?data.finalized.ids:[]);initialized=true;}
   selected=new Set([...selected].filter(id=>(data.eligibleIds||[]).includes(id)));
   $('movies').replaceChildren();$('finalized-movies').replaceChildren();$('removed-movies').replaceChildren();pickCards.clear();
@@ -342,7 +363,7 @@ function render(data){
   $('selection').hidden=!data.reviewEnabled;
   const f=data.finalized||{ids:[],valid:false,movies:[]};$('finalized').hidden=!f.ids.length;
   finalizedIds=f.ids||[];finalizedValid=!!f.valid;
-  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. No download starts until you confirm an exact file.`:f.reason==='genre-filter'?'Your saved selections are retained, but a title is ineligible under your no Comedy filter. Choose eligible replacements.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
+  $('finalized-status').textContent=f.valid?`${f.ids.length} movies finalized. ${autoDownloads?(f.ids.every(id=>downloadRequestedIds.has(id))?'Their server download requests are listed below.':'Press Finalize & download to start their server downloads.'):'No download starts until you confirm an exact file.'}`:f.reason==='genre-filter'?'Your saved selections are retained, but a title is ineligible under your no Comedy filter. Choose eligible replacements.':f.reason==='shortlist-stale'?'Your saved selections are retained. Refresh the weekly suggestions before confirming eligibility.':`Your saved selections are retained but need review because eligibility or feedback changed. Finalize ${minPicks}–${maxPicks} eligible movies again.`;
   for(const movie of f.movies){const card=cardBody(movie,'h3');if(f.valid&&data.actionsEnabled)card.append(watchButtons(movie,true));$('finalized-movies').append(card);}
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
@@ -350,9 +371,10 @@ function render(data){
 }
 $('request-refill').onclick=()=>reviewWrite('feedback',{action:'request-refill',requestId:crypto.randomUUID()});
 $('finalize').onclick=async()=>{
-  if(await reviewWrite('finalize',{ids:[...selected]})&&finalizedValid&&!$('finalized').hidden){
-    toast('Picks finalized. No download starts until you confirm an exact file.');
-    $('finalized').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});$('finalized-title').focus({preventScroll:true});
+  if(await reviewWrite('finalize',{ids:[...selected],...(autoDownloads?{startDownloads:true,requestId:crypto.randomUUID()}:{})})&&finalizedValid&&!$('finalized').hidden){
+    toast(autoDownloads?'Picks finalized. Server downloads requested.':'Picks finalized. No download starts until you confirm an exact file.');
+    if(autoDownloads)await loadDownloads();
+    $(autoDownloads?'downloads':'finalized').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});$(autoDownloads?'downloads-title':'finalized-title').focus({preventScroll:true});
   }
 };
 async function load(){
@@ -366,3 +388,4 @@ window.addEventListener('focus',load);
 window.addEventListener('online',()=>{recoveryAttempts=0;load();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 load();
+

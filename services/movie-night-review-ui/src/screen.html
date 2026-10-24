@@ -11,8 +11,8 @@
 <li><strong>Like</strong> anything that interests you.</li>
 <li><strong>Not for me</strong> replaces a suggestion. You can restore it later.</li>
 <li><strong>Seen</strong> hides a movie you’ve already watched. It won’t come back.</li>
-<li><strong>Pick</strong> __MIN_PICKS__–__MAX_PICKS__ movies, then finalize.</li><li><strong>Review server download</strong> on a finalized movie. Confirm its exact file to start.</li></ol>
-<p>Horror, creature and crime movies can include frightening scenes and strong violence. Likes and finalized picks never start a download.</p></details></header>
+<li><strong>Pick</strong> __MIN_PICKS__–__MAX_PICKS__ movies, then finalize.</li><li id="download-step"><strong>Review server download</strong> on a finalized movie. Confirm its exact file to start.</li></ol>
+<p>Horror, creature and crime movies can include frightening scenes and strong violence. <span id="download-rule">Likes and finalized picks never start a download.</span></p></details></header>
 <div id="notice" role="status" aria-live="polite"></div>
 <section id="movies" aria-label="Movie suggestions"></section>
 <section id="selection" class="tray" hidden aria-label="Finalize your picks"><div class="tray-inner">
@@ -21,9 +21,9 @@
 <section id="refill" class="panel" aria-labelledby="refill-title"><h2 id="refill-title">Want more options?</h2><p id="reserve-status"></p>
 <button id="request-refill" class="secondary" type="button">Request more picks</button><p id="refill-status" class="muted" role="status">Requests wait for the next reviewed update; they do not start downloads.</p></section>
 <section id="finalized" class="panel" hidden aria-labelledby="finalized-title"><h2 id="finalized-title" tabindex="-1">Your finalized picks</h2><p id="finalized-status"></p>
-<div id="finalized-movies"></div><p class="muted">Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.</p></section>
+<div id="finalized-movies"></div><p id="finalized-help" class="muted">Next, review each exact file, quality, codec, size, available storage and HP server destination before confirming its download.</p></section>
 <details id="removed" class="panel" hidden><summary>Removed or seen <span id="removed-count"></span></summary><ul id="removed-movies"></ul></details>
-<section id="downloads" class="panel" hidden aria-labelledby="downloads-title"><h2 id="downloads-title">Server downloads</h2><p class="muted">Files are saved on HP Envy. After completion you can save a separate copy to this device.</p><div id="download-list"></div></section>
+<section id="downloads" class="panel" hidden aria-labelledby="downloads-title"><h2 id="downloads-title" tabindex="-1">Server downloads</h2><p class="muted">Files are saved on HP Envy. After completion you can save a separate copy to this device.</p><div id="download-list"></div></section>
 <section id="stream-result" class="panel" hidden><h2>Checked source</h2><p>Source and connection checked recently. Actual playback has not been verified.</p><a id="stream-now">Stream now</a></section>
 <section id="job" class="panel" hidden aria-labelledby="job-title"><h2 id="job-title">Your download</h2><p id="job-status" role="status" aria-live="polite"></p>
 <progress id="progress" value="0" max="1" aria-label="Downloaded bytes"></progress><p id="completion"></p>
@@ -35,3 +35,4 @@
 <label for="reply">Type <strong>yes</strong> to confirm this exact download</label><input id="reply" autocomplete="off" spellcheck="false"></div>
 <p id="confirm-error" role="alert"></p><div class="buttons"><button id="confirm-yes" type="button" hidden disabled>Confirm download</button><button id="retry-source" type="button" hidden>Check again</button><a id="source-reload" href="__BASE__/" hidden>Reload Movie Night</a><button id="back" class="secondary" type="button">Close</button></div></dialog>
 </main></body></html>
+
