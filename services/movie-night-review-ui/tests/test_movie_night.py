@@ -156,7 +156,8 @@ class RowPolicyTests(unittest.TestCase):
     def row(self, **kw):
         r={'id':'tt12345','name':'Fixture Movie','year':2024,'scareLevel':'low','intensityReviewed':True,'intenseSupernatural':False,'fitTags':['twists']};r.update(kw)
         return shortlist({'generatedEpoch':1000,'movies':[r]}, 1100)
-    def test_stated_taste_reason(self): self.assertIn('stated preference',self.row()[0]['description'])
+    def test_legacy_reason_does_not_claim_theme_similarity(self):
+        self.assertIn('Reviewed Movie Night suggestion.',self.row()[0]['description'])
     def test_seen_heretic(self): self.assertEqual([], self.row(name='Heretic'))
     def test_seen_companion(self): self.assertEqual([], self.row(name='Companion'))
     def test_no_inferred_talk_to_me_watch(self): self.assertEqual(1,len(self.row(name='Talk to Me')))
