@@ -8,7 +8,7 @@ from movie_night import *
 
 def choice(**kw):
     return replace(Choice('tt12345', 'Fixture Movie', 2024, 'Theatrical', 'torbox', 12, 3,
-                          'Fixture.Movie.1080p.mkv', '1080p', 'HEVC', 4_000_000_000,
+                          'Fixture.Movie.1080p.mkv', '1080p', 'HEVC', 5_000_000_000,
                           ROOT + '/Fixture.Movie.2024.mkv'), **kw)
 
 
@@ -142,14 +142,14 @@ class ApprovalTests(unittest.TestCase):
 
 
 class RowPolicyTests(unittest.TestCase):
-    def test_at_nine_gb(self): self.assertEqual(CAP, select_compact([choice(size=CAP)]).size)
-    def test_above_nine_gb(self): self.assertIsNone(select_compact([choice(size=CAP+1)]))
+    def test_at_fifteen_gb(self): self.assertEqual(CAP, select_compact([choice(size=CAP)]).size)
+    def test_above_fifteen_gb(self): self.assertIsNone(select_compact([choice(size=CAP+1)]))
     def test_unknown_size(self): self.assertIsNone(select_compact([choice(size=None)]))
     def test_zero_size(self): self.assertIsNone(select_compact([choice(size=0)]))
     def test_bool_size(self): self.assertIsNone(select_compact([choice(size=True)]))
     def test_compact_over_larger(self): self.assertEqual(5_000_000_000, select_compact([choice(size=5_000_000_001),choice(size=5_000_000_000)]).size)
-    def test_three_to_five_preferred(self): self.assertEqual(4_000_000_000, select_compact([choice(size=2_000_000_000), choice()]).size)
-    def test_smaller_before_large_fallback(self): self.assertEqual(2_000_000_000, select_compact([choice(size=2_000_000_000),choice(size=8_000_000_000)]).size)
+    def test_at_least_five_required(self): self.assertEqual(5_000_000_000, select_compact([choice(size=2_000_000_000), choice()]).size)
+    def test_small_file_never_used_as_fallback(self): self.assertEqual(8_000_000_000, select_compact([choice(size=2_000_000_000),choice(size=8_000_000_000)]).size)
     def test_wrong_resolution(self): self.assertIsNone(select_compact([choice(quality='2160p')]))
     def test_path_traversal(self): self.assertIsNone(select_compact([choice(destination=ROOT+'/../escape.mkv')]))
 

@@ -11,7 +11,7 @@ import threading
 import time
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
-from movie_night import ApprovalStore, Choice, QUOTA, ROOT, select_compact, shortlist, stream_status, excluded_genres
+from movie_night import ApprovalStore, Choice, QUOTA, ROOT, MIN_BYTES, CAP, select_compact, shortlist, stream_status, excluded_genres
 from movie_posters import PosterCache, image_mime
 from feedback import MIN_PICKS, MAX_PICKS, VISIBLE_MOVIES
 
@@ -73,6 +73,7 @@ class Controller:
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
             valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
             return {'movies':rank_reviewed(pool,ratings),'reviewEnabled':self.review_enabled,
+                    'downloadPolicy':{'minBytes':5_000_000_000,'maxBytes':CAP,'quality':'1080p','storage':'8 TB drive','host':'afz-zbook'},
                     'actionsEnabled':self.enabled,'autoDownloads':bool(self.auto_downloads and self.enabled),
                     'downloadRequestedIds':[x['imdb'] for x in self.auto_downloads.requests(principal)] if self.auto_downloads else [],'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
                     'eligibleIds':list(eligible),'selectionLimits':{'min':MIN_PICKS,'max':MAX_PICKS,'visible':VISIBLE_MOVIES},

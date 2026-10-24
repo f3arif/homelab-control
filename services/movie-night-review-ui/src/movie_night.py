@@ -11,10 +11,11 @@ from trailer_policy import reviewed_trailer
 from discovery_policy import screened
 from movie_presentation import display_fields
 
-CAP = 9_000_000_000
+MIN_BYTES = 5_000_000_000
+CAP = 15_000_000_000
 RESERVE = 50 * 1024**3
 QUOTA = 100_000_000_000
-ROOT = '/home/coolyo/afz-curated-media/Movies'
+ROOT = '/srv/afzmedia/Media/MovieNight/Movies'
 PREFERRED_TAGS = {'obsession', 'relationship tension', 'twists', 'suspense'}
 SEEN_TITLES = {'heretic', 'companion'}
 
@@ -49,10 +50,10 @@ class Choice:
             raise ValueError('release year required')
         if self.provider != 'torbox' or any(type(n) is not int or n < 0 for n in (self.torrent_id, self.file_id)):
             raise ValueError('exact provider file required')
-        if type(self.size) is not int or not 0 < self.size <= CAP:
-            raise ValueError('known size of at most 9,000,000,000 bytes required')
+        if type(self.size) is not int or not MIN_BYTES <= self.size <= CAP:
+            raise ValueError('known size between 5,000,000,000 and 15,000,000,000 bytes required')
         if self.quality != '1080p':
-            raise ValueError('phone movie prototype requires 1080p')
+            raise ValueError('Movie Night requires 1080p')
         for value in (self.title, self.edition, self.provider_name, self.codec):
             if not isinstance(value, str) or not value.strip() or any(ord(c) < 32 for c in value):
                 raise ValueError('complete printable confirmation metadata required')
@@ -69,9 +70,9 @@ def select_compact(choices):
             c.validate()
         except (ValueError, TypeError):
             continue
-        # Every known-size <=5GB option outranks >5GB. 3–5GB is preferred.
+        # Choose the smallest concrete file within the owner's 5–15 GB range.
         eligible.append(c)
-    return min(eligible, key=lambda c: (0 if 3_000_000_000 <= c.size <= 5_000_000_000 else 1 if c.size <= 5_000_000_000 else 2, c.size, c.torrent_id, c.file_id)) if eligible else None
+    return min(eligible, key=lambda c: (c.size, c.torrent_id, c.file_id)) if eligible else None
 
 
 def stream_status(choice, proof, now, device_id):
@@ -150,6 +151,7 @@ class ApprovalStore:
         self.db.execute('CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, principal TEXT, payload TEXT, expires INTEGER)')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, title TEXT UNIQUE, destination TEXT UNIQUE, payload TEXT, state TEXT, bytes INTEGER, evidence TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS cancellations (id TEXT PRIMARY KEY)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS archived_jobs(id TEXT PRIMARY KEY,title TEXT,destination TEXT,payload TEXT,state TEXT,bytes INTEGER,evidence TEXT,reason TEXT,archived INTEGER)')
         self.db.commit()
 
     def propose(self, choice, principal, now, free, quota=QUOTA):
@@ -180,7 +182,7 @@ class ApprovalStore:
                 raise ValueError('download request no longer active')
             if not 0<=now-provider_checked_at<=300:raise ValueError('provider verification expired')
             reserved=sum(json.loads(x[0])['choice']['size']-x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
-            committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs'))
+            committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
             if free-reserved-choice.size<RESERVE or QUOTA-committed<choice.size+1:
                 raise ValueError('insufficient storage or quota')
             pid=str(uuid4())
@@ -216,7 +218,7 @@ class ApprovalStore:
             if existing or completed_present is not True:
                 raise ValueError('existing file or provider completion not verified')
             reserved = sum(json.loads(x[0])['choice']['size'] - x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
-            committed = sum(json.loads(x[0])['choice']['size'] + 1 for x in self.db.execute('SELECT payload FROM jobs'))
+            committed = sum(json.loads(x[0])['choice']['size'] + 1 for x in self.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
             if free - reserved - current_choice.size < RESERVE or quota - committed < current_choice.size + 1:
                 raise ValueError('insufficient storage or quota')
             self.db.execute('INSERT INTO jobs VALUES (?,?,?,?,?,?,?)', (pid, current_choice.imdb, current_choice.destination, p[1], 'approved', 0, '{}'))

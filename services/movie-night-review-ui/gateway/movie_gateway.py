@@ -130,7 +130,7 @@ def dispatch_media(handler,headers):
             handler.send(response.status,'File unavailable','text/plain');return
         mime=response.getheader('Content-Type','').split(';')[0]
         length=int(response.getheader('Content-Length','-1'))
-        if mime not in ('video/mp4','video/x-matroska','video/matroska','application/octet-stream') or not 0<=length<=9_000_000_000:
+        if mime not in ('video/mp4','video/x-matroska','video/matroska','application/octet-stream') or not 0<=length<=15_000_000_000:
             raise ValueError()
         handler.send_response(response.status)
         handler.send_header('Content-Type',mime);handler.send_header('Content-Length',str(length))

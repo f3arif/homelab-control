@@ -174,6 +174,7 @@ class AutoDownloadTests(unittest.TestCase):
         self.assertEqual(409,self.finalize().status_code);self.assertEqual(0,self.count('movie_download_queue'))
     def test_download_snapshot_cannot_link_a_job_missing_from_same_response(self):
         q=self.h.controller.auto_downloads
+        if q.future:q.future.result(5) # finish empty startup recovery before changing journal mode
         with sqlite3.connect(self.h.db) as db:db.execute('PRAGMA journal_mode=WAL')
         with patch.object(q,'start'):self.finalize()
         request=next(r for r in q.requests('fixture') if r['imdb']==IDS[0])

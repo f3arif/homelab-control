@@ -1,3 +1,11 @@
+# Current Movie Night storage contract — 2026-10-24
+
+The shared Movie Night backend now targets the ZBook's 8 TB AFZ_MEDIA disk, `/srv/afzmedia/Media/MovieNight/Movies`, while retaining the owner entry at `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. New finalized server downloads require cached 1080p files of **5–15 GB inclusive**; unknown, smaller and larger sizes are excluded. `GET /movie-night/api/shortlist` exposes `downloadPolicy` with `minBytes`, `maxBytes`, `quality`, `storage`, and `host`. Nuvio should display that contract and distinguish “8 TB drive” from a separate “Save to this device” copy.
+
+This is the server contract and integration plan. No Android APK is changed here. The existing owner gateway, CSRF and exact-file binding remain. A missing/wrong/read-only 8 TB volume stops downloads; there is no Envy/internal-disk fallback. Completed historical files remain available even if below the newly requested minimum. Migration archives old cancelled attempts and allows a new bounded source choice rather than overwriting their partial files.
+
+The older plan below remains useful for shared-list/profile/API work, but references to HP Envy as the movie storage destination are superseded by the ZBook/8 TB destination above. Keep the Envy URL as the private front door; do not expose the backend relay port to Nuvio or embed its secret in an APK.
+
 # Movie Night and AFZ Nuvio integration plan
 
 Updated: 2026-10-24 UTC. Owner: AFZ Media. Access claim #282; automatic-finalization claim #288 / PR #289.
@@ -7,7 +15,7 @@ Scope: separate web access is implemented in this change. The Android integratio
 
 The independent entry is `https://hpenvy.tailc9bb62.ts.net:8453/movie-night/`. Tailscale Serve authenticates the caller; a private allowlist admits only the existing owner's exact account. The gateway binds to loopback and exposes only Movie Night routes. No billing password, cookie or billing endpoint is used. The old billing entry on 8447 remains available for compatibility. Both reach the same private review socket and stable internal principal, so existing feedback, finalized selections and jobs are preserved.
 
-Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, automatic-finalization PR #289, stacked on source-feedback #287 and the access/download predecessors. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. The owner now authorizes **Finalize & download** to automatically acquire and download 3–10 selected eligible films. The web request saves finalization and a durable per-movie queue atomically; Pick/Like alone have no acquisition side effect. Old saved picks do not enqueue merely on activation. Files go to HP Envy, not the phone or ZBook.
+Standalone source: `f3arif/homelab-control`, `services/movie-night-review-ui/`, 8 TB storage PR #291, stacked on automatic-finalization #289, source-feedback #287 and the access/download predecessors. `src/webapp.py` owns review/confirmation APIs; `src/feedback.py` persists feedback and finalization; `src/screen.js` currently keeps unfinalized Pick buttons in a browser-local in-memory Set. Draft picks are therefore NOT synchronized today. The owner now authorizes **Finalize & download** to automatically acquire and download 3–10 selected eligible films. The web request saves finalization and a durable per-movie queue atomically; Pick/Like alone have no acquisition side effect. Old saved picks do not enqueue merely on activation. Files go directly to the 8 TB drive on ZBook; phone copies are separate.
 
 AFZ Nuvio PR #21 is an open draft at `579d79c81338eed7431127629744f9bba47a1ea5`. R48 build161 was built but its handoff reports no installation. Native source was independently read on H3, WSL **Ubuntu-24.04**, `/home/faiz/afz-nuvio-r48-movie-night-daily-20261023`, clean commit `6e79f7c4e1c256cd4fb9e87049254c3b9ef9bd5a`. Do not confuse that native commit with the GitHub receipts commit.
 
@@ -70,7 +78,7 @@ Keep separate actions: **Finalize & download to server** uses the owner-authoriz
 
 Automatic lookup checks existing completed TorBox inventory, then the existing Comet metadata and TorBox cache. It may add the chosen cached hash with cached-only enforcement; it never launches uncached acquisition or opens addon playback URLs. A fresh completed/safe account-file check binds exact identity, size, destination and codec before transfer. Show unavailable sources honestly and offer explicit retry. App restart resumes status observation; an uncertain request is reconciled by its idempotency key, never given a new key silently. No retroactive downloads on merely connecting a profile, opening the app or seeing previously finalized picks.
 
-For completed media, use the existing authenticated catalog/media paths and verify the selected player and native download engine keep access to the same Tailscale route. Test GET Range/206, seek, cancellation, source disappearance and device-local completion; add HEAD support only if the chosen client requires it. Keep “downloaded”, “available/indexed” and “playback tested” distinct. Jellyfin indexing and moving storage to the ZBook are separate work.
+For completed media, use the existing authenticated catalog/media paths and verify the selected player and native download engine keep access to the same Tailscale route. Test GET Range/206, seek, cancellation, source disappearance and device-local completion; add HEAD support only if the chosen client requires it. Keep “downloaded”, “available/indexed” and “playback tested” distinct. ZBook/8 TB storage is implemented by this server release. Jellyfin indexing remains separate work.
 
 ## Acceptance and rollout gates
 

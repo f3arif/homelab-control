@@ -1,8 +1,8 @@
-const puppeteer=require('/home/coolyo/afz-website-review-tools-20261010/node_modules/puppeteer');
+const puppeteer=require(process.env.AFZ_PUPPETEER||'/home/coolyo/afz-website-review-tools-20261010/node_modules/puppeteer');
 const fs=require('fs'),assert=require('node:assert/strict');
 (async()=>{
  const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,results=[];
- const browser=await puppeteer.launch({headless:true,timeout:60000,executablePath:'/home/coolyo/afz-website-review-tools-20261010/browser-with-zip/chrome/linux-155.0.8059.39/chrome-linux64/chrome',args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
+ const browser=await puppeteer.launch({headless:true,timeout:60000,executablePath:process.env.AFZ_CHROME||'/home/coolyo/afz-website-review-tools-20261010/browser-with-zip/chrome/linux-155.0.8059.39/chrome-linux64/chrome',args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
  try{
   for(const width of [360,412,1280]){
    const p=await browser.newPage();await p.setViewport({width,height:860});
