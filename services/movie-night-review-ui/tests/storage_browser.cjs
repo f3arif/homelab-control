@@ -2,7 +2,7 @@ const {chromium}=require(process.env.AFZ_PLAYWRIGHT||'/home/coolyo/afz-grocery-b
 const fs=require('fs'),assert=require('node:assert/strict');
 (async()=>{
  const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,results=[];
- const browser=await chromium.launch({headless:true,timeout:60000,executablePath:process.env.AFZ_CHROME||'/home/coolyo/afz-grocery-browser-test-tools/browsers/chromium_headless_shell-1248/chrome-headless-shell-linux64/headless_shell',args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
+ const browser=await chromium.launch({headless:true,timeout:60000,executablePath:process.env.AFZ_CHROME||'/home/coolyo/afz-grocery-browser-test-tools/browsers/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell',args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
  try{
   for(const width of [360,412,1280]){
    const p=await browser.newPage();await p.setViewportSize({width,height:860});
