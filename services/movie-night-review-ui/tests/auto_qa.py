@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='afz-auto-qa-') as td:
     try:
         out=BASE/'qa/auto';out.mkdir(parents=True,exist_ok=True)
         env=dict(os.environ,AFZ_GATEWAY_QA_ORIGIN=origin,AFZ_GATEWAY_QA_OUTPUT=str(out))
-        result=subprocess.run([os.environ.get('AFZ_NODE','/home/coolyo/.local/bin/node'),str(BASE/'tests/auto_browser.cjs')],capture_output=True,text=True,env=env,timeout=130)
+        result=subprocess.run([os.environ.get('AFZ_NODE','/home/coolyo/.local/bin/node'),str(BASE/'tests'/os.environ.get('AFZ_BROWSER_SCRIPT','auto_browser.cjs'))],capture_output=True,text=True,env=env,timeout=130)
         (out/'browser.log').write_text(result.stdout+result.stderr)
         (out/'fixture-state.json').write_text(json.dumps({'saved':h.controller.feedback.saved('billing-owner'),'downloads':h.controller.downloads('billing-owner'),'providerResolves':h.provider.resolves,'providerAdds':len(cache.added)},indent=2))
         assert result.returncode==0,(result.stdout+result.stderr)[-3000:]
