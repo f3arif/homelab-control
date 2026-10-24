@@ -120,6 +120,7 @@ class AutoDownloads:
                         pid=store.approve_finalized(choice,principal,request_id,int(self.c.clock()),self.c.free(),checked)
                     self.c.futures[pid]=self.c.pool.submit(self.c.worker.run,pid)
             except Exception as exc:
+                if self.closed:return # leave a checking request recoverable after shutdown
                 # Never expose provider exceptions, credentials or temporary URLs.
                 message='Source service unavailable. Try again later.'
                 if str(exc)=='insufficient storage or quota':message='Not enough free storage or transfer budget. No server transfer started.'

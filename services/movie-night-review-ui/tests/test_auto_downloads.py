@@ -147,12 +147,20 @@ class AutoDownloadTests(unittest.TestCase):
         with sqlite3.connect(self.h.db) as db:db.execute("UPDATE movie_download_queue SET state='checking' WHERE imdb=?",(IDS[0],))
         self.h.controller.enable_auto_downloads();self.settle();self.assertEqual(1,self.h.provider.resolves)
         self.h.controller.auto_downloads.recover();self.settle();self.assertEqual(1,self.h.provider.resolves)
+    def test_shutdown_during_source_check_is_recoverable(self):
+        entered=threading.Event()
+        def choices(imdb):
+            if imdb==IDS[0]:entered.set();self.release.wait(5);return [self.h.choice]
+            return []
+        self.h.controller.choices=choices;self.finalize();self.assertTrue(entered.wait(2))
+        q=self.h.controller.auto_downloads;q.closed=True;self.release.set();q.future.result(5);q.close()
+        self.assertEqual('checking',next(r for r in q.requests('fixture') if r['imdb']==IDS[0])['state'])
+        self.h.controller.enable_auto_downloads();self.settle();self.assertEqual(1,self.h.provider.resolves)
     def test_failed_transfer_is_preserved_without_automatic_retry(self):
         self.h.truncated=True;self.finalize();result=self.settle()
         self.assertEqual('failed',result['jobs'][0]['state']);self.assertFalse(result['requests'][-1]['canRetry'])
         self.finalize(retryDownloads=[IDS[0]]);self.settle();self.assertEqual(1,self.h.provider.resolves)
     def test_atomic_link_survives_missing_dispatch(self):
-        original=self.h.controller.pool.submit
         with patch.object(self.h.controller.pool,'submit') as submit:
             self.finalize()
             end=time.monotonic()+5
