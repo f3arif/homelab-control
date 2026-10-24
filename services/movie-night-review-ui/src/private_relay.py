@@ -14,8 +14,6 @@ import socketserver
 import stat
 
 HEADER = 'x-movie-night-relay'
-HOP_HEADERS = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
-               'te', 'trailer', 'transfer-encoding', 'upgrade'}
 
 
 def read_secret(path):
