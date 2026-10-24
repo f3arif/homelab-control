@@ -1,6 +1,6 @@
 """Release guards exercised with temporary files/databases and a mocked service."""
 from pathlib import Path
-import json, sqlite3, sys, tempfile, unittest
+import io, json, sqlite3, sys, tempfile, unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import deploy_genre_variety as release
@@ -31,7 +31,7 @@ class GenreDeployTests(unittest.TestCase):
         p = patch.object(release.socket, 'gethostname', return_value='afz-zbook'); p.start(); self.addCleanup(p.stop)
 
     def run_action(self, action, verify=None):
-        with patch.object(sys, 'argv', ['deploy', action]), patch.object(release, 'service') as service, patch.object(release, 'healthy'), patch.object(release, 'verify', side_effect=verify or (lambda _: {'suggestions': 10, 'finalized': 5})):
+        with patch.object(sys, 'stdout', io.StringIO()), patch.object(sys, 'argv', ['deploy', action]), patch.object(release, 'service') as service, patch.object(release, 'healthy'), patch.object(release, 'verify', side_effect=verify or (lambda _: {'suggestions': 10, 'finalized': 5})):
             release.main()
             return [call.args[0] for call in service.call_args_list]
 
