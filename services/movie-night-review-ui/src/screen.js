@@ -6,6 +6,9 @@ const maxPicks = Number(document.querySelector('meta[name="mn-max-picks"]').cont
 const $ = id => document.getElementById(id);
 let pending = null, job = null, timer = null, loadGeneration = 0;
 let autoDownloads=false,downloadRequestedIds=new Set(),downloadGeneration=0;
+let downloadDataState='loading',downloadFailures=0;
+const downloadItems=new Map(),cardDownloads=new Map();
+const downloadLabels={queued:'Queued',checking:'Finding a source',unavailable:'No ready source',failed:'Needs attention',cancelled:'Cancelled',approved:'Queued for transfer',downloading:'Downloading',downloaded:'Downloaded · checking availability',indexed:'Ready on server','playback-tested':'Ready on server'};
 let sourceBusy=false,sourceGeneration=0,sourceMovie=null,downloadTimer=null;
 let selected=new Set(), initialized=false, reviewBusy=false;let refillTimer=null, recoveryTimer=null, recoveryAttempts=0, uncertainWrite=false;
 let toastTimer=null, finalizedIds=[], finalizedValid=false;const titles=new Map(), pickCards=new Map();
@@ -166,12 +169,13 @@ $('cancel').onclick=async()=>{if(job)try{await api('cancel',{confirmationId:job}
 function sameAsFinalized(){return finalizedValid&&finalizedIds.length===selected.size&&finalizedIds.every(id=>selected.has(id));}
 function selectionCount(){
   const n=selected.size, done=sameAsFinalized()&&(!autoDownloads||[...selected].every(id=>downloadRequestedIds.has(id)));
+  const ready=downloadDataState==='current'?[...selected].filter(id=>serverReady(downloadItems.get(id))).length:0;
   const dots=document.createElement('span');dots.className='dots';dots.setAttribute('aria-hidden','true');
   for(let i=0;i<maxPicks;i++){const d=document.createElement('i');if(i<n)d.className='on';dots.append(d);}
-  const label=done?`${n} picks ${autoDownloads?'sent to downloads':'finalized'}`:n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
+  const label=done?(autoDownloads&&ready?`${ready} of ${n} ready`:`${n} picks ${autoDownloads?'sent to downloads':'finalized'}`):n<minPicks?`${n} of ${minPicks}–${maxPicks} picked`:`${n} of ${maxPicks} picked · ready to finalize`;
   $('selection-count').replaceChildren(dots,document.createTextNode(label));
   $('selection-names').textContent=n?[...selected].map(id=>titles.get(id)||'').filter(Boolean).join(' · '):`Use Pick on ${minPicks}–${maxPicks} movies.`;
-  $('finalize').textContent=autoDownloads?(done?'Downloads requested ✓':`Finalize & download${n>=minPicks?' '+n:''}`):(done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks');
+  $('finalize').textContent=autoDownloads?(done?(n>0&&ready===n?'All ready ✓':'Downloads requested ✓'):`Finalize & download${n>=minPicks?' '+n:''}`):(done?'Finalized ✓':n>=minPicks&&n<=maxPicks?`Finalize ${n} picks`:'Finalize picks');
   $('finalize').disabled=reviewBusy||done||n<minPicks||n>maxPicks;
   for(const [id,ui] of pickCards)paintPick(id,ui);
 }
@@ -192,9 +196,47 @@ async function reviewWrite(path,data){
 function watchButtons(movie,enabled){
   const actions=document.createElement('div');actions.className='buttons';
   if(!enabled){actions.hidden=true;return actions;}
-  const download=document.createElement('button');download.textContent=autoDownloads?'View server downloads':'Review server download';
-  download.onclick=()=>autoDownloads?$('downloads').scrollIntoView({block:'start'}):propose(movie.id,movie.name);
+  if(autoDownloads){
+    const group=document.createElement('div');group.className='card-download';
+    const status=document.createElement('p');status.className='card-download-status';status.setAttribute('role','status');
+    const detail=document.createElement('p');detail.className='muted card-download-detail';
+    const progress=document.createElement('progress');progress.setAttribute('aria-label',movie.name+' downloaded bytes');
+    const save=document.createElement('a');save.className='server-file';save.href=base+'/media/'+encodeURIComponent(movie.id);save.textContent='Save a copy to this device';
+    const view=document.createElement('button');view.className='secondary';
+    view.onclick=async()=>{
+      if(downloadDataState!=='current'){await loadDownloads();return;}
+      const target=[...$('download-list').children].find(row=>row.dataset.imdb===movie.id)||$('downloads-title');
+      target.setAttribute('tabindex','-1');target.scrollIntoView({block:'center'});target.focus({preventScroll:true});
+    };
+    actions.append(save,view);group.append(status,detail,progress,actions);
+    const ui={group,status,detail,progress,save,view};
+    if(!cardDownloads.has(movie.id))cardDownloads.set(movie.id,[]);cardDownloads.get(movie.id).push(ui);
+    paintCardDownload(movie.id,ui);return group;
+  }
+  const download=document.createElement('button');download.textContent='Review server download';
+  download.onclick=()=>propose(movie.id,movie.name);
   actions.append(download);return actions;
+}
+function serverReady(item){return !!(item?.downloaded&&item.indexed);}
+function paintCardDownload(id,ui){
+  const item=downloadItems.get(id),current=downloadDataState==='current',ready=current&&serverReady(item);
+  ui.group.dataset.state=!current?downloadDataState:ready?'ready':item?.state||'not-requested';
+  ui.status.textContent=!current?(downloadDataState==='loading'?'Checking server status…':'Status unavailable'):ready?'✓ Ready on server':downloadLabels[item?.state]||'Not requested';
+  ui.detail.textContent=!current?(downloadDataState==='loading'?'Checking the 8 TB drive download list.':'Could not refresh download status. Check again or reload Movie Night.'):
+    ready?`Verified file on the 8 TB drive${item.size?' · '+(item.size/1e9).toFixed(2)+' GB':''}.`:
+    item?.state==='downloading'?`${((item.bytesReceived||0)/1e9).toFixed(2)} of ${(item.size/1e9).toFixed(2)} GB · saving to the 8 TB drive.`:
+    item?.state==='downloaded'?'The file is downloaded; server availability is still being checked.':item?.message|| (item?'Saved request. See download details for progress.':'Use Finalize & download to request this movie.');
+  ui.progress.hidden=!(current&&item?.state==='downloading'&&item.size>0);
+  if(!ui.progress.hidden){ui.progress.max=item.size;ui.progress.value=item.bytesReceived||0;}
+  ui.save.hidden=!ready;ui.view.textContent=current?'View download details':'Check status';
+}
+function updateCardDownloads(){
+  for(const [id,uis] of cardDownloads)for(const ui of uis)paintCardDownload(id,ui);
+  if(autoDownloads&&finalizedValid){
+    const ready=finalizedIds.filter(id=>serverReady(downloadItems.get(id))).length;
+    $('finalized-status').textContent=downloadDataState==='current'?`${finalizedIds.length} movies finalized · ${ready} of ${finalizedIds.length} ready on server.`:`${finalizedIds.length} movies finalized. ${downloadDataState==='loading'?'Checking server status…':'Server status could not be refreshed.'}`;
+  }
+  selectionCount();
 }
 async function loadDownloads(){
   if(downloadTimer)clearTimeout(downloadTimer);
@@ -204,13 +246,17 @@ async function loadDownloads(){
     const panel=$('downloads'),list=$('download-list');list.replaceChildren();panel.hidden=false;
     const requests=data.requests||[],jobs=new Map(data.jobs.map(j=>[j.id,j]));
     const linked=new Set(requests.map(r=>r.jobId).filter(Boolean));
-    downloadRequestedIds=new Set(requests.map(r=>r.imdb));selectionCount();
+    downloadRequestedIds=new Set(requests.map(r=>r.imdb));
     const items=[...requests.map(r=>({...r,...(jobs.get(r.jobId)||{}),requestId:r.id})),...data.jobs.filter(j=>!linked.has(j.id))];
     for(const item of items)if(item.state==='linked'){item.state='checking';item.message='Refreshing transfer status.';}
+    downloadItems.clear();
+    // Requests refer to the current attempt; an older verified file remains usable.
+    for(const item of items)if(!downloadItems.has(item.imdb)||serverReady(item))downloadItems.set(item.imdb,item);
+    downloadDataState='current';downloadFailures=0;updateCardDownloads();
     const priority={downloading:0,approved:1,checking:2,queued:3,indexed:4,'playback-tested':4,downloaded:4,unavailable:6,failed:6,cancelled:7};
     items.sort((a,b)=>(priority[a.state]??5)-(priority[b.state]??5));
     if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to the 8 TB drive.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
-    const labels={queued:'Queued',checking:'Finding a source',unavailable:'No ready source',failed:'Needs attention',cancelled:'Cancelled',approved:'Queued for transfer',downloading:'Downloading',downloaded:'Downloaded',indexed:'Ready on server','playback-tested':'Ready on server'};
+    const labels=downloadLabels;
     for(const item of items){
       const row=document.createElement('article');row.className='download-row';row.dataset.imdb=item.imdb;row.dataset.state=item.state;
       const title=document.createElement('h3');title.textContent=item.name;
@@ -234,8 +280,11 @@ async function loadDownloads(){
       if(item.indexed){const link=document.createElement('a');link.href=base+'/media/'+encodeURIComponent(item.imdb);link.textContent='Save a copy to this device';link.className='secondary';row.append(link);}
       list.append(row);
     }
-    if(items.some(x=>['queued','checking','approved','downloading'].includes(x.state)))downloadTimer=setTimeout(loadDownloads,3000);
-  }catch(error){if(generation===downloadGeneration)showFailure(error);}
+    if(items.some(x=>['queued','checking','approved','downloading','downloaded'].includes(x.state)))downloadTimer=setTimeout(loadDownloads,3000);
+  }catch(error){if(generation===downloadGeneration){
+    downloadDataState='unavailable';updateCardDownloads();showFailure(error);
+    if(error.kind==='connection'&&downloadFailures<5)downloadTimer=setTimeout(loadDownloads,[3000,6000,12000,20000,30000][downloadFailures++]);
+  }}
 }
 function movieOverview(movie,heading='h2'){
   const overview=document.createElement('div');overview.className='movie-overview';
@@ -315,10 +364,10 @@ function render(data){
   autoDownloads=!!data.autoDownloads;downloadRequestedIds=new Set(data.downloadRequestedIds||[]);
   $('download-step').textContent=autoDownloads?'Finalize & download saves your picks and starts their server downloads automatically.':'Review server download on a finalized movie. Confirm its exact file to start.';
   $('download-rule').textContent=autoDownloads?'The server chooses a suitable cached 1080p file. Downloads keep running after you close the page. Likes and Pick alone do not start downloads.':'Likes and finalized picks never start a download.';
-  $('finalized-help').textContent=autoDownloads?'See 8 TB drive downloads for progress, unavailable sources, retry and cancellation. Files are saved on the 8 TB drive.':'Next, review each exact file, quality, codec, size, available storage and 8 TB drive destination before confirming its download.';
+  $('finalized-help').textContent=autoDownloads?'Server status updates on each card. Ready files are saved on the 8 TB drive; Save a copy downloads a separate copy to this device. View download details for retry or cancellation.':'Next, review each exact file, quality, codec, size, available storage and 8 TB drive destination before confirming its download.';
   if(!initialized){selected=new Set(data.finalized?.valid?data.finalized.ids:[]);initialized=true;}
   selected=new Set([...selected].filter(id=>(data.eligibleIds||[]).includes(id)));
-  $('movies').replaceChildren();$('finalized-movies').replaceChildren();$('removed-movies').replaceChildren();pickCards.clear();
+  $('movies').replaceChildren();$('finalized-movies').replaceChildren();$('removed-movies').replaceChildren();pickCards.clear();cardDownloads.clear();
   for(const movie of [...data.movies,...(data.finalized?.movies||[])])titles.set(movie.id,movie.name);
   const messages=[];
   if(!data.seenStateComplete)messages.push('Watched filtering: known exclusions only (Heretic and Companion). Complete watch-history access is not yet verified.');
@@ -367,7 +416,7 @@ function render(data){
   for(const movie of f.movies){const card=cardBody(movie,'h3');if(f.valid&&data.actionsEnabled)card.append(watchButtons(movie,true));$('finalized-movies').append(card);}
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
-  selectionCount();
+  updateCardDownloads();
 }
 $('request-refill').onclick=()=>reviewWrite('feedback',{action:'request-refill',requestId:crypto.randomUUID()});
 $('finalize').onclick=async()=>{
