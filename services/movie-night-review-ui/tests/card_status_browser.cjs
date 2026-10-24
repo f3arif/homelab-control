@@ -26,7 +26,7 @@ function item(i,state){return {id:'job-'+i,imdb:ids[i],name:movies[i].name,state
    else status=204;
    await route.fulfill({status,contentType:type,body});
   });
-  await p.goto('http://fixture.test/movie-night/',{waitUntil:'networkidle'});
+  await p.goto('http://localhost/movie-night/',{waitUntil:'networkidle'});
   const cards=p.locator('#finalized-movies .movie-card');await cards.nth(0).locator('.card-download[data-state="queued"]').waitFor();
   assert.deepEqual(await cards.locator('.card-download-status').allTextContents(),labels);
   assert.equal(await cards.locator('.server-file:visible').count(),2);
@@ -36,6 +36,8 @@ function item(i,state){return {id:'job-'+i,imdb:ids[i],name:movies[i].name,state
   await cards.nth(8).getByRole('button',{name:'View download details'}).click();
   assert.equal(await p.evaluate(()=>document.activeElement.dataset.imdb),ids[8]);
   // Downloaded is not yet indexed: polling must continue until it is available.
+  jobs=jobs.map(j=>['queued','checking','approved','downloading'].includes(j.state)?item(ids.indexOf(j.imdb),'unavailable'):j);
+  await p.evaluate(()=>loadDownloads());
   await cards.nth(4).locator('summary').click();await cards.nth(4).getByRole('button').focus();
   jobs[4]=item(4,'indexed');
   await p.waitForFunction(id=>document.querySelector(`#finalized-movies [data-movie="${id}"] .card-download`).dataset.state==='ready',ids[4],{timeout:8000});
