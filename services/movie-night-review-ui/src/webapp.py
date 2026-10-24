@@ -31,10 +31,18 @@ class Controller:
         self.refill_provider=refill_provider
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
         self.csrf={}; self.lock=threading.RLock();self.futures={}
+        self.auto_downloads=None
         self.lookups={}; self.lookup_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-sources')
         with closing(ApprovalStore(self.db)): pass
 
+    def enable_auto_downloads(self,acquire=None):
+        self.require_enabled()
+        from auto_downloads import AutoDownloads
+        self.auto_downloads=AutoDownloads(self,acquire)
+        self.auto_downloads.recover()
+
     def close(self):
+        if self.auto_downloads:self.auto_downloads.close()
         if self.refill_provider and hasattr(self.refill_provider,'close'):self.refill_provider.close()
         self.lookup_pool.shutdown(wait=True)
         self.pool.shutdown(wait=True)
@@ -65,7 +73,8 @@ class Controller:
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
             valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
             return {'movies':rank_reviewed(pool,ratings),'reviewEnabled':self.review_enabled,
-                    'actionsEnabled':self.enabled,'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
+                    'actionsEnabled':self.enabled,'autoDownloads':bool(self.auto_downloads and self.enabled),
+                    'downloadRequestedIds':[x['imdb'] for x in self.auto_downloads.requests(principal)] if self.auto_downloads else [],'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
                     'eligibleIds':list(eligible),'selectionLimits':{'min':MIN_PICKS,'max':MAX_PICKS,'visible':VISIBLE_MOVIES},
                     'disliked':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='dislike'],
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
@@ -100,12 +109,19 @@ class Controller:
                 return self.request_refill(principal,'auto-'+secrets.token_hex(16))
             return result
 
-    def finalize(self,principal,ids):
+    def finalize(self,principal,ids,*,start_downloads=False,request_id=None,retry=None):
         if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
         with self.lock:
             ratings=self.feedback.ratings(principal)
             eligible={r['id'] for r in self.review_pool() if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')}
-            self.feedback.finalize(principal,ids,eligible)
+            callback=None
+            if self.auto_downloads:
+                self.require_enabled()
+                if start_downloads is not True:raise ValueError('Reload Movie Night to finalize and download.')
+                rows={r['id']:r for r in self.review_pool()}
+                callback=lambda db:self.auto_downloads.enqueue(db,principal,ids,rows,request_id,retry or [])
+            self.feedback.finalize(principal,ids,eligible,on_saved=callback)
+            if self.auto_downloads:self.auto_downloads.start()
             return self.review(principal)
 
     def require_finalized(self,imdb,principal):
@@ -167,7 +183,7 @@ class Controller:
                 choice=json.loads(raw)['choice'];status=store.status(pid)
                 result.append({'id':pid,'name':choice['title'],'imdb':choice['imdb'],'size':choice['size'],
                                'destination':choice['destination'],**status})
-            return {'jobs':result}
+            return {'jobs':result,'requests':self.auto_downloads.requests(principal) if self.auto_downloads else []}
 
     def propose(self, imdb, principal):
         self.require_enabled()
@@ -255,7 +271,8 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         except HTTPException: raise
         except PermissionError: raise HTTPException(404,'Confirmation unavailable')
         except (ValueError,sqlite3.IntegrityError) as exc:
-            allowed={'No matching compact source','Too many source checks. Try again shortly.','Downloads and source checks are disabled pending activation approval.',
+            allowed={'Reload Movie Night to finalize and download.','Invalid download retry.','Download request ID was already used. Reload Movie Night.',
+                     'No matching compact source','Too many source checks. Try again shortly.','Downloads and source checks are disabled pending activation approval.',
                      'Source metadata changed. Refresh sources before confirmation.',
                      'This file is already present; it will not be overwritten.',
                      'No cancellable transfer. Existing completed files are preserved.',
@@ -286,9 +303,9 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         return HTMLResponse(html,headers={'Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer'})
 
     @app.get(prefix+'/screen.js')
-    def javascript(request:Request): identity(request);return FileResponse(assets/'screen.js',media_type='application/javascript')
+    def javascript(request:Request): identity(request);return FileResponse(assets/'screen.js',media_type='application/javascript',headers={'Cache-Control':'private, no-store'})
     @app.get(prefix+'/screen.css')
-    def css(request:Request): identity(request);return FileResponse(assets/'screen.css',media_type='text/css')
+    def css(request:Request): identity(request);return FileResponse(assets/'screen.css',media_type='text/css',headers={'Cache-Control':'private, no-store'})
     @app.get(prefix+'/posters/{imdb}.img')
     def poster(request:Request,imdb:str):
         identity(request)
@@ -307,7 +324,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/finalize')
     async def finalize(request:Request):
         principal=identity(request,True);data=await body(request)
-        return safe(lambda:controller.finalize(principal,data.get('ids')))
+        return safe(lambda:controller.finalize(principal,data.get('ids'),start_downloads=data.get('startDownloads'),request_id=data.get('requestId'),retry=data.get('retryDownloads')))
 
     @app.post(prefix+'/api/propose')
     async def propose(request:Request):
@@ -326,6 +343,8 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/cancel')
     async def cancel(request:Request):
         principal=identity(request,True);data=await body(request)
+        if data.get('requestId') and controller.auto_downloads:
+            return safe(lambda:controller.auto_downloads.cancel(str(data['requestId']),principal))
         return safe(lambda:controller.cancel(str(data.get('confirmationId','')),principal))
     @app.post(prefix+'/api/check-stream')
     async def check_stream(request:Request):
@@ -352,3 +371,4 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         if not path: raise HTTPException(404,'No validated local file')
         return FileResponse(path,filename=path.name,headers={'Cache-Control':'private, no-store'})
     return app
+

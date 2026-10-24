@@ -13,7 +13,8 @@ PRINCIPAL = 'billing-owner'
 GET_PATHS = frozenset(('/movie-night', '/movie-night/', '/movie-night/screen.js', '/movie-night/screen.css', '/movie-night/api/shortlist', '/movie-night/posters/{imdb}.img'))
 POST_PATHS = frozenset(('/movie-night/api/feedback', '/movie-night/api/finalize'))
 
-def build_app(state, origin, discovery=None, downloads=False, provider=None, media_root=None):
+def build_app(state, origin, discovery=None, downloads=False, provider=None, media_root=None, auto_downloads=False):
+    if auto_downloads and not downloads:raise ValueError('Automatic downloads require --downloads')
     state = Path(state)
     def payload():
         try:
@@ -47,6 +48,9 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
         controller.inventory=ProviderInventory(provider);controller.worker=adapter;controller.index=index
         controller.free=free;controller.enabled=True
         controller.recover_jobs()
+        if auto_downloads:
+            from cached_sources import CachedSources
+            controller.enable_auto_downloads(CachedSources(provider,payload).acquire)
     app = create_app(controller, authorize=lambda r: PRINCIPAL if r.headers.get('x-afz-review-principal') == PRINCIPAL else None,
                      allowed_origin=origin)
     app.router.routes = [r for r in app.routes if
@@ -63,6 +67,7 @@ def main():
     parser.add_argument('--state', required=True)
     parser.add_argument('--origin', required=True)
     parser.add_argument('--downloads', action='store_true')
+    parser.add_argument('--auto-downloads', action='store_true')
     args = parser.parse_args()
     os.umask(0o077)
     state = Path(args.state)
@@ -90,7 +95,7 @@ def main():
     os.chmod(endpoint, 0o600)
     listener.listen(128)
     from metadata_discovery import CinemetaDiscovery
-    app, controller = build_app(state, args.origin, discovery=CinemetaDiscovery(), downloads=args.downloads)
+    app, controller = build_app(state, args.origin, discovery=CinemetaDiscovery(), downloads=args.downloads, auto_downloads=args.auto_downloads)
     try:
         uvicorn.Server(uvicorn.Config(app, access_log=False, log_level='warning')).run(sockets=[listener])
     finally:
@@ -113,3 +118,4 @@ def verify_local_route(state,imdb,size):
     finally:connection.close()
 
 if __name__ == '__main__': main()
+

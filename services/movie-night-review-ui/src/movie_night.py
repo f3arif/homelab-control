@@ -166,6 +166,35 @@ class ApprovalStore:
 
     def close(self): self.db.close()
 
+    def approve_finalized(self, choice, principal, request_id, now, free, provider_checked_at):
+        """Bind a concrete file to the owner's durable Finalize & download request.
+
+        Queue linkage, plan and job commit together. This is an explicit alternate
+        authorization path; it never manufactures a reply to a manual confirmation.
+        """
+        choice.validate()
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            request=self.db.execute('SELECT imdb,state FROM movie_download_queue WHERE id=? AND principal=?',(request_id,principal)).fetchone()
+            if not request or request!=(choice.imdb,'checking'):
+                raise ValueError('download request no longer active')
+            if not 0<=now-provider_checked_at<=300:raise ValueError('provider verification expired')
+            reserved=sum(json.loads(x[0])['choice']['size']-x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
+            committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs'))
+            if free-reserved-choice.size<RESERVE or QUOTA-committed<choice.size+1:
+                raise ValueError('insufficient storage or quota')
+            pid=str(uuid4())
+            payload=canonical({'choice':asdict(choice),'authorization':'finalize-and-download',
+                               'requestId':request_id,'authorizedBy':principal,'authorizedEpoch':now,
+                               'freeBytes':free,'quotaRemainingBytes':QUOTA-committed,'reserveBytes':RESERVE})
+            self.db.execute('INSERT INTO plans VALUES(?,?,?,?)',(pid,principal,payload,now+900))
+            self.db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?)',(pid,choice.imdb,choice.destination,payload,'approved',0,'{}'))
+            self.db.execute("UPDATE movie_download_queue SET state='linked',job_id=?,message='',updated=? WHERE id=?",(pid,now,request_id))
+            self.db.commit()
+            return pid
+        except Exception:
+            self.db.rollback();raise
+
     def approve(self, pid, binding, principal, reply, current_choice, provider_checked_at, now,
                 free, quota=QUOTA, existing=False, completed_present=False):
         if reply.strip().casefold() != 'yes':
@@ -233,3 +262,4 @@ class ApprovalStore:
         proof = json.loads(row[2])
         return {'state': row[0], 'bytesReceived': row[1], 'downloaded': 'file' in proof,
                 'indexed': 'index' in proof, 'playbackTested': 'playback' in proof}
+
