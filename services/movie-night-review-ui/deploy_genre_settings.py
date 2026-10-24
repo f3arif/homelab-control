@@ -5,7 +5,7 @@ from deploy import Release, ROOT, LIVE, UNIT, digest, atomic, healthy
 
 STAGE = ROOT / 'movie-night-genre-settings-20261024'
 BASE = '3d0aa260e7a3092e8cb2671f16e2a168740bb86a'
-FILES = ('genre_settings.py','discovery_policy.py','movie_night.py','feedback.py','webapp.py',
+FILES = ('genre_settings.py','review_service.py','discovery_policy.py','movie_night.py','feedback.py','webapp.py',
          'metadata_discovery.py','reviewed_refill.py','discovery_refill.py','publish_reviewed.py',
          'screen.js','screen.html','screen.css')
 ENV = dict(os.environ, XDG_RUNTIME_DIR='/run/user/1000', DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus')

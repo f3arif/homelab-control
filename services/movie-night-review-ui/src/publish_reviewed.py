@@ -92,7 +92,9 @@ def publish(state,input_path,expected_hash,dry_run=False,now=None,*,refill=False
         incoming_ids={r['id'] for r in rows}
         # Keep eligible existing choices, never re-add a disliked or known-seen title.
         carry=[r for r in current.get('movies',[])+current.get('retainedIneligibleSelections',[])+current.get('genreFilteredMovies',[]) if canonical_id(r) in retained and canonical_id(r) not in incoming_ids]
-        merged=rows+carry
+        carry_ids=incoming_ids|{r['id'] for r in carry}
+        carry += [r for r in current.get('genreFilteredMovies',[]) if r['id'] not in carry_ids and genre_match(r,settings)]
+        merged=list({r['id']:r for r in rows+carry}.values())
         policy=SeenPolicy(lambda:{'states':{i:True for i in known},'complete':False})
         eligible={r['id'] for r in shortlist({'generatedEpoch':now,'movies':merged},now,policy,limit=None,genre_settings=settings)}
         accepted=[r for r in merged if canonical_id(r) in eligible and canonical_id(r) not in disliked]

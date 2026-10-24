@@ -140,6 +140,9 @@ class EditableGenreTests(unittest.TestCase):
             payload=json.loads(target.read_text())
             self.assertEqual([row(1,['Drama'])],payload['genreFilteredMovies'])
             self.assertIn(row(1)['id'],[r['id'] for r in shortlist(payload,now,genre_settings=settings(['Drama']))])
+            GenreSettingsStore(state).save(settings())
+            publish(state,incoming,hashlib.sha256(target.read_bytes()).hexdigest(),refill=True)
+            self.assertIn(row(1)['id'],[r['id'] for r in json.loads(target.read_text())['movies']])
 
     def test_reviewed_refill_uses_current_saved_genres(self):
         with tempfile.TemporaryDirectory() as td:
@@ -150,6 +153,19 @@ class EditableGenreTests(unittest.TestCase):
             refill=ReviewedRefill(state);self.assertEqual([row(1,['Drama'])],refill.candidates()[3])
             self.assertTrue(refill.fulfill()['fulfilled'])
             self.assertEqual(['Drama'],json.loads((state/'reviewed-shortlist.json').read_text())['movies'][0]['genres'])
+
+    def test_runtime_source_metadata_includes_reenabled_retained_titles(self):
+        from review_service import build_app
+        with tempfile.TemporaryDirectory() as td:
+            state=Path(td);now=int(time.time())
+            payload={'generatedEpoch':now,'movies':[row(0)],'retainedIneligibleSelections':[row(1,['Drama'])], 'genreFilteredMovies':[row(2,['Animation']),row(0)]}
+            (state/'reviewed-shortlist.json').write_text(json.dumps(payload))
+            app,controller=build_app(state,'https://example.test')
+            try:
+                GenreSettingsStore(state).save(settings())
+                self.assertEqual(3,len(controller.shortlist_payload()['movies']))
+                self.assertEqual(3,len(controller.review_pool()))
+            finally:controller.close()
 
     def test_inflight_discovery_cannot_publish_old_settings(self):
         with tempfile.TemporaryDirectory() as td:
