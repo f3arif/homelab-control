@@ -77,6 +77,11 @@ class AutoDownloadTests(unittest.TestCase):
         key=str(uuid4());self.finalize(requestId=key);self.settle()
         self.assertEqual(409,self.finalize(ids=IDS[::-1],requestId=key).status_code)
         self.assertEqual(IDS,self.h.controller.feedback.saved('fixture')['ids'])
+    def test_late_replay_preserves_newer_saved_order(self):
+        key=str(uuid4());self.finalize(requestId=key);self.settle()
+        self.finalize(ids=IDS[::-1]);self.settle()
+        self.finalize(requestId=key);self.settle()
+        self.assertEqual(IDS[::-1],self.h.controller.feedback.saved('fixture')['ids'])
     def test_unavailable_is_visible_and_not_retried_by_reload_or_finalize(self):
         calls=[];self.h.controller.choices=lambda imdb:calls.append(imdb) or []
         self.finalize();result=self.settle();self.assertEqual(3,len(calls))

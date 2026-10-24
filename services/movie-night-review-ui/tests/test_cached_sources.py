@@ -72,6 +72,10 @@ class CachedSourceTests(unittest.TestCase):
     def test_bad_hashes_and_urls_are_not_used(self):
         self.streams=[{'infoHash':'bad','url':'https://comet.elfhosted.com/playback/'+HASH},{'behaviorHints':{'bingeGroup':'comet|other|'+HASH}}]
         self.assertEqual([],self.sources.candidates('tt12345'));self.assertEqual([],self.provider.calls)
+    def test_cache_lookup_batches_and_bounds_hashes(self):
+        self.streams=[{'behaviorHints':{'bingeGroup':'comet|torbox|'+format(i,'040x')}} for i in range(201)]
+        self.sources.candidates('tt12345')
+        self.assertEqual([100,100],[len(q['hash'].split(',')) for e,q,b in self.provider.calls])
     def test_cache_hash_must_match_requested_hash(self):
         self.provider.cached[HASH]['hash']='b'*40
         self.assertIsNone(self.sources.acquire('tt12345',self.guard));self.assertEqual([],self.provider.added)

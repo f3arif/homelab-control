@@ -49,11 +49,14 @@ class CachedSources:
             info_hash=match[1] if match else stream.get('infoHash','')
             if not isinstance(info_hash,str) or not re.fullmatch('[a-fA-F0-9]{40}',info_hash):continue
             if info_hash.lower() not in hashes:hashes.append(info_hash.lower())
-        complete=len(hashes)<=100 and len(streams)<=500
-        hashes=hashes[:100]
+        complete=len(hashes)<=200 and len(streams)<=500
+        hashes=hashes[:200]
         if not hashes:return []
-        cache=self.provider._api('checkcached',{'hash':','.join(hashes),'format':'object','list_files':'true'},True)
-        if not isinstance(cache,dict):raise ValueError('cache response invalid')
+        cache={}
+        for offset in range(0,len(hashes),100):
+            page=self.provider._api('checkcached',{'hash':','.join(hashes[offset:offset+100]),'format':'object','list_files':'true'},True)
+            if not isinstance(page,dict):raise ValueError('cache response invalid')
+            cache.update(page)
         choices=[]
         for info_hash in hashes:
             cached=cache.get(info_hash)
