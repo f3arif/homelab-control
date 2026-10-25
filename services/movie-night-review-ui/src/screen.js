@@ -516,7 +516,7 @@ function keepTitleVisible(){
 function positionTitlePopup(){
   if($('title-popup').hidden)return;
   const rect=$('similar-query').getBoundingClientRect(),{top,bottom}=titleViewBounds();
-  const below=bottom-rect.bottom-12,above=rect.top-top-12,useAbove=below<160&&above>below;
+  const below=bottom-rect.bottom-12,above=rect.top-top-12,useAbove=below<280&&above>below;
   $('title-popup').style.width=$('similar-form').querySelector('.similar-input').clientWidth+'px';
   $('title-popup').classList.toggle('above',useAbove);
   $('title-popup').style.maxHeight=Math.max(80,Math.min(480,useAbove?above:below))+'px';
@@ -565,6 +565,7 @@ function fillTitlePreview(button,title){
   if(Number.isInteger(info.runtimeMinutes)&&info.runtimeMinutes>0){const h=Math.floor(info.runtimeMinutes/60),m=info.runtimeMinutes%60;facts.push(h?`${h}h ${m}m`:`${m} min`);}
   if(Number.isFinite(info.imdbRating))facts.push('IMDb '+info.imdbRating.toFixed(1));
   line(facts.join(' · '),'title-option-facts');
+  if(detail.querySelector('.title-option-facts'))detail.querySelector('.title-option-facts').title='Movie details supplied by Cinemeta';
   if(info.cast?.length)line('Cast: '+info.cast.join(', '),'title-option-people');
   if(info.director?.length)line('Director: '+info.director.join(', '),'title-option-director');
   line(info.summary||'Synopsis unavailable.','title-option-story');

@@ -200,6 +200,7 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 .title-option-people,.title-option-story{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .title-option-director{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
 @media(max-width:400px){.similar-titles button{grid-template-columns:52px minmax(0,1fr);gap:9px;padding:12px 7px}.title-option-poster{width:52px;height:78px}.title-option-name{font-size:.94rem}}
+@media(min-width:600px){.title-option-detail{min-height:7em}}
 #title-popup-retry{margin:4px 10px 8px}
 #similar-movies{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;margin-top:16px}
 #similar-movies .movie-card{margin:0}
