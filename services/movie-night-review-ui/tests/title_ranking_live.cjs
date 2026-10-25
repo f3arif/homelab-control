@@ -11,7 +11,7 @@ const out=path.resolve(__dirname,'../qa/title-ranking-live');fs.mkdirSync(out,{r
   await p.route('**/*',route=>{
    const r=route.request();if(['GET','HEAD'].includes(r.method()))return route.continue();
    const action=r.postDataJSON()?.action;
-   if(new URL(r.url()).pathname==='/movie-night/api/feedback'&&['search-titles','find-similar','similar-status'].includes(action)){actions.push(action);return route.continue();}
+   if(new URL(r.url()).pathname==='/movie-night/api/feedback'&&['search-titles','title-preview','find-similar','similar-status'].includes(action)){actions.push(action);return route.continue();}
    blocked.push(r.method());return route.abort();
   });
   const response=await p.goto('https://hpenvy.tailc9bb62.ts.net:8453/movie-night/',{waitUntil:'networkidle'});assert.equal(response.status(),200);
@@ -20,7 +20,7 @@ const out=path.resolve(__dirname,'../qa/title-ranking-live');fs.mkdirSync(out,{r
   for(const query of ['Holid','Holiday','Holiday 2014']){
    await p.locator('#similar-query').fill(query);
    await p.getByRole('option',{name:'Holiday · 2014',exact:true}).waitFor({timeout:30000});
-   const options=await p.getByRole('option').allTextContents();assert(options.length>12);
+   const options=await p.getByRole('option').evaluateAll(es=>es.map(e=>e.getAttribute('aria-label')));assert(options.length>12);
    assert(options.indexOf('Holiday · 2014')<4,JSON.stringify(options.slice(0,5)));
    if(query==='Holiday 2014')assert.equal(options[0],'Holiday · 2014');
   }

@@ -426,6 +426,8 @@ $('save-genres').onclick=async()=>{
 };
 let similarGeneration=0,similarBusy=false,similarEnabled=false,similarRevision=null;
 let titleTimer=null,titleWorking=false,titlePending=null,titleVersion=0,titleResponse=null,titleActive=-1,titleWantsPopup=false,titleComposing=false;
+let previewObserver=null,previewTimer=null,previewWorking=false,previewPending=[];
+const titlePreviews=new Map();
 function searchControls(){
   $('search-titles').disabled=!similarEnabled||similarBusy;
   $('similar-query').disabled=!similarEnabled;
@@ -517,9 +519,10 @@ function positionTitlePopup(){
   const below=bottom-rect.bottom-12,above=rect.top-top-12,useAbove=below<160&&above>below;
   $('title-popup').style.width=$('similar-form').querySelector('.similar-input').clientWidth+'px';
   $('title-popup').classList.toggle('above',useAbove);
-  $('title-popup').style.maxHeight=Math.max(80,Math.min(360,useAbove?above:below))+'px';
+  $('title-popup').style.maxHeight=Math.max(80,Math.min(480,useAbove?above:below))+'px';
 }
 function closeTitlePopup(){
+  stopTitlePreviews();
   titleWantsPopup=false;$('title-popup').hidden=true;$('similar-query').setAttribute('aria-expanded','false');
   setTitleActive(-1);
 }
@@ -545,17 +548,93 @@ function chooseTitle(title,jobId){
   $('similar-query').value=title.name;closeTitlePopup();$('similar-query').blur();
   findSimilar(title,jobId);
 }
+function stopTitlePreviews(){
+  previewObserver?.disconnect();previewObserver=null;previewPending=[];
+  if(previewTimer)clearTimeout(previewTimer);previewTimer=null;
+}
+function previewVisible(button){
+  if(!button.isConnected||$('title-popup').hidden)return false;
+  const row=button.getBoundingClientRect(),popup=$('title-popup').getBoundingClientRect();
+  return row.bottom>popup.top&&row.top<popup.bottom;
+}
+function fillTitlePreview(button,title){
+  const detail=button.querySelector('.title-option-detail'),info=title.movieInfo||{};
+  detail.replaceChildren();
+  const line=(text,cls)=>{if(!text)return;const span=document.createElement('span');span.className=cls;span.textContent=text;detail.append(span);};
+  const facts=[...(title.genres||[]).slice(0,3)];
+  if(Number.isInteger(info.runtimeMinutes)&&info.runtimeMinutes>0){const h=Math.floor(info.runtimeMinutes/60),m=info.runtimeMinutes%60;facts.push(h?`${h}h ${m}m`:`${m} min`);}
+  if(Number.isFinite(info.imdbRating))facts.push('IMDb '+info.imdbRating.toFixed(1));
+  line(facts.join(' · '),'title-option-facts');
+  if(info.cast?.length)line('Cast: '+info.cast.join(', '),'title-option-people');
+  if(info.director?.length)line('Director: '+info.director.join(', '),'title-option-director');
+  line(info.summary||'Synopsis unavailable.','title-option-story');
+  button.dataset.preview='ready';
+}
+async function drainTitlePreviews(){
+  if(previewWorking)return;
+  previewWorking=true;
+  try{
+    while(previewPending.length){
+      const request=previewPending.shift(),{button,title,jobId,version}=request;
+      if(version!==titleVersion||!titleWantsPopup||!previewVisible(button)){if(button.dataset.preview==='queued')button.dataset.preview='idle';continue;}
+      button.dataset.preview='loading';
+      try{
+        // Complete stale reads silently, keeping at most one preview active.
+        // The other server worker remains available for new title typing.
+        const result=await searchJob({action:'title-preview',jobId,imdb:title.id},null,true);
+        if(result.title?.id!==title.id)throw new Error('Movie details unavailable.');
+        titlePreviews.delete(title.id);titlePreviews.set(title.id,{title:result.title,receivedAt:Date.now()});
+        while(titlePreviews.size>80)titlePreviews.delete(titlePreviews.keys().next().value);
+        if(version===titleVersion&&button.isConnected)fillTitlePreview(button,result.title);
+      }catch(error){
+        if(version===titleVersion&&button.isConnected){
+          button.dataset.preview='failed';button.querySelector('.title-option-detail').textContent='Details unavailable. Search again to retry.';
+        }
+      }
+    }
+  }finally{previewWorking=false;}
+}
+function watchTitlePreviews(result){
+  const version=titleVersion;
+  previewObserver=new IntersectionObserver(entries=>{
+    for(const entry of entries){
+      const button=entry.target;
+      if(!entry.isIntersecting||version!==titleVersion||!titleWantsPopup)continue;
+      const poster=button.querySelector('img[data-src]');if(poster){poster.src=poster.dataset.src;delete poster.dataset.src;}
+      if(result.previewsEnabled&&button.dataset.preview==='idle'){
+        button.dataset.preview='queued';previewPending.push({button,title:result.titles[Number(button.dataset.titleIndex)],jobId:result.jobId,version});
+      }
+    }
+    if(previewPending.length&&!previewTimer)previewTimer=setTimeout(()=>{previewTimer=null;drainTitlePreviews();},180);
+  },{root:$('title-popup'),threshold:0});
+  for(const button of $('similar-titles').querySelectorAll('[role="option"]'))previewObserver.observe(button);
+}
 function renderTitles(result){
+  stopTitlePreviews();
   $('similar-titles').replaceChildren();setTitleActive(-1);
   for(const [index,title] of result.titles.entries()){
     const li=document.createElement('li'),button=document.createElement('button');li.setAttribute('role','presentation');
     button.type='button';button.tabIndex=-1;button.id='movie-title-option-'+index;button.setAttribute('role','option');button.setAttribute('aria-selected','false');
-    button.textContent=title.name+' · '+(title.releaseInfo||'Year unavailable');
+    const label=title.name+' · '+(title.releaseInfo||'Year unavailable');
+    button.setAttribute('aria-label',label);button.dataset.titleIndex=index;button.dataset.preview='idle';
+    const poster=document.createElement('span');poster.className='title-option-poster';poster.setAttribute('aria-hidden','true');
+    const fallback=document.createElement('span');fallback.textContent='No poster';poster.append(fallback);
+    if(/^tt\d{5,12}$/.test(title.id||'')){
+      const img=document.createElement('img');img.alt='';img.width=64;img.height=96;img.decoding='async';img.referrerPolicy='no-referrer';img.dataset.src=base+'/posters/'+title.id+'.img';
+      img.onload=()=>{fallback.hidden=true;};img.onerror=()=>{img.remove();fallback.hidden=false;};poster.append(img);
+    }
+    const copy=document.createElement('span');copy.className='title-option-copy';
+    const name=document.createElement('span');name.className='title-option-name';name.textContent=label;
+    const detail=document.createElement('span');detail.className='title-option-detail';detail.id='movie-title-detail-'+index;
+    detail.textContent=result.previewsEnabled?'Loading details…':'Movie details unavailable.';
+    button.setAttribute('aria-describedby',detail.id);copy.append(name,detail);button.append(poster,copy);
+    const cached=titlePreviews.get(title.id);if(cached&&Date.now()-cached.receivedAt<600000)fillTitlePreview(button,cached.title);
     button.onpointerdown=event=>{if(event.pointerType==='mouse')event.preventDefault();};
     button.onclick=()=>chooseTitle(title,result.jobId);li.append(button);$('similar-titles').append(li);
   }
   const message=result.titles.length?`${result.titles.length} matches. Tap a movie, or use ↑ ↓ and Enter.`:'No movie titles found. Check the spelling or try a shorter title.';
   showTitlePopup(message);$('similar-status').textContent=result.titles.length?'Choose a movie from the popup to find related suggestions.':message;
+  watchTitlePreviews(result);
 }
 async function drainTitleLookups(){
   if(titleWorking)return;
@@ -576,6 +655,7 @@ async function drainTitleLookups(){
   }finally{titleWorking=false;searchControls();}
 }
 function requestTitles(immediate=false){
+  stopTitlePreviews();
   if(titleTimer)clearTimeout(titleTimer);titleTimer=null;titlePending=null;
   const query=titleQuery(),version=++titleVersion;
   $('similar-titles').replaceChildren();setTitleActive(-1);

@@ -62,7 +62,7 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   for(const query of ['Holid','Holiday','Holiday 2014']){
    await input.fill(query);await p.getByRole('option',{name:'Holiday · 2014',exact:true}).waitFor();
    assert.equal(await p.getByRole('option').count(),20);
-   assert.equal(await p.getByRole('option').first().innerText(),'Holiday · 2014');
+   assert.equal(await p.getByRole('option').first().getAttribute('aria-label'),'Holiday · 2014');
    const box=await p.locator('#title-popup').boundingBox(),bar=await p.locator('#selection').boundingBox();
    assert(box.x>=0&&box.x+box.width<=width+1&&box.y>=0&&box.y+box.height<=bar.y+1);
   }
@@ -74,7 +74,7 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   const overflow=await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
   const small=await p.locator('#similar-search button:visible,#similar-search input:visible').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().height<40).length);
   assert(!overflow);assert.equal(small,0);assert.deepEqual(errors,[]);
-  assert(requests.every(r=>['search-titles','find-similar','similar-status'].includes(r.action)));
+  assert(requests.every(r=>['search-titles','title-preview','find-similar','similar-status'].includes(r.action)));
   results.push({width,debounced:true,keyboard:true,touch:width<600,newestQueryOnly:true,clearIgnoresLateResults:true,ime:true,retry:true,literalTextSafe:true,overflow,smallControls:small,errors});await ctx.close();
  }}finally{await browser.close();}
  fs.writeFileSync(path.join(out,'browser-results.json'),JSON.stringify({passed:true,results},null,2));console.log(JSON.stringify(results));

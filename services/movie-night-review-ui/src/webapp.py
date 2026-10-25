@@ -342,7 +342,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
-        if data.get('action') in ('search-titles','find-similar','similar-status','add-similar'):
+        if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar'):
             try:return controller.similar.action(principal,data)
             except ValueError as exc:raise HTTPException(400,str(exc))
             except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')

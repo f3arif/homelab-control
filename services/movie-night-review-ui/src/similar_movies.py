@@ -18,7 +18,7 @@ from discovery_policy import normalize, screened, clean_text
 from genre_settings import genres_of
 from metadata_discovery import CinemetaDiscovery, DiscoveryUnavailable
 from movie_night import shortlist
-from movie_presentation import ID, normalize_info
+from movie_presentation import ID, normalize_info, display_fields
 
 
 def query_text(value):
@@ -123,6 +123,18 @@ class CinemetaSimilar:
             if item:
                 result.setdefault(item['id'], item)
         return rank_titles(result.values(), query)[:40]
+
+    def preview(self, imdb):
+        if not isinstance(imdb, str) or not ID.fullmatch(imdb):
+            raise ValueError('Choose a movie from the title search results.')
+        meta = self.metadata.get('/meta/movie/' + imdb + '.json', time.monotonic() + 15).get('meta')
+        chosen = reference(meta)
+        if not chosen or chosen['id'] != imdb:
+            raise DiscoveryUnavailable('Movie details unavailable')
+        # Reference details are descriptive, not recommendation eligibility.
+        # Existing display normalization bounds names, runtime, rating and text.
+        info = display_fields(imdb, normalize_info(meta, imdb))['movieInfo']
+        return dict(chosen, movieInfo=info, genres=sorted(genres_of(meta)))
 
     def find(self, imdb, settings):
         deadline = time.monotonic() + 55
@@ -247,7 +259,7 @@ class SimilarMovies:
     def close(self):
         self.pool.shutdown(wait=True, cancel_futures=True)
 
-    def start(self, principal, kind, key, call, revision=None):
+    def start(self, principal, kind, key, call, revision=None, keep_job=None):
         with self.lock:
             now = time.monotonic()
             for job_id, job in list(self.jobs.items()):
@@ -256,10 +268,13 @@ class SimilarMovies:
             for job_id, job in self.jobs.items():
                 if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision:
                     return {'jobId': job_id, 'state': 'searching'}
+            if kind == 'preview' and any(j['kind'] == 'preview' and not j['future'].done() for j in self.jobs.values()):
+                raise ValueError('Movie details are loading. Try again shortly.')
             if sum(not j['future'].done() for j in self.jobs.values()) >= 2:
                 raise ValueError('Two movie searches are already running. Try again shortly.')
             if len(self.jobs) >= 24:
-                del self.jobs[next(k for k, v in self.jobs.items() if v['future'].done())]
+                # Scrolling must retain the parent title job for selection.
+                del self.jobs[next(k for k, v in self.jobs.items() if k != keep_job and v['future'].done())]
             job_id = secrets.token_hex(16)
             self.jobs[job_id] = dict(principal=principal, kind=kind, key=key, revision=revision, created=now, future=self.pool.submit(call))
             return {'jobId': job_id, 'state': 'searching'}
@@ -295,7 +310,9 @@ class SimilarMovies:
             return {'jobId': job_id, 'state': 'searching'}
         job, result = self.result(principal, job_id, job['kind'])
         if job['kind'] == 'titles':
-            return {'jobId': job_id, 'state': 'ready', 'titles': result}
+            return {'jobId': job_id, 'state': 'ready', 'titles': result, 'previewsEnabled': True}
+        if job['kind'] == 'preview':
+            return {'jobId': job_id, 'state': 'ready', 'title': result}
         if job['revision'] != self.controller.genre_settings.read()['revision']:
             raise ValueError('Your genres changed. Find similar movies again to use the latest settings.')
         existing = {r['id'] for r in self.controller.review_pool()}
@@ -314,6 +331,14 @@ class SimilarMovies:
             return self.start(principal, 'titles', query.casefold(), lambda: self.source.search(query))
         if action == 'similar-status':
             with c.lock: return self.status(principal, data.get('jobId'))
+        if action == 'title-preview':
+            with self.lock:
+                parent = data.get('jobId')
+                _, titles = self.result(principal, parent, 'titles')
+                imdb = data.get('imdb')
+                if imdb not in [r['id'] for r in titles]:
+                    raise ValueError('Choose a movie from the title search results.')
+                return self.start(principal, 'preview', imdb, lambda: self.source.preview(imdb), keep_job=parent)
         if action == 'find-similar':
             _, titles = self.result(principal, data.get('jobId'), 'titles')
             imdb = data.get('imdb')

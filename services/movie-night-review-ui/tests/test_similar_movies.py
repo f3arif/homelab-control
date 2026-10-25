@@ -102,6 +102,19 @@ class SimilarMetadataTests(unittest.TestCase):
    def iter_content(self,*a):yield b'{"metas":[]}'
   with patch('requests.get',return_value=Response()) as get:
    CinemetaSimilar().search('Original');self.assertEqual('https://v3-cinemeta.strem.io/catalog/movie/top/search=Original.json',get.call_args.args[0]);self.assertFalse(get.call_args.kwargs['allow_redirects'])
+ def test_reference_preview_descriptive_fields_allow_old_excluded_movie(self):
+  self.transport.seed.update(genres=['Drama','Comedy'],imdbRating='7.2',runtime='170 min')
+  r=self.source.preview('tt90000000')
+  self.assertEqual('2008',r['releaseInfo']);self.assertEqual(['Comedy','Drama'],r['genres'])
+  self.assertEqual(['Fixture Actor'],r['movieInfo']['cast']);self.assertEqual(['Fixture Director'],r['movieInfo']['director'])
+  self.assertEqual(170,r['movieInfo']['runtimeMinutes']);self.assertEqual(7.2,r['movieInfo']['imdbRating'])
+  self.assertEqual(self.transport.seed['description'],r['movieInfo']['summary'])
+ def test_preview_rejects_wrong_identity_and_bounds_optional_fields(self):
+  with self.assertRaises(ValueError):self.source.preview('../invalid')
+  with self.assertRaises(DiscoveryUnavailable):self.source.preview('tt99999')
+  self.transport.seed.update(cast=['A'*101,'Valid']*5,director=['D'*101],runtime=0,imdbRating='NaN',description='x'*3001)
+  info=self.source.preview('tt90000000')['movieInfo'];self.assertEqual(['Valid'],info['cast']);self.assertEqual([],info['director'])
+  self.assertFalse({'runtimeMinutes','imdbRating','summary'}&info.keys())
 class SimilarWorkflowTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.h=Harness(self.tmp.name);self.h.clock=int(time.time());self.h.payload['generatedEpoch']=self.h.clock
@@ -120,6 +133,45 @@ class SimilarWorkflowTests(unittest.TestCase):
   self.assertEqual(0,self.h.provider.resolves);self.assertEqual(0,self.h.provider.verifies);self.assertFalse(list(self.h.media.rglob('*.mkv')))
   self.assertEqual(['tt90000001'],[x['id'] for x in SuggestionStore(self.tmp.name).read()]);self.assertEqual(0o600,self.c.similar.store.path.stat().st_mode&0o777)
   self.act('add-similar',jobId=r['jobId'],imdb='tt90000001');self.assertEqual(1,len(self.c.similar.store.read()))
+ def test_title_preview_has_no_choice_or_media_side_effects(self):
+  before=self.dump();r=self.wait(self.act('search-titles',query='Original'));self.assertTrue(r['previewsEnabled'])
+  details=self.wait(self.act('title-preview',jobId=r['jobId'],imdb='tt90000000'))
+  self.assertEqual('tt90000000',details['title']['id']);self.assertEqual(['Fixture Actor'],details['title']['movieInfo']['cast'])
+  self.assertEqual(before,self.dump());self.assertFalse(self.c.similar.store.path.exists());self.assertEqual(0,self.h.provider.resolves)
+ def test_preview_parent_identity_principal_expiry_and_csrf(self):
+  r=self.wait(self.act('search-titles',query='Original'));b=dict(action='title-preview',jobId=r['jobId'],imdb='tt90000000')
+  with self.assertRaisesRegex(ValueError,'expired'):self.c.similar.action('another',b)
+  with self.assertRaisesRegex(ValueError,'Choose a movie'):self.act('title-preview',jobId=r['jobId'],imdb='tt99999')
+  self.assertEqual(403,self.h.client.post('/movie-night/api/feedback',json=b).status_code)
+  self.assertEqual(403,self.h.client.post('/movie-night/api/feedback',json=b,headers=dict(self.h.headers,origin='https://evil.test')).status_code)
+  self.assertEqual(200,self.h.post('feedback',b).status_code)
+  self.c.similar.jobs[r['jobId']]['created']-=901
+  with self.assertRaisesRegex(ValueError,'expired'):self.c.similar.action('fixture',b)
+ def test_scroll_many_previews_retains_parent_title_job(self):
+  rows=[movie(i) for i in range(40)]
+  def provider(path):
+   if '/search=' in path:return {'metas':rows}
+   return {'meta':next((r for r in rows if path=='/meta/movie/'+r['id']+'.json'),None)}
+  self.c.similar.source=CinemetaSimilar(CinemetaDiscovery(provider))
+  titles=self.wait(self.act('search-titles',query='Dream'))
+  for row in titles['titles']:
+   r=self.wait(self.act('title-preview',jobId=titles['jobId'],imdb=row['id']));self.assertEqual(row['id'],r['title']['id'])
+   self.assertIn(titles['jobId'],self.c.similar.jobs);self.assertLessEqual(len(self.c.similar.jobs),24)
+ def test_one_preview_leaves_capacity_for_title_typing(self):
+  event=threading.Event()
+  try:
+   self.c.similar.start('fixture','preview','one',lambda:event.wait(5))
+   with self.assertRaisesRegex(ValueError,'details are loading'):self.c.similar.start('fixture','preview','two',lambda:None)
+   self.wait(self.act('search-titles',query='Original'))
+  finally:event.set()
+ def test_preview_failure_can_retry_and_cannot_be_used_for_admission(self):
+  r=self.wait(self.act('search-titles',query='Original'));self.transport.fail=True
+  a=self.act('title-preview',jobId=r['jobId'],imdb='tt90000000')
+  with self.assertRaises(DiscoveryUnavailable):self.c.similar.jobs[a['jobId']]['future'].result(5)
+  with self.assertRaisesRegex(ValueError,'temporarily unavailable'):self.act('similar-status',jobId=a['jobId'])
+  self.transport.fail=False;b=self.wait(self.act('title-preview',jobId=r['jobId'],imdb='tt90000000'))
+  with self.assertRaisesRegex(ValueError,'no longer eligible'):self.act('add-similar',jobId=b['jobId'],imdb='tt90000000')
+  self.assertNotEqual(a['jobId'],b['jobId'])
  def test_add_then_existing_finalize(self):
   r=self.find();self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
   self.assertTrue(self.c.finalize('fixture',['tt12345','tt12346','tt90000001'])['finalized']['valid']);self.assertEqual(0,self.h.provider.resolves)
