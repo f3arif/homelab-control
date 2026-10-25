@@ -86,6 +86,15 @@ class ExplicitSearchWorkflowTests(unittest.TestCase):
   saved=self.c.finalize('fixture',['tt12345','tt12346','tt90000004'])
   self.assertTrue(saved['finalized']['valid']);self.assertNotIn('tt90000004',saved['finalized']['excludedIds'])
   self.assertEqual(0,self.h.provider.resolves)
+ def test_fresh_added_titles_remain_named_after_weekly_list_ages_out(self):
+  result=self.find();ids=['tt90000001','tt90000003','tt90000004']
+  for imdb in ids:self.act('add-similar',jobId=result['jobId'],imdb=imdb)
+  self.c.finalize('fixture',ids)
+  self.h.payload['generatedEpoch']-=31*86400
+  view=self.c.review('fixture')
+  self.assertTrue(view['finalized']['valid'])
+  self.assertEqual(ids,[r['id'] for r in view['finalized']['movies']])
+  self.assertTrue(all(r['name'].startswith('Dream Mission') for r in view['finalized']['movies']))
  def test_watched_and_disliked_stay_visible_but_cannot_be_added(self):
   result=self.find();ids=[r['id'] for r in result['movies']]
   self.c.feedback.rate('fixture',result['movies'][0],'seen')
