@@ -18,7 +18,8 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   assert.equal(await p.getByRole('option',{name:'Original · 2020',exact:true}).count(),1);
   await p.getByRole('option',{name:'Original · 2008',exact:true}).click();
   await p.locator('#similar-results').waitFor({state:'visible'});
-  assert.equal(await p.locator('#similar-movies .movie-card').count(),2);
+  assert.equal(await p.locator('#similar-movies .movie-card').count(),4);
+  assert((await p.locator('#similar-status').textContent()).includes('all genres and years'));
   assert((await p.locator('#similar-movies').textContent()).includes('Genre match only'));
   await p.locator('#similar-results').scrollIntoViewIfNeeded();await p.screenshot({path:path.join(out,'results-'+width+'.png')});
   const add=p.locator('#similar-movies [data-similar-add="tt90000001"]');

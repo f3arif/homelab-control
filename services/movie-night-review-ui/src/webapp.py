@@ -73,7 +73,10 @@ class Controller:
             pool=shortlist(payload,now,self.seen_policy,limit=None,genre_settings=settings)
             saved_pool=pool if fresh else shortlist(payload,generated if type(generated) is int else now,self.seen_policy,limit=None,genre_settings=settings)
             saved_rows={r['id']:r for r in saved_pool}
-            genre_blocked={r['id']:dict(r,releaseInfo=str(r.get('year',''))) for r in payload.get('movies',[])+payload.get('retainedIneligibleSelections',[])+payload.get('genreFilteredMovies',[]) if not genre_match(r,settings)}
+            # Fresh explicit additions remain descriptive when weekly rows age out.
+            saved_rows.update({r['id']:r for r in pool})
+            manual={r['id'] for r in pool if r.get('manualSuggestion')}
+            genre_blocked={r['id']:dict(r,releaseInfo=str(r.get('year',''))) for r in payload.get('movies',[])+payload.get('retainedIneligibleSelections',[])+payload.get('genreFilteredMovies',[]) if r['id'] not in manual and not genre_match(r,settings)}
             saved_rows.update(genre_blocked)
             eligible={r['id']:r for r in pool if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')}
             saved=self.feedback.saved(principal)

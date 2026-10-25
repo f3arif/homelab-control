@@ -69,22 +69,24 @@ class SimilarMetadataTests(unittest.TestCase):
   self.assertEqual(40,len(found));self.assertEqual(40,len({r['id'] for r in found}))
   self.assertEqual([reference(good)],self.title_search('Unique',invalid+[good,good]))
   rows=[None]*100+[good];self.assertEqual([],self.title_search('Unique',rows))
- def test_results_screened_old_reference_allowed(self):
+ def test_explicit_results_ignore_shortlist_genres_and_year_floor(self):
   r=self.source.find('tt90000000',defaults());self.assertEqual('2008',r['reference']['releaseInfo'])
-  self.assertEqual({'tt90000001','tt90000002'},{x['id'] for x in r['rows']})
+  self.assertEqual({'tt90000001','tt90000002','tt90000003','tt90000004'},{x['id'] for x in r['rows']})
   self.assertTrue(all(x.get('presentation') for x in r['rows']))
  def test_saved_filters_enable_drama(self):
   r=self.source.find('tt90000000',dict(defaults(),excluded=['Comedy','Animation']))
   self.assertIn('tt90000003',[x['id'] for x in r['rows']])
- def test_conflicting_catalog_and_detail_filters(self):
+ def test_catalog_and_detail_genres_preserved_without_exclusions(self):
   def transport(path):
    if '/catalog/' in path:return {'metas':[dict(movie(1),genre=['Drama'])]}
    return self.transport(path)
-  self.assertEqual([],CinemetaSimilar(CinemetaDiscovery(transport)).find('tt90000000',defaults())['rows'])
+  rows=CinemetaSimilar(CinemetaDiscovery(transport)).find('tt90000000',defaults())['rows']
+  self.assertEqual(1,len(rows));self.assertIn('Drama',rows[0]['genres'])
  def test_story_connections_and_honest_genre_only_label(self):
   a,ar=related_score(movie(0),movie(1));b,br=related_score(movie(0),self.transport.movies[1])
   self.assertGreater(a,b);self.assertIn('Genre match only',br[-1]);self.assertTrue(any('Same director' in r for r in ar))
-  self.assertEqual((0,[]),related_score(movie(0),movie(genres=['Romance'])))
+  self.assertEqual((0,[]),related_score(movie(0),movie(genres=['Romance'],director=[],cast=[],description='An unrelated romance.')))
+  self.assertGreater(related_score(movie(0),movie(genres=['Romance']))[0],0)
  def test_generic_words_do_not_beat_shared_director(self):
   seed=movie(0,description='A team steals corporate technology on a secret mission.')
   weak=movie(1,genres=['Thriller'],description='A team steals corporate technology.',director=[],cast=[])
@@ -178,11 +180,14 @@ class SimilarWorkflowTests(unittest.TestCase):
  def test_seen_and_payload_exclusions_rechecked(self):
   r=self.find();self.c.feedback.rate('fixture',r['movies'][0],'seen')
   with self.assertRaisesRegex(ValueError,'no longer eligible'):self.act('add-similar',jobId=r['jobId'],imdb=r['movies'][0]['id'])
-  self.h.payload['knownSeenIds']=['tt90000002'];self.assertEqual([],self.act('similar-status',jobId=r['jobId'])['movies'])
- def test_changed_settings_invalidate_cached_results(self):
+  self.h.payload['knownSeenIds']=['tt90000002']
+  view={x['id']:x for x in self.act('similar-status',jobId=r['jobId'])['movies']}
+  self.assertFalse(view[r['movies'][0]['id']]['canAdd']);self.assertFalse(view['tt90000002']['canAdd'])
+ def test_changed_settings_do_not_limit_explicit_cached_results(self):
   r=self.find();s=defaults();s['included']=['Thriller'];s['excluded']=['Sci-Fi'];self.c.genre_settings.save(s)
-  with self.assertRaisesRegex(ValueError,'genres changed'):self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
-  self.assertFalse(self.c.similar.store.path.exists())
+  data=self.act('add-similar',jobId=r['jobId'],imdb='tt90000001')
+  self.assertIn('tt90000001',data['eligibleIds']);self.assertTrue(self.c.similar.store.path.exists())
+  self.assertEqual(['Sci-Fi'],self.c.genre_settings.read()['excluded'])
  def test_foreign_job_and_unoffered_ids(self):
   r=self.wait(self.act('search-titles',query='Original'))
   with self.assertRaisesRegex(ValueError,'expired'):self.c.similar.action('another',dict(action='similar-status',jobId=r['jobId']))

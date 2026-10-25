@@ -18,14 +18,14 @@
 <div id="notice" role="status" aria-live="polite"></div>
 <section id="similar-search" class="panel" aria-labelledby="similar-title">
 <h2 id="similar-title">Find movies like…</h2>
-<p class="muted" id="similar-help">Start typing a movie you enjoyed. Compare posters, cast and story details in the popup, then tap the right movie. Suggestions follow your saved genres and watched filters.</p>
+<p class="muted" id="similar-help">Start typing a movie you enjoyed, then choose it from the popup. Find related movies across all genres and years, including films connected through its cast, director and country. Your shortlist filters do not limit this search.</p>
 <form id="similar-form" role="search"><label for="similar-query">Movie title</label><div class="similar-input">
 <div id="title-picker" class="title-picker"><input id="similar-query" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="similar-titles" placeholder="Start typing a movie…" minlength="2" maxlength="120" required autocomplete="off" spellcheck="false" enterkeyhint="search" aria-describedby="similar-help" disabled>
 <button id="clear-similar" class="title-clear" type="button" aria-label="Clear search" title="Clear search" hidden>×</button>
 <div id="title-popup" class="title-popup" hidden><p id="title-popup-status" role="status" aria-live="polite"></p><ul id="similar-titles" class="similar-titles" role="listbox" aria-label="Matching movie titles"></ul><button id="title-popup-retry" type="button" class="secondary" hidden>Try again</button></div></div>
 <button id="search-titles" type="submit" disabled>Find movie</button></div></form>
 <p id="similar-status" role="status" aria-live="polite"></p>
-<div id="similar-results" hidden><h3 id="similar-results-title" tabindex="-1"></h3><p class="muted">Related by genres, synopsis words, or shared cast and directors. Add a result to your shortlist, then use Pick. Downloads start only when you finalize.</p><div id="similar-movies"></div></div>
+<div id="similar-results" hidden><h3 id="similar-results-title" tabindex="-1"></h3><p class="muted">Connections are shown below each movie. Add any result to your shortlist, then use Pick. Watched and Not for me titles stay visible here but cannot be added. Downloads start only when you finalize.</p><div id="similar-movies"></div></div>
 </section>
 <section id="movies" aria-label="Movie suggestions"></section>
 <section id="selection" class="tray" hidden aria-label="Finalize your picks"><div class="tray-inner">
@@ -44,7 +44,7 @@
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <dialog id="genre-editor" aria-labelledby="genre-title" aria-describedby="genre-help">
 <h2 id="genre-title" tabindex="-1">Your movie genres</h2>
-<p id="genre-help" class="muted">Add or remove genres below. These settings are saved for Movie Night across your devices.</p>
+<p id="genre-help" class="muted">Add or remove genres for your regular suggestions across devices. Movies you explicitly add from a search keep their place.</p>
 <fieldset><legend>Include genres</legend><p id="include-help" class="muted">Movies can match any one of these genres. Leave this empty for any genre.</p>
 <div id="included-tags" class="genre-tags" aria-label="Included genres"></div>
 <label for="include-add">Add an included genre</label><select id="include-add" aria-describedby="include-help"></select>
