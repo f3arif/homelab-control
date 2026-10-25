@@ -310,6 +310,7 @@ function movieOverview(movie,heading='h2'){
     imdb.title=Number.isFinite(info.imdbRating)?'IMDb rating supplied by Cinemeta; not a live IMDb lookup.':'View movie information on IMDb';facts.append(imdb);
   }
   text.append(facts);
+  if(movie.manualSuggestion){const note=document.createElement('p');note.className='muted';note.textContent='Added from your search';text.append(note);}
   if(movie.genres?.length){const genres=document.createElement('ul');genres.className='movie-genres';genres.setAttribute('aria-label','Genres');
     for(const g of movie.genres){const li=document.createElement('li');li.textContent=g;genres.append(li);}text.append(genres);}
   overview.append(poster,text);overview.pickBadge=badge;return overview;

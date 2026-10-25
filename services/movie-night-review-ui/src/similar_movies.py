@@ -68,7 +68,7 @@ def rank_titles(items, query):
 
 
 # Generic synopsis words do not count as evidence of a similar story.
-STOP = set('about after again against also another around away back becomes before being between both come comes could days does during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young team project task plan idea work tragic dangerous mission'.split())
+STOP = set('about after again against also another around attempt attempts away back becomes before being between both come comes could days does down during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young team project task plan idea work tragic dangerous mission'.split())
 
 
 def words(meta):
