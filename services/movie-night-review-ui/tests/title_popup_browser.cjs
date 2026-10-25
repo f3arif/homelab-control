@@ -26,9 +26,9 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   await input.press('ArrowDown');assert.equal(await input.getAttribute('aria-activedescendant'),'movie-title-option-1');
   await input.press('ArrowUp');await input.press('Enter');await p.locator('#similar-results').waitFor({state:'visible'});
   assert(await p.locator('#title-popup').isHidden());assert.equal(await input.inputValue(),'Original');
-  const heading=await p.locator('#similar-results-title').boundingBox();
-  if(!(heading.y>=0&&heading.y<100)){await p.screenshot({path:path.join(out,'heading-failure-'+width+'.png')});console.log('HEADING_DIAGNOSTIC',JSON.stringify({width,heading,...await p.evaluate(()=>({scrollY,docHeight:document.documentElement.scrollHeight,view:innerHeight,active:document.activeElement?.id,bodyTop:document.body.getBoundingClientRect().top}))}));}
-  assert(heading.y>=0&&heading.y<100);
+  // Chromium rounds scroll offsets to whole pixels; the heading may start a
+  // fraction of one pixel above zero after scrollIntoView (observed -0.47 px).
+  const heading=await p.locator('#similar-results-title').boundingBox();assert(heading.y>=-1&&heading.y<100,JSON.stringify({width,heading}));
   await input.focus();await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
   await input.press('Escape');assert(await p.locator('#title-popup').isHidden());assert.equal(await input.inputValue(),'Original');
   await input.press('ArrowDown');await p.getByRole('option',{name:'Original · 2008',exact:true}).waitFor();
