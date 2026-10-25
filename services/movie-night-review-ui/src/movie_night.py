@@ -106,27 +106,40 @@ def shortlist(payload, now, seen_policy=None, limit=12, genre_settings=None):
         if not isinstance(row, dict):
             continue
         imdb, name = row.get('id', ''), row.get('name', '')
+        manual = imdb in requested and screened(row,now,unrestricted=True)
+        checked = manual or screened(row,now,genre_settings)
         # An explicitly added, freshly screened title does not refresh stale weekly rows.
-        if not fresh and (imdb not in requested or not screened(row, now, genre_settings)):
+        if not fresh and (imdb not in requested or not checked):
             continue
-        if imdb in payload.get('knownSeenIds', []) or not genre_match(row,genre_settings):continue
+        if imdb in payload.get('knownSeenIds', []) or (not manual and not genre_match(row,genre_settings)):continue
         if not isinstance(imdb, str) or not re.fullmatch(r'tt\d+', imdb) or imdb in ids:
             continue
         if str(name).strip().casefold() in SEEN_TITLES or row.get('seen') is True:
             continue
-        if type(row.get('year')) is not int or not 2016 <= row['year'] <= 2100:
+        if type(row.get('year')) is not int or not (1888 if manual else 2016) <= row['year'] <= 2100:
             continue
         # Broad "Horror" or similarity is insufficient evidence about intensity.
-        if not screened(row,now,genre_settings) and (row.get('scareLevel') not in {'low', 'moderate'} or row.get('intensityReviewed') is not True):
+        if not checked and (row.get('scareLevel') not in {'low', 'moderate'} or row.get('intensityReviewed') is not True):
             continue
         tags = set(row.get('fitTags') or []) & PREFERRED_TAGS
         genres = genres_of(row) & set(genre_settings['included']) if genre_settings['included'] else genres_of(row)
         # Genre-qualified films need not share the old obsession/tension/twist tags.
         # Retain the existing editorial fallback for legacy rows without genre metadata.
-        if row.get('intenseSupernatural') is not False and not screened(row,now,genre_settings):
+        if row.get('intenseSupernatural') is not False and not checked:
             continue
-        reason = 'Matches your preferred genres: ' + ', '.join(sorted(genres)) if genres else 'Reviewed Movie Night suggestion.'
-        result.append({'id': imdb, 'type': 'movie', 'name': str(name),
+        reason = 'Added from your movie search; all genres and years.' if manual else ('Matches your preferred genres: ' + ', '.join(sorted(genres)) if genres else 'Reviewed Movie Night suggestion.')
+        result.append(dict(present_movie(row,now,reason),manualSuggestion=manual))
+        ids.add(imdb)
+        if limit is not None and len(result) >= limit:
+            break
+    return result
+
+
+def present_movie(row,now,reason):
+    """Format already validated metadata; eligibility stays with the caller."""
+    imdb=row['id']
+    tags=set(row.get('fitTags') or []) & PREFERRED_TAGS
+    return {'id': imdb, 'type': 'movie', 'name': str(row['name']),
                        'releaseInfo': str(row.get('year', '')),
                        'description': reason + '\nFinalize your picks to request their server downloads. Source availability and playback are not yet verified.',
                        'posterShape': 'poster', 'fitTags': sorted(tags),
@@ -136,11 +149,7 @@ def shortlist(payload, now, seen_policy=None, limit=12, genre_settings=None):
                        'screening': 'automatic metadata' if row.get('discoveryEvidence') else 'editorial',
                        'sources': row.get('sources',[]),
                        'intensityGuide': str(row.get('intensityGuide',''))[:240],
-                       **display_fields(imdb, row.get('presentation'), now)})
-        ids.add(imdb)
-        if limit is not None and len(result) >= limit:
-            break
-    return result
+                       **display_fields(imdb, row.get('presentation'), now)}
 
 
 class ApprovalStore:

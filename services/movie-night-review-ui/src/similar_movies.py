@@ -17,7 +17,7 @@ import unicodedata
 from discovery_policy import normalize, screened, clean_text
 from genre_settings import genres_of
 from metadata_discovery import CinemetaDiscovery, DiscoveryUnavailable
-from movie_night import shortlist
+from movie_night import shortlist, present_movie
 from movie_presentation import ID, normalize_info, display_fields
 
 
@@ -84,27 +84,37 @@ def people(meta, key):
     return {n for n in value[:12] if clean_text(n, 100)} if isinstance(value, list) else set()
 
 
+def countries(meta):
+    value = meta.get('country', '')
+    return {n.strip() for n in value.split(',')[:5] if clean_text(n.strip(), 80)} if isinstance(value, str) and len(value) <= 400 else set()
+
+
 def related_score(seed, meta, frequency=None, total=1):
     common = genres_of(seed) & genres_of(meta)
-    if not common:
-        return 0, []
     shared = words(seed) & words(meta)
     frequency = frequency or {}
     distinctive = sorted(shared, key=lambda w: (frequency.get(w, 0), w))[:4]
     narrative = sum(math.log(1 + total / (1 + frequency.get(w, 0))) for w in distinctive)
     directors = sorted(people(seed, 'director') & people(meta, 'director'))
     cast = sorted(people(seed, 'cast') & people(meta, 'cast'))
-    reasons = ['Shared genres: ' + ', '.join(sorted(common))]
+    # Cross-genre cast/director and substantive story connections are valid.
+    # A country alone (or a single stray synopsis word) is not a recommendation.
+    if not common and not directors and not cast and len(distinctive) < 2:
+        return 0, []
+    reasons = ['Shared genres: ' + ', '.join(sorted(common))] if common else []
     if distinctive:
         reasons.append('Shared synopsis words: ' + ', '.join(distinctive))
     if directors:
         reasons.append('Same director: ' + ', '.join(directors[:2]))
     if cast:
         reasons.append('Shared cast: ' + ', '.join(cast[:2]))
+    country = sorted(countries(seed) & countries(meta))
+    if country:
+        reasons.append('Same country: ' + ', '.join(country[:2]))
     if not distinctive and not directors and not cast:
         reasons.append('Genre match only; no closer story connection found.')
-    genre_score = len(common) / len(genres_of(seed) | genres_of(meta))
-    return 3 * genre_score + min(4, narrative) + 6 * bool(directors) + min(2, len(cast)), reasons
+    genre_score = len(common) / max(1, len(genres_of(seed) | genres_of(meta)))
+    return 3 * genre_score + min(6, narrative) + 6 * bool(directors) + 3 * min(2, len(cast)) + 2 * bool(country), reasons
 
 
 class CinemetaSimilar:
@@ -136,18 +146,26 @@ class CinemetaSimilar:
         info = display_fields(imdb, normalize_info(meta, imdb))['movieInfo']
         return dict(chosen, movieInfo=info, genres=sorted(genres_of(meta)))
 
-    def find(self, imdb, settings):
+    def find(self, imdb, settings=None):
         deadline = time.monotonic() + 55
         seed = self.metadata.get('/meta/movie/' + imdb + '.json', deadline).get('meta')
         chosen = reference(seed)
-        if not chosen or chosen['id'] != imdb or not genres_of(seed):
+        if not chosen or chosen['id'] != imdb:
             raise ValueError('Details for this reference movie are unavailable. Choose another title.')
-        # A reference can predate 2016 or be watched/excluded. Only results must qualify.
-        genres = sorted(genres_of(seed) - set(settings['excluded']))
+        # Explicit reference discovery is independent of saved shortlist filters.
+        # Cinemeta's person searches return real filmography candidates alongside
+        # literal name matches. Verify each connection from metadata before use.
+        names = []
+        for key, limit in (('director', 2), ('cast', 3)):
+            value = seed.get(key, [])
+            if isinstance(value, list):
+                names += [n for n in value[:limit] if clean_text(n, 100)]
+        names = list(dict.fromkeys(names))[:5]
+        paths = ['/catalog/movie/top/search=' + quote(n, safe='') + '.json' for n in names]
+        genres = sorted(genres_of(seed))
         supported = [g for g in genres if g not in ('Music', 'Musical')]
-        paths = ['/catalog/movie/top/genre=' + quote(g, safe='') + '.json' for g in supported[:3]]
-        paths += ['/catalog/movie/top/genre=' + quote(g, safe='') + '&skip=100.json' for g in supported[:2]]
-        if genres and not paths:
+        paths += ['/catalog/movie/top/genre=' + quote(g, safe='') + '.json' for g in supported[:3]]
+        if not paths:
             paths = ['/catalog/movie/top.json']
         candidates = {}; failures = 0
         for path in paths:
@@ -156,15 +174,18 @@ class CinemetaSimilar:
                 if not isinstance(metas, list):
                     raise DiscoveryUnavailable('Invalid catalog')
                 for meta in metas[:100]:
-                    row = normalize(meta, genre_settings=settings)
-                    if row and row['id'] != imdb and genres_of(seed) & genres_of(row):
-                        candidates.setdefault(row['id'], (meta, row))
+                    item = reference(meta)
+                    if item and item['id'] != imdb:
+                        # Discard literal title-only person-name search hits.
+                        score, _ = related_score(seed, meta)
+                        if score > 0:
+                            candidates.setdefault(item['id'], (meta, item))
             except DiscoveryUnavailable:
                 failures += 1
         frequency = Counter(w for meta, _ in candidates.values() for w in words(meta))
         ordered = sorted(candidates.values(), key=lambda pair: (-related_score(seed, pair[0], frequency, len(candidates))[0], pair[1]['id']))
         verified = []
-        for meta, catalog in ordered[:18]:
+        for meta, catalog in ordered[:30]:
             if time.monotonic() >= deadline:
                 break
             try:
@@ -172,11 +193,11 @@ class CinemetaSimilar:
             except DiscoveryUnavailable:
                 failures += 1
                 continue
-            row = normalize(detail, genre_settings=settings)
+            row = normalize(detail, unrestricted=True)
             if not row or row['id'] != catalog['id']:
                 continue
-            row['discoveryEvidence']['genres'] = list(dict.fromkeys(catalog['genres'] + row['genres']))
-            row = normalize(row['discoveryEvidence'], genre_settings=settings)
+            row['discoveryEvidence']['genres'] = list(dict.fromkeys(sorted(genres_of(meta)) + row['genres']))
+            row = normalize(row['discoveryEvidence'], unrestricted=True)
             if not row:
                 continue
             score, reasons = related_score(seed, detail, frequency, len(candidates))
@@ -184,13 +205,14 @@ class CinemetaSimilar:
                 continue
             row['presentation'] = normalize_info(detail, row['id'])
             verified.append((score, row, reasons))
-            if len(verified) >= 12:
+            if len(verified) >= 18:
                 break
         if not verified and failures:
             raise DiscoveryUnavailable('Metadata provider unavailable')
         verified.sort(key=lambda item: (-item[0], item[1]['id']))
         return {'reference': chosen, 'rows': [r for _, r, _ in verified],
                 'reasons': {r['id']: reason for _, r, reason in verified},
+                'searchScope': 'all-genres-and-years',
                 'partial': bool(failures or time.monotonic() >= deadline)}
 
 
@@ -300,6 +322,7 @@ class SimilarMovies:
         c = self.controller
         ratings = c.feedback.ratings(principal)
         payload = {'generatedEpoch': int(c.clock()), 'movies': rows,
+                   'requestedSuggestionIds': [r['id'] for r in rows],
                    'knownSeenIds': c.shortlist_payload().get('knownSeenIds', [])}
         return [r for r in shortlist(payload, int(c.clock()), c.seen_policy, limit=None, genre_settings=c.genre_settings.read())
                 if ratings.get(r['id'], {}).get('value') not in ('seen', 'dislike')]
@@ -313,12 +336,21 @@ class SimilarMovies:
             return {'jobId': job_id, 'state': 'ready', 'titles': result, 'previewsEnabled': True}
         if job['kind'] == 'preview':
             return {'jobId': job_id, 'state': 'ready', 'title': result}
-        if job['revision'] != self.controller.genre_settings.read()['revision']:
-            raise ValueError('Your genres changed. Find similar movies again to use the latest settings.')
         existing = {r['id'] for r in self.controller.review_pool()}
-        movies = [dict(r, similarReasons=result['reasons'][r['id']], inShortlist=r['id'] in existing)
-                  for r in self.eligible(result['rows'], principal)]
-        return {'jobId': job_id, 'state': 'ready', 'reference': result['reference'], 'movies': movies, 'partial': result.get('partial', False)}
+        eligible = {r['id'] for r in self.eligible(result['rows'], principal)}
+        ratings = self.controller.feedback.ratings(principal)
+        now = int(self.controller.clock())
+        movies = []
+        for row in result['rows']:
+            if not screened(row, now, unrestricted=True):
+                continue
+            value = ratings.get(row['id'], {}).get('value')
+            block = None if row['id'] in eligible else value if value in ('seen', 'dislike') else 'known-seen'
+            movies.append(dict(present_movie(row, now, 'Related movie search; all genres and years.'),
+                               similarReasons=result['reasons'][row['id']], inShortlist=row['id'] in existing,
+                               canAdd=not block, selectionBlock=block))
+        return {'jobId': job_id, 'state': 'ready', 'reference': result['reference'], 'movies': movies,
+                'searchScope': 'all-genres-and-years', 'partial': result.get('partial', False)}
 
     def action(self, principal, data):
         c = self.controller
@@ -344,14 +376,13 @@ class SimilarMovies:
             imdb = data.get('imdb')
             if imdb not in [r['id'] for r in titles]:
                 raise ValueError('Choose a movie from the title search results.')
-            settings = c.genre_settings.read()
-            return self.start(principal, 'similar', imdb, lambda: self.source.find(imdb, settings), settings['revision'])
+            return self.start(principal, 'similar', imdb, lambda: self.source.find(imdb))
         if action == 'add-similar':
             with c.lock:
                 job_id = data.get('jobId'); imdb = data.get('imdb')
                 view = self.status(principal, job_id)
-                if imdb not in [r['id'] for r in view.get('movies', [])]:
-                    raise ValueError('This suggestion is no longer eligible. Search again with your current settings.')
+                if imdb not in [r['id'] for r in view.get('movies', []) if r.get('canAdd')]:
+                    raise ValueError('This suggestion is no longer eligible. Watched and Not for me movies cannot be added.')
                 _, result = self.result(principal, job_id, 'similar')
                 row = next(r for r in result['rows'] if r['id'] == imdb)
                 self.store.add(row)

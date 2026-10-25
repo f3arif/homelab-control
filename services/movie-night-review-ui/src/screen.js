@@ -441,11 +441,18 @@ function clearSimilar(message=''){
 }
 function syncSimilar(data){
   similarEnabled=!!data.similarSearchEnabled;
-  if(similarRevision!==null&&data.genreSettings?.revision!==similarRevision)
-    clearSimilar('Your genres changed. Search again to use your latest settings.');
-  for(const b of $('similar-movies').querySelectorAll('[data-similar-add]'))
-    b.textContent=pickCards.has(b.dataset.similarAdd)?'Show in shortlist':'Add to shortlist';
+  const seen=new Set((data.seen||[]).map(r=>r.id)),disliked=new Set((data.disliked||[]).map(r=>r.id));
+  for(const b of $('similar-movies').querySelectorAll('[data-similar-add]')){
+    b.dataset.feedbackBlocked=seen.has(b.dataset.similarAdd)?'seen':disliked.has(b.dataset.similarAdd)?'dislike':'';
+    similarButtonState(b);
+  }
   searchControls();
+}
+function similarButtonState(button){
+  const block=button.dataset.historyBlocked||button.dataset.feedbackBlocked;
+  button.disabled=!!block;
+  button.textContent=block?(block==='dislike'?'Not for me — cannot add':'Watched — cannot add'):
+    pickCards.has(button.dataset.similarAdd)?'Show in shortlist':'Add to shortlist';
 }
 async function searchJob(data,generation,finishStale=false){
   let result=await api('feedback',data);const deadline=performance.now()+75000;
@@ -472,14 +479,16 @@ async function findSimilar(title,titleJob){
     if(!result)return;
     const name=result.reference.name+(result.reference.releaseInfo?' ('+result.reference.releaseInfo+')':'');
     $('similar-results-title').textContent='Movies related to '+name;
-    $('similar-status').textContent=result.movies.length?`${result.movies.length} suggestions match your current filters.${result.partial?' Some metadata was unavailable; these are the verified matches.':''}`:
-      'No related movies matched your saved genres and watched filters. Try another title or use Edit genres.';
+    $('similar-status').textContent=result.movies.length?`${result.movies.length} related movies · all genres and years.${result.partial?' Some metadata was unavailable; these are the verified matches.':''}`:
+      'No verified related movies were found. Try another title or search again.';
     $('similar-results').hidden=!result.movies.length;
     for(const movie of result.movies){
       const card=cardBody(movie,'h4'),reasons=document.createElement('ul');reasons.className='similar-reasons';
       for(const text of movie.similarReasons||[]){const li=document.createElement('li');li.textContent=text;reasons.append(li);}
       const add=document.createElement('button');add.type='button';add.dataset.similarAdd=movie.id;
-      add.textContent=pickCards.has(movie.id)?'Show in shortlist':'Add to shortlist';
+      add.dataset.historyBlocked=movie.selectionBlock==='known-seen'?'known-seen':'';
+      add.dataset.feedbackBlocked=['seen','dislike'].includes(movie.selectionBlock)?movie.selectionBlock:'';
+      similarButtonState(add);
       add.onclick=async()=>{
         if(reviewBusy)return;
         if(!pickCards.has(movie.id)){
@@ -488,7 +497,7 @@ async function findSimilar(title,titleJob){
             render(await api('feedback',{action:'add-similar',jobId:result.jobId,imdb:movie.id}));
             toast('Added “'+movie.name+'” to your shortlist. Use Pick to select it.');
           }catch(error){similarError(error);if(error.kind==='connection')load();return;}
-          finally{reviewBusy=false;add.disabled=false;selectionCount();}
+          finally{reviewBusy=false;similarButtonState(add);selectionCount();}
         }
         const target=pickCards.get(movie.id)?.card;
         if(target){target.tabIndex=-1;target.scrollIntoView({block:'center'});target.focus({preventScroll:true});}
