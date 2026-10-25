@@ -21,7 +21,20 @@ with tempfile.TemporaryDirectory(prefix='afz-title-popup-qa-') as td:
                     [dict(metadata.seed,id='tt2556308',name='Holiday',releaseInfo='2014'),
                      dict(metadata.seed,id='tt0030241',name='Holiday',releaseInfo='1938')]}
         if path=='/meta/movie/tt2556308.json':
-            return {'meta':dict(metadata.seed,id='tt2556308',name='Holiday',releaseInfo='2014')}
+            return {'meta':dict(metadata.seed,id='tt2556308',name='Holiday',releaseInfo='2014',cast=['Akshay Kumar','Sonakshi Sinha','Freddy Daruwala'],director=['A.R. Murugadoss'],runtime='170 min',imdbRating='7.2',genres=['Action','Crime','Thriller'],description='A military officer hunts sleeper cells while home on leave.')}
+        if path=='/meta/movie/tt0030241.json':
+            return {'meta':dict(metadata.seed,id='tt0030241',name='Holiday',releaseInfo='1938',cast=['Cary Grant','Katharine Hepburn'],director=['George Cukor'],runtime='95 min',genres=['Comedy','Romance'],description='A young man must choose between a wealthy family and his own plans.')}
+        for query,imdb,name in [('SlowDetails','tt8000099','Slow details movie'),('LatestDetails','tt8000098','Latest details movie'),('FailDetails','tt8000097','Failed details movie'),('LiteralDetails','tt8000096','Literal details movie'),('SparseDetails','tt8000095','Sparse details movie')]:
+            if '/search='+query in path:return {'metas':[dict(metadata.seed,id=imdb,name=name)]}
+            if path=='/meta/movie/'+imdb+'.json':
+                if query=='SlowDetails':time.sleep(1.4)
+                data=dict(metadata.seed,id=imdb,name=name,cast=['Current Actor' if query=='LatestDetails' else 'Old Actor'])
+                if query=='LiteralDetails':data.update(cast=['<img src=x onerror=alert(1)>'],description='<script>alert(1)</script>')
+                if query=='SparseDetails':data={k:data[k] for k in ('id','name','type','releaseInfo')}
+                return {'meta':data}
+        if path.startswith('/meta/movie/tt80000'):
+            imdb=path.rsplit('/',1)[-1].removesuffix('.json')
+            return {'meta':dict(metadata.seed,id=imdb,cast=['Catalog Actor'])}
         if '/search=Slow' in path:
             time.sleep(1.2)
             return {'metas':[dict(metadata.seed,name='Slow result')]}
@@ -44,10 +57,10 @@ with tempfile.TemporaryDirectory(prefix='afz-title-popup-qa-') as td:
     endpoint.chmod(0o600)
     thread=threading.Thread(target=front.serve_forever,daemon=True);thread.start()
     with sqlite3.connect(h.db) as db:before='\n'.join(db.iterdump())
-    out=BASE/'qa/title-popup';out.mkdir(parents=True,exist_ok=True)
+    out=BASE/os.environ.get('AFZ_POPUP_QA_FOLDER','qa/title-popup');out.mkdir(parents=True,exist_ok=True)
     try:
         env=dict(os.environ,AFZ_GATEWAY_QA_ORIGIN=origin,AFZ_GATEWAY_QA_OUTPUT=str(out))
-        result=subprocess.run([os.environ.get('AFZ_NODE','/home/coolyo/.local/bin/node'),str(BASE/'tests/title_popup_browser.cjs')],capture_output=True,text=True,env=env,timeout=180)
+        result=subprocess.run([os.environ.get('AFZ_NODE','/home/coolyo/.local/bin/node'),str(BASE/'tests'/os.environ.get('AFZ_POPUP_QA_SCRIPT','title_popup_browser.cjs'))],capture_output=True,text=True,env=env,timeout=180)
         (out/'browser.log').write_text(result.stdout+result.stderr)
         assert result.returncode==0,(result.stdout+result.stderr)[-3500:]
         with sqlite3.connect(h.db) as db:assert before=='\n'.join(db.iterdump()),'Settings changed existing database content'

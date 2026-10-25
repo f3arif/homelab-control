@@ -46,7 +46,7 @@ const origin=process.env.AFZ_GATEWAY_QA_ORIGIN,out=process.env.AFZ_GATEWAY_QA_OU
   const overflow=await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
   const small=await p.locator('#similar-search button:visible,#similar-search input:visible').evaluateAll(es=>es.filter(e=>e.getBoundingClientRect().height<40).length);
   assert(!overflow);assert.equal(small,0);assert.deepEqual(errors,[]);
-  assert(writes.every(w=>w.path==='/movie-night/api/feedback'&&['search-titles','find-similar','similar-status','add-similar'].includes(w.body.action)));
+  assert(writes.every(w=>w.path==='/movie-night/api/feedback'&&['search-titles','title-preview','find-similar','similar-status','add-similar'].includes(w.body.action)));
   await p.screenshot({path:path.join(out,'search-'+width+'.png')});
   results.push({width,emptySearch:true,disambiguation:true,persisted:true,canPick:true,failedSearchRecovery:true,clearIgnoresLateResults:true,overflow,smallControls:small,errors});await ctx.close();
  }}finally{await browser.close();}
