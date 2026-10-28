@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "width": 360,
+      "eligible": 4,
+      "excludedNotes": 2,
+      "readyFiles": 6,
+      "overflow": false,
+      "errors": [],
+      "writes": []
+    },
+    {
+      "width": 412,
+      "eligible": 4,
+      "excludedNotes": 2,
+      "readyFiles": 6,
+      "overflow": false,
+      "errors": [],
+      "writes": []
+    },
+    {
+      "width": 1280,
+      "eligible": 4,
+      "excludedNotes": 2,
+      "readyFiles": 6,
+      "overflow": false,
+      "errors": [],
+      "writes": []
+    }
+  ]
+}

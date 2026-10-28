@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "width": 360,
+      "emptySearch": true,
+      "disambiguation": true,
+      "persisted": true,
+      "canPick": true,
+      "failedSearchRecovery": true,
+      "clearIgnoresLateResults": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    },
+    {
+      "width": 412,
+      "emptySearch": true,
+      "disambiguation": true,
+      "persisted": true,
+      "canPick": true,
+      "failedSearchRecovery": true,
+      "clearIgnoresLateResults": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    },
+    {
+      "width": 1280,
+      "emptySearch": true,
+      "disambiguation": true,
+      "persisted": true,
+      "canPick": true,
+      "failedSearchRecovery": true,
+      "clearIgnoresLateResults": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    }
+  ]
+}
