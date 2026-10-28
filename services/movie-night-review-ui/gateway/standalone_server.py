@@ -14,6 +14,9 @@ from urllib.parse import urlsplit
 
 from movie_gateway import DEFAULT_SOCKET, dispatch
 
+# Only these public entry pages may be opened from another site.
+ENTRY_PATHS = frozenset(('/', '/login', '/movie-night', '/movie-night/'))
+
 
 def exact_origin(value):
     url = urlsplit(value)
@@ -89,10 +92,14 @@ class Handler(BaseHTTPRequestHandler):
         if len(sites) > 1:
             self.send(403, 'Request not allowed', 'text/plain'); return False
         if sites == ['cross-site']:
+            # In-app browsers can omit Sec-Fetch-Dest or mark it empty; the
+            # browser-controlled navigation mode is still required. Reject
+            # cross-site subresources, API calls, and all writes as before.
+            dest = self.headers.get_all('Sec-Fetch-Dest', [])
             entry = (not post and self.command == 'GET'
-                     and self.path in ('/', '/login', '/movie-night', '/movie-night/')
-                     and self.headers.get('Sec-Fetch-Mode') == 'navigate'
-                     and self.headers.get('Sec-Fetch-Dest') == 'document')
+                     and self.path.partition('?')[0] in ENTRY_PATHS
+                     and self.headers.get_all('Sec-Fetch-Mode', []) == ['navigate']
+                     and dest in ([], ['document'], ['empty']))
             if not entry:
                 self.send(403, 'Cross-site request denied', 'text/plain'); return False
         return True
@@ -103,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.headers.get_all('Tailscale-User-Login', []) == [self.server.owner_login]
 
     def denied(self):
-        if self.path in ('/', '/login', '/movie-night', '/movie-night/'):
+        if self.path.partition('?')[0] in ENTRY_PATHS:
             self.send(403, '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Movie Night · Private access</title><main><h1>Movie Night</h1><p>Connect Tailscale using your owner account, then open this page again.</p><p>This address uses your Tailscale sign-in. No billing password is needed.</p></main></html>')
         else:
             self.send(403, '{"error":"movie_night_owner_required"}', 'application/json')
@@ -113,6 +120,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.session():
             self.denied(); return
+        path, separator, _ = self.path.partition('?')
+        if separator and path in ENTRY_PATHS:
+            # Drop tracking parameters rather than forwarding unknown query
+            # strings to the exact-route-only private backend.
+            self.send(303, location='/movie-night/' if path in ('/', '/login') else path)
+            return
         if self.path in ('/', '/login'):
             self.send(303, location='/movie-night/'); return
         dispatch(self)

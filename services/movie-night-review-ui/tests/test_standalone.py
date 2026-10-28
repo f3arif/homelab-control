@@ -117,10 +117,60 @@ class AccessTests(unittest.TestCase):
         h=self.headers(**{'Origin':PUBLIC,'Content-Type':'application/json'})
         self.assertEqual(self.request('/movie-night/api/feedback','POST',h,b'{}')[0],403)
 
-    def test_cross_site_entry_only(self):
+    def test_cross_site_entry_only_for_document_and_in_app_navigations(self):
+        for destination in ('document', 'empty', None):
+            fetch={'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate'}
+            if destination is not None: fetch['Sec-Fetch-Dest']=destination
+            h=self.headers(**fetch)
+            for path in ('/', '/login'):
+                status, response, _ = self.request(path,headers=h)
+                self.assertEqual((status,response.get('Location')),(303,'/movie-night/'))
+            for path in ('/movie-night', '/movie-night/'):
+                self.assertEqual(self.request(path,headers=h)[0],200)
+            # Exact routing still excludes API subresources and response bodies.
+            self.assertEqual(self.request(headers=h)[0],403)
+            self.assertEqual(self.request('/movie-night/api/downloads',headers=h)[0],403)
+
+    def test_cross_site_entry_query_redirect_drops_params_and_does_not_forward(self):
         h=self.headers(**{'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'})
-        self.assertEqual(self.request('/',headers=h)[0],303)
-        self.assertEqual(self.request(headers=h)[0],403)
+        before=len(self.backend.received)
+        for url,canonical in (
+            ('/movie-night/?utm_source=chatgpt','/movie-night/'),
+            ('/movie-night?ref=chatgpt','/movie-night'),
+            ('/login?ref=chatgpt','/movie-night/'),
+            ('/?entry=chatgpt','/movie-night/'),
+        ):
+            status,headers,body=self.request(url,headers=h)
+            self.assertEqual((status,headers.get('Location')),(303,canonical),url)
+            self.assertNotIn('utm_source',body.decode())
+            self.assertIn('no-store',headers.get('Cache-Control',''))
+        self.assertEqual(len(self.backend.received),before)
+        # The clean top-level navigation works after following the redirect.
+        self.assertEqual(self.request('/movie-night/',headers=h)[0],200)
+
+    def test_cross_site_non_navigation_and_post_still_denied(self):
+        for mode,destination in (
+            ('cors','empty'),('no-cors','image'),('navigate','iframe'),
+            ('navigate','script'),('same-origin','document'),(None,'document'),
+        ):
+            fetch={'Sec-Fetch-Site':'cross-site'}
+            if mode is not None: fetch['Sec-Fetch-Mode']=mode
+            if destination is not None: fetch['Sec-Fetch-Dest']=destination
+            self.assertEqual(self.request('/movie-night/',headers=self.headers(**fetch))[0],403)
+        h=self.headers(**{'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate',
+                           'Sec-Fetch-Dest':'document','Origin':PUBLIC,
+                           'Content-Type':'application/json','X-Movie-Night-CSRF':'valid-csrf'})
+        self.assertEqual(self.request('/movie-night/api/feedback','POST',h,b'{}')[0],403)
+        self.assertEqual(self.request('/movie-night%2f?utm_source=chatgpt',headers=h)[0],403)
+        self.assertEqual(self.request('/movie-night/../api/billing/snapshot?x=1',headers=h)[0],403)
+
+    def test_external_entry_still_requires_owner_host_and_exact_origin(self):
+        h=self.headers(**{'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'})
+        without_owner=[(k,v) for k,v in h if k!='Tailscale-User-Login']
+        self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=without_owner)[0],403)
+        self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=h+[('Origin','https://chatgpt.com')])[0],403)
+        self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=h+[('Host','evil.test')])[0],403)
+        self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=h+[('Sec-Fetch-Mode','navigate')])[0],403)
 
     def test_oversized_body_rejected(self):
         h=self.headers(**{'Origin':PUBLIC,'Content-Type':'application/json'})
