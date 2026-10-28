@@ -5,9 +5,9 @@ is authoritative. This adapter only handles GETs *after* the standalone
 gateway's exact Host/Origin and Tailscale owner checks. It creates no downloads,
 holds no credentials, exposes no backend address and retains no private cache.
 """
+import http.client
 import json
 import re
-from urllib.parse import urlsplit
 
 from movie_gateway import UnixConnection
 
@@ -33,7 +33,7 @@ def route(path):
     if path == CATALOG:
         return ("catalog", 0)
     m = PAGED.fullmatch(path)
-    if m and int(m[1]) % PAGE_SIZE == 0:
+    if m:
         return ("catalog", int(m[1]))
     m = META.fullmatch(path)
     if m:
@@ -130,6 +130,6 @@ def handle(handler):
     try:
         data = payload(handler, *matched)
         handler.send(200, json.dumps(data, ensure_ascii=False, separators=(",", ":")), "application/json")
-    except (OSError, ValueError, json.JSONDecodeError, TimeoutError):
+    except (OSError, ValueError, http.client.HTTPException, TimeoutError):
         handler.send(503, '{"error":"movie_night_catalog_unavailable"}', "application/json")
     return True
