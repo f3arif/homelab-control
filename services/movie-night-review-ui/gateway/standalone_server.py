@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(403, 'Request not allowed', 'text/plain'); return False
         if sites == ['cross-site']:
             # In-app browsers can omit Sec-Fetch-Dest or mark it empty; the
-            # unforgeable browser navigation mode is still required. Reject
+            # browser-controlled navigation mode is still required. Reject
             # cross-site subresources, API calls, and all writes as before.
             dest = self.headers.get_all('Sec-Fetch-Dest', [])
             entry = (not post and self.command == 'GET'
