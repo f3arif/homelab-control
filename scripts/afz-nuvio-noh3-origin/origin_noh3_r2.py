@@ -13,7 +13,7 @@ import ssl
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -40,6 +40,18 @@ MUTATIONS={"POST","PUT","PATCH","DELETE","OPTIONS"}
 STATS={"hp_success":0,"zbook_success":0,"hp_failure":0,"zbook_failure":0}
 MUTEX=threading.Lock()
 app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
+def wire_path(raw_path,path):
+    """Path to send upstream. Starlette hands the proxy a percent-DECODED path, so a
+    search like 'social%20reckoning' arrives with a literal space, which http.client
+    rejects (InvalidURL) and every multi-word search became an instant 503.
+    Prefer the raw request path; otherwise re-encode the decoded one."""
+    wire=raw_path.decode("latin-1") if raw_path else ""
+    if not wire.startswith("/"):
+        wire=quote(path,safe="/:@!$&'()*+,;=-._~%")
+    if re.search(r"[\x00-\x20\x7f-\xff]",wire):
+        wire=quote(wire,safe="/:@!$&'()*+,;=-._~%")
+    return wire
+
 def add_stat(field):
     with MUTEX: STATS[field]+=1
 
@@ -83,21 +95,24 @@ async def proxy(path:str,request:Request):
     path="/"+path
     if any(x in path.lower() for x in ("..","//","%2e","%2f","%5c","\\")) or len(path)>1000:
         return JSONResponse({"error":"invalid_route"},status_code=404)
+    wire=wire_path(request.scope.get("raw_path"),path)
+    if any(x in wire.lower() for x in ("..","//","%2e","%2f","%5c","\\")) or len(wire)>1000:
+        return JSONResponse({"error":"invalid_route"},status_code=404)
     method=request.method
     data=await request.body()
     if len(data)>1024*1024:
         return JSONResponse({"error":"body_too_large"},status_code=413)
     headers={k:v for k,v in request.headers.items() if k.lower() not in HOP}
-    if zbook_local_first(method,path):
+    if zbook_local_first(method,wire):
         attempts=["zbook","hp-local"]
     else:
-        attempts=["hp-local"]+ (["zbook"] if eligible_for_zbook(method,path) else [])
+        attempts=["hp-local"]+ (["zbook"] if eligible_for_zbook(method,wire) else [])
     for name in attempts:
         connection=None
         response=None
         try:
             connection,response=await run_in_threadpool(
-                upstream,name,method,path,request.url.query,headers,data if data else None)
+                upstream,name,method,wire,request.url.query,headers,data if data else None)
             if response.status in (502,503,504):
                 add_stat("hp_failure" if name=="hp-local" else "zbook_failure")
                 response.close();connection.close()
