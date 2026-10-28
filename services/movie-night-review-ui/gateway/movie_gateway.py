@@ -124,7 +124,7 @@ def dispatch_media(handler,headers):
         headers['Range']=range_value
     connection=UnixConnection(handler.server.movie_socket);sent=False
     try:
-        connection.request('GET',handler.path,headers=headers)
+        connection.request(handler.command,handler.path,headers=headers)
         response=connection.getresponse()
         if response.status not in (200,206):
             handler.send(response.status,'File unavailable','text/plain');return
@@ -141,6 +141,8 @@ def dispatch_media(handler,headers):
             value=response.getheader(name)
             if value and '\r' not in value and '\n' not in value:handler.send_header(name,value)
         handler.end_headers();sent=True
+        if handler.command == 'HEAD':
+            return
         left=length
         while left:
             chunk=response.read(min(65536,left))
