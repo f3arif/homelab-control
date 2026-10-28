@@ -1,0 +1,21 @@
+{
+  "settings": {
+    "revision": 18,
+    "included": [
+      "Action",
+      "Adventure",
+      "Crime",
+      "Horror",
+      "Mystery",
+      "Sci-Fi",
+      "Thriller"
+    ],
+    "excluded": [
+      "Animation",
+      "Drama",
+      "Comedy"
+    ]
+  },
+  "databasesUnchanged": true,
+  "mediaStarted": false
+}

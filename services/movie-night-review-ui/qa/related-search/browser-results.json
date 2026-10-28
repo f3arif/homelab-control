@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "width": 360,
+      "unfiltered": true,
+      "watchedVisibleAndBlocked": true,
+      "genreEditKeptSearch": true,
+      "oldExcludedAddPersisted": true,
+      "canPick": true,
+      "savedChoicesUnchanged": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    },
+    {
+      "width": 412,
+      "unfiltered": true,
+      "watchedVisibleAndBlocked": true,
+      "genreEditKeptSearch": true,
+      "oldExcludedAddPersisted": true,
+      "canPick": true,
+      "savedChoicesUnchanged": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    },
+    {
+      "width": 1280,
+      "unfiltered": true,
+      "watchedVisibleAndBlocked": true,
+      "genreEditKeptSearch": true,
+      "oldExcludedAddPersisted": true,
+      "canPick": true,
+      "savedChoicesUnchanged": true,
+      "overflow": false,
+      "smallControls": 0,
+      "errors": []
+    }
+  ]
+}

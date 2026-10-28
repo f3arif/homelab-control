@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "width": 360,
+      "overflow": false,
+      "smallControls": 0,
+      "ready": 10,
+      "errors": [],
+      "writes": []
+    },
+    {
+      "width": 412,
+      "overflow": false,
+      "smallControls": 0,
+      "ready": 10,
+      "errors": [],
+      "writes": []
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "smallControls": 0,
+      "ready": 10,
+      "errors": [],
+      "writes": []
+    }
+  ]
+}
