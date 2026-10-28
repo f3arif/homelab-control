@@ -12,7 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from movie_gateway import DEFAULT_SOCKET, dispatch
+from movie_gateway import DEFAULT_SOCKET, dispatch, dispatch_media, MEDIA_PATH, PRINCIPAL
+from nuvio_ready_catalog import handle as handle_nuvio_catalog
 
 # Only these public entry pages may be opened from another site.
 ENTRY_PATHS = frozenset(('/', '/login', '/movie-night', '/movie-night/'))
@@ -128,7 +129,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ('/', '/login'):
             self.send(303, location='/movie-night/'); return
+        if handle_nuvio_catalog(self):
+            return
         dispatch(self)
+
+    def do_HEAD(self):
+        if not self.boundary():
+            return
+        if not self.session():
+            self.denied(); return
+        if not MEDIA_PATH.fullmatch(self.path):
+            self.send(404, 'Unavailable', 'text/plain'); return
+        dispatch_media(self, {'X-AFZ-Review-Principal': PRINCIPAL, 'Host': 'localhost'})
 
     def do_POST(self):
         if not self.boundary(post=True):
