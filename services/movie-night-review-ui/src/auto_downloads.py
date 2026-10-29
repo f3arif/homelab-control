@@ -34,7 +34,13 @@ class AutoDownloads:
             return False # an old replay must not overwrite a newer selection
         db.execute('INSERT INTO movie_download_requests VALUES(?,?,?)',(principal,request_id,body))
         now=int(self.c.clock())
+        removed=self.c.removed_media_ids()
         for imdb in ids:
+            if imdb in removed:
+                db.execute('INSERT OR IGNORE INTO movie_download_queue VALUES(?,?,?,?,?,NULL,?,?)',
+                           (str(uuid4()),principal,imdb,rows[imdb]['name'],'removed','Removed from your 8 TB server.',now))
+                db.execute("UPDATE movie_download_queue SET state='removed',message='Removed from your 8 TB server.',updated=? WHERE principal=? AND imdb=?",(now,principal,imdb))
+                continue
             db.execute('INSERT OR IGNORE INTO movie_download_queue VALUES(?,?,?,?,?,NULL,?,?)',
                        (str(uuid4()),principal,imdb,rows[imdb]['name'],'queued','Waiting for a source check.',now))
             if imdb in retry:
@@ -73,6 +79,7 @@ class AutoDownloads:
             row=db.execute('SELECT state FROM movie_download_queue WHERE id=? AND principal=?',(request_id,principal)).fetchone()
         if row!=('checking',):raise ValueError('download request no longer active')
         self.c.require_enabled();self.c.require_finalized(imdb,principal)
+        self.c.require_not_removed(imdb)
 
     def _finish(self, request_id, state, message):
         with closing(self.c.feedback.connect()) as db,db:
@@ -122,6 +129,9 @@ class AutoDownloads:
             except Exception as exc:
                 if self.closed:return # leave a checking request recoverable after shutdown
                 # Never expose provider exceptions, credentials or temporary URLs.
+                if str(exc)=='Owner intentionally removed server copy; no automatic re-download':
+                    self._finish(request_id,'removed','Removed from your 8 TB server.')
+                    continue
                 message='Source service unavailable. Try again later.'
                 if str(exc)=='insufficient storage or quota':message='Not enough free storage or transfer budget. No server transfer started.'
                 elif str(exc)=='8 TB drive unavailable; downloads paused.':message=str(exc)

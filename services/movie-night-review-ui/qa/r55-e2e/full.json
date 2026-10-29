@@ -1,0 +1,33 @@
+{
+  "atUtc": "2026-10-29T04:19:05.559115+00:00",
+  "inputCommit": "790567d002bb7531b77a6648848756feef3a8c1a",
+  "originalSourceBase": "c6fe9a6e71ce8d510136da1289fd938c4e6bacd6",
+  "python": "3.12.15",
+  "scope": "full",
+  "tests": 358,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "passed": true,
+  "elapsedSeconds": 9.079,
+  "sourceSHA256": {
+    "services/movie-night-review-ui/src/adapters.py": "91cc23b360e38922c7cf369a77ced657e20c733382cfd3b406dd18f3c5585717",
+    "services/movie-night-review-ui/src/webapp.py": "96ad2133b3dbe3f15718b4dcad697c7f453d36a93f069d764c2d3159362174c9",
+    "services/movie-night-review-ui/src/auto_downloads.py": "dd4914491a07009d97f7e008169360595dcc381680fc35838066ae7e0930bc1c",
+    "services/movie-night-review-ui/src/review_service.py": "0ab608a3498fe329165bc2ec922b5e8994a4ef6be4568c099f16600e2c8db468",
+    "services/movie-night-review-ui/src/server_file_delete.py": "e4cf06bec65fb31806e6a35ec03cf54844834edd9d0c9091448e0eb6fbfebc53"
+  },
+  "dependencies": {
+    "fastapi": "0.141.1",
+    "uvicorn": "0.53.0",
+    "starlette": "1.10.0",
+    "httpx": "0.28.1",
+    "httpx2": "2.16.0",
+    "requests": "2.34.2"
+  },
+  "failureNames": [],
+  "nonLoopbackNetworkAllowed": false,
+  "productionFilesAccessed": false,
+  "serverActivated": false,
+  "phoneOrTVAcceptanceClaimed": false
+}
