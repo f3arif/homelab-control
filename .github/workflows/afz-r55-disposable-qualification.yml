@@ -33,6 +33,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Install generated-media fixture tools on disposable runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
       - name: Install existing pinned test dependencies
         run: >-
           python -m pip install
