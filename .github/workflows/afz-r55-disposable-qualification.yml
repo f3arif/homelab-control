@@ -6,14 +6,14 @@ on:
     paths:
       - 'ops/r55-e2e-20261029/**'
       - '.github/workflows/afz-r55-disposable-qualification.yml'
-      - 'services/movie-night-review-ui/tests/test_server_delete_e2e.py'
+      - 'services/movie-night-review-ui/**'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: afz-r55-disposable-qualification-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   qualify:
@@ -28,7 +28,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
+          persist-credentials: false
       - name: Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -44,48 +45,7 @@ jobs:
           python -m pip install
           -r services/movie-night-review-ui/requirements-runtime.txt
           -r services/movie-night-review-ui/requirements-test.txt
-      - name: Apply only original-base qualification fixes
-        run: python ops/r55-e2e-20261029/apply_qualification_fixes.py
       - name: Complete HTTP gateway and relay fixture tests
         run: python ops/r55-e2e-20261029/run_qualification.py test_server_delete_e2e.py
       - name: All existing Movie Night server regressions
         run: python ops/r55-e2e-20261029/run_qualification.py
-      - name: Preserve passed source and receipts on the same draft branch only
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          branch='gpt/movie-night-confirmed-server-delete-20261028'
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          git fetch --no-tags origin "$branch"
-          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD" || {
-            echo 'Branch moved during qualification; refusing to publish stale source.' >&2
-            exit 1
-          }
-          python - <<'PY'
-          import json, subprocess
-          from pathlib import Path
-          prefix='services/movie-night-review-ui/'
-          allowed={prefix+'src/'+name for name in
-                   ('adapters.py','webapp.py','auto_downloads.py','review_service.py')}
-          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
-          if changed != allowed:
-              raise SystemExit('Unexpected source change set; refusing commit')
-          for name in ('e2e','full'):
-              result=json.loads(Path(prefix+'qa/r55-e2e/'+name+'.json').read_text())
-              if not result['passed'] or result['failures'] or result['errors']:
-                  raise SystemExit('A required qualification did not pass')
-          PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- \
-            services/movie-night-review-ui/src/adapters.py \
-            services/movie-night-review-ui/src/webapp.py \
-            services/movie-night-review-ui/src/auto_downloads.py \
-            services/movie-night-review-ui/src/review_service.py
-          git add -f -- \
-            services/movie-night-review-ui/qa/r55-e2e/e2e.json \
-            services/movie-night-review-ui/qa/r55-e2e/full.json
-          git commit -m 'fix(r55): preserve removed state, stop redownloads, require explicit activation (qualified)'
-          git push origin "HEAD:refs/heads/$branch"
