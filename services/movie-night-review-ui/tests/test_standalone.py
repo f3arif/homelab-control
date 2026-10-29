@@ -172,6 +172,31 @@ class AccessTests(unittest.TestCase):
         self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=h+[('Host','evil.test')])[0],403)
         self.assertEqual(self.request('/movie-night/?ref=chatgpt',headers=h+[('Sec-Fetch-Mode','navigate')])[0],403)
 
+    def test_new_server_deletion_routes_preserve_owner_and_csrf(self):
+        self.backend.received.clear()
+        path = '/movie-night/api/delete-server/tt12262116'
+        status, _, _ = self.request(path)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.backend.received[-1][1], path)
+        bad = self.headers(**{'Sec-Fetch-Site':'cross-site',
+                              'Sec-Fetch-Mode':'cors','Sec-Fetch-Dest':'empty'})
+        before = len(self.backend.received)
+        self.assertEqual(self.request(path, headers=bad)[0], 403)
+        self.assertEqual(len(self.backend.received), before)
+        content = b'{"imdb":"tt12262116","confirmationToken":"test","confirmedTitle":"Demo"}'
+        valid = self.headers(**{'Origin':PUBLIC,'Content-Type':'application/json',
+                                'X-Movie-Night-CSRF':'valid-csrf'})
+        self.assertEqual(self.request('/movie-night/api/delete-server', 'POST', valid, content)[0], 200)
+        forwarded = self.backend.received[-1][2]
+        self.assertEqual(forwarded['Origin'], BACKEND)
+        self.assertEqual(forwarded['X-Movie-Night-CSRF'], 'valid-csrf')
+        no_origin = self.headers(**{'Content-Type':'application/json',
+                                   'X-Movie-Night-CSRF':'valid-csrf'})
+        self.assertEqual(self.request('/movie-night/api/delete-server', 'POST', no_origin, content)[0], 403)
+        self.assertEqual(self.request('/movie-night/api/delete-server', 'POST',
+                                      self.headers(**{'Origin':'https://evil.test','Content-Type':'application/json'}),
+                                      content)[0], 403)
+
     def test_oversized_body_rejected(self):
         h=self.headers(**{'Origin':PUBLIC,'Content-Type':'application/json'})
         self.assertEqual(self.request('/movie-night/api/feedback','POST',h,b'x'*8193)[0],400)

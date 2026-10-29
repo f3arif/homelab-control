@@ -71,6 +71,17 @@ class MediaIndex:
             if 'visible' not in {x[1] for x in c.execute('PRAGMA table_info(media)')}:
                 raise ValueError('Preserve old index; select a new isolated index path')
 
+    def removed_ids(self):
+        # Read tombstones even with destructive endpoints disabled.
+        with sqlite3.connect(f"file:{self.db}?mode=ro", uri=True) as c:
+            if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='removed_media'").fetchone():
+                return set()
+            return {row[0] for row in c.execute('SELECT id FROM removed_media')}
+
+    def require_not_removed(self, imdb):
+        if imdb in self.removed_ids():
+            raise ValueError('Owner intentionally removed server copy; no automatic re-download')
+
     def register(self, choice, proof):
         if self.storage_guard:self.storage_guard()
         path=self.root/'Movies'/Path(choice.destination).name
@@ -78,6 +89,9 @@ class MediaIndex:
             raise ValueError('published file missing')
         worker.safe_directory(path.parent)
         with sqlite3.connect(self.db) as c:
+            if c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='removed_media'").fetchone() and c.execute(
+                'SELECT 1 FROM removed_media WHERE id=?',(choice.imdb,)).fetchone():
+                raise ValueError('Owner intentionally removed server copy; no automatic re-download')
             existing=c.execute('SELECT filename,size,sha FROM media WHERE id=?',(choice.imdb,)).fetchone()
             expected=(path.name,choice.size,proof['sha256'])
             if existing and existing!=expected: raise ValueError('index conflict; preserve existing entry')
@@ -126,6 +140,8 @@ class WorkerAdapter:
             if claimed!=1: raise ValueError('job already claimed')
             owned=True
             choice=Choice(**json.loads(row[0])['choice']).validate()
+            # Reject stale jobs before provider resolution or transfer.
+            self.index.require_not_removed(choice.imdb)
             if self.storage_guard:self.storage_guard()
             def cancelled():
                 return bool(store.db.execute('SELECT 1 FROM cancellations WHERE id=?',(pid,)).fetchone())

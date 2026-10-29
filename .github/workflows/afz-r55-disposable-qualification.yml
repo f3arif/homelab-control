@@ -1,0 +1,51 @@
+name: AFZ R55 disposable deletion qualification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'ops/r55-e2e-20261029/**'
+      - '.github/workflows/afz-r55-disposable-qualification.yml'
+      - 'services/movie-night-review-ui/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: afz-r55-disposable-qualification-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    if: >-
+      github.event.pull_request.number == 323 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'gpt/movie-night-confirmed-server-delete-20261028'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact candidate without production access
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install generated-media fixture tools on disposable runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Install existing pinned test dependencies
+        run: >-
+          python -m pip install
+          -r services/movie-night-review-ui/requirements-runtime.txt
+          -r services/movie-night-review-ui/requirements-test.txt
+      - name: Complete HTTP gateway and relay fixture tests
+        run: python ops/r55-e2e-20261029/run_qualification.py test_server_delete_e2e.py
+      - name: All existing Movie Night server regressions
+        run: python ops/r55-e2e-20261029/run_qualification.py
