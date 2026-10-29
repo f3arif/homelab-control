@@ -59,6 +59,8 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
         controller.choices=InventoryChoices(provider,controller.shortlist_payload)
         controller.inventory=ProviderInventory(provider);controller.worker=adapter;controller.index=index
         controller.free=free;controller.enabled=True
+        from server_file_delete import ServerFileDeletion
+        controller.delete_service=ServerFileDeletion(index,controller.db,clock=controller.clock)
         controller.recover_jobs()
         if auto_downloads:
             from cached_sources import CachedSources
@@ -127,8 +129,11 @@ def main():
 
 
 
-DOWNLOAD_GET=frozenset(('/movie-night/api/lookup/{pid}','/movie-night/api/status/{pid}','/movie-night/api/downloads','/movie-night/catalog/movie/downloaded.json'))
-DOWNLOAD_POST=frozenset(('/movie-night/api/propose','/movie-night/api/approve','/movie-night/api/cancel'))
+DOWNLOAD_GET=frozenset(('/movie-night/api/lookup/{pid}','/movie-night/api/status/{pid}',
+    '/movie-night/api/downloads','/movie-night/catalog/movie/downloaded.json',
+    '/movie-night/api/delete-server/{imdb}'))
+DOWNLOAD_POST=frozenset(('/movie-night/api/propose','/movie-night/api/approve',
+    '/movie-night/api/cancel','/movie-night/api/delete-server'))
 
 def verify_local_route(state,imdb,size):
     from movie_transport import UnixConnection

@@ -78,6 +78,9 @@ class MediaIndex:
             raise ValueError('published file missing')
         worker.safe_directory(path.parent)
         with sqlite3.connect(self.db) as c:
+            if c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='removed_media'").fetchone() and c.execute(
+                'SELECT 1 FROM removed_media WHERE id=?',(choice.imdb,)).fetchone():
+                raise ValueError('Owner intentionally removed server copy; no automatic re-download')
             existing=c.execute('SELECT filename,size,sha FROM media WHERE id=?',(choice.imdb,)).fetchone()
             expected=(path.name,choice.size,proof['sha256'])
             if existing and existing!=expected: raise ValueError('index conflict; preserve existing entry')

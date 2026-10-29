@@ -38,6 +38,7 @@ class Controller:
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
         self.csrf={}; self.lock=threading.RLock();self.futures={}
         self.auto_downloads=None
+        self.delete_service=None  # Owner-only, mounted-media delete confirmation
         self.lookups={}; self.lookup_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-sources')
         with closing(ApprovalStore(self.db)): pass
 
@@ -162,6 +163,19 @@ class Controller:
             expected=self.csrf.get(principal)
             return bool(expected and secrets.compare_digest(expected,str(token)))
 
+    def preview_server_delete(self, imdb, principal):
+        self.require_enabled()
+        if not self.delete_service:
+            raise ValueError("Server deletion is unavailable.")
+        return self.delete_service.preview(principal, imdb)
+
+    def delete_server_copy(self, imdb, token, confirmed_title, principal):
+        self.require_enabled()
+        if not self.delete_service:
+            raise ValueError("Server deletion is unavailable.")
+        with self.lock:
+            return self.delete_service.delete(principal, imdb, token, confirmed_title)
+
     def require_enabled(self):
         if not self.enabled: raise ValueError('Downloads and source checks are disabled pending activation approval.')
 
@@ -209,7 +223,20 @@ class Controller:
                 choice=json.loads(raw)['choice'];status=store.status(pid)
                 result.append({'id':pid,'name':choice['title'],'imdb':choice['imdb'],'size':choice['size'],
                                'destination':choice['destination'],**status})
-            return {'jobs':result,'requests':self.auto_downloads.requests(principal,db=store.db) if self.auto_downloads else []}
+            requests=self.auto_downloads.requests(principal,db=store.db) if self.auto_downloads else []
+            removed=self.delete_service.removed_ids() if self.delete_service else set()
+            for item in result:
+                if item['imdb'] in removed:
+                    item['state']='removed'
+                    item['downloaded']=False
+                    item['indexed']=False
+                    item['playbackTested']=False
+            for item in requests:
+                if item['imdb'] in removed:
+                    item['state']='removed'
+                    item['canRetry']=False
+                    item['message']='Removed from your 8 TB server.'
+            return {'jobs':result,'requests':requests}
 
     def propose(self, imdb, principal):
         self.require_enabled()
@@ -302,6 +329,15 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
                      'Source metadata changed. Refresh sources before confirmation.',
                      'This file is already present; it will not be overwritten.',
                      'No cancellable transfer. Existing completed files are preserved.',
+                     'Server deletion is unavailable.','Owner session unavailable.',
+                     'Invalid movie ID.','Transfer state unavailable; no movie was deleted.',
+                     'A transfer is active; no movie was deleted.',
+                     'Server file no longer available. Refresh Movie Night.',
+                     'Server file identity changed; no movie was deleted.',
+                     'Server metadata unavailable; no movie was deleted.',
+                     'Confirmation expired. Review the movie again.',
+                     'Server file changed. Review the movie again.',
+                     'Server index changed. Review the movie again.',
                      'choice changed; new confirmation required','stale choice; new confirmation required',
                      'insufficient storage or quota','explicit yes to this confirmation required',
                      'approval binding mismatch','Movie review is disabled pending activation.',
@@ -369,6 +405,21 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     def lookup(pid:str,request:Request):return safe(lambda:controller.lookup(pid,identity(request)))
     @app.get(prefix+'/api/downloads')
     def downloads(request:Request):return safe(lambda:controller.downloads(identity(request)))
+    @app.get(prefix+'/api/delete-server/{imdb}')
+    def preview_server_delete(imdb: str, request: Request):
+        principal=identity(request)
+        return JSONResponse(safe(lambda: dict(controller.preview_server_delete(imdb,principal),
+                                              csrfToken=controller.token(principal))),
+                            headers={'Cache-Control':'private, no-store'})
+    @app.post(prefix+'/api/delete-server')
+    async def delete_server_copy(request: Request):
+        principal=identity(request,True)
+        data=await body(request)
+        if set(data) != {'imdb','confirmationToken','confirmedTitle'}:
+            raise HTTPException(400,'Invalid deletion confirmation')
+        return safe(lambda: controller.delete_server_copy(
+            data['imdb'], data['confirmationToken'], data['confirmedTitle'],principal))
+
     @app.post(prefix+'/api/approve')
     async def approve(request:Request):
         principal=identity(request,True);data=await body(request)
