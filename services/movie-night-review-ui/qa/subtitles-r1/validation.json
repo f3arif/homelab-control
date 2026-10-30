@@ -1,0 +1,38 @@
+{
+  "sourceCommit": "96e6061a756a83c5e9440419952ef205c51164b9",
+  "sourceParent": "8f666286e603a1d16b75fb324e6a209e967b3687",
+  "host": "afz-zbook",
+  "python": "3.12.15",
+  "newSubtitleTests": {"tests": 25, "failures": 0, "errors": 0, "skipped": 0},
+  "fullServerTests": {"tests": 383, "failures": 0, "errors": 0, "skipped": 0, "includesNewSubtitleTests": true},
+  "sourceSHA256": {
+    "src/server_subtitles.py": "9c55b3f9c6c95df9cf93dedf80b296bcac997187dc4e36f591f4ce38ecf29fdd",
+    "gateway/nuvio_subtitle_bridge.py": "b1b1c99a7acf91635e0f9214acae5d2d77bbed9641ee067d43e7a01c344fe73e",
+    "tests/test_server_subtitles.py": "040343413f4defe2954c55ae5558d2c7783e1935e0ab1c40899077eb6e09cba2"
+  },
+  "sourceBytesMatchedGitHub": true,
+  "existingIndexedMoviesWithEnglishTextTracks": 5,
+  "existingIndexedMoviesInspected": 5,
+  "realFileQualification": {
+    "tracksPrepared": 1,
+    "language": "eng",
+    "format": "WebVTT",
+    "bytes": 31144,
+    "cueCount": 598,
+    "firstCueStartSeconds": 21.855,
+    "firstCueEndSeconds": 24.358,
+    "preparationSeconds": 59.29,
+    "movieMetadataIndexAndProcessUnchanged": true,
+    "subtitleDialoguePublished": false
+  },
+  "generatedMediaTimingTestPassed": true,
+  "generatedEnglishAndArabicTestPassed": true,
+  "sameOwnerGatewayResourceTestsPassed": true,
+  "cacheUnavailableDoesNotBlockVideoTestPassed": true,
+  "productionActivated": false,
+  "productionServicesRestarted": false,
+  "moviePlaybackStarted": false,
+  "phoneOrTVRenderingVerified": false,
+  "apkInstalledOrSent": false,
+  "playerLanguagePreferencesChanged": false
+}
