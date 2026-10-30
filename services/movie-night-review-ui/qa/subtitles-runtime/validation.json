@@ -1,0 +1,24 @@
+{
+  "atUtc": "2026-10-30T03:33:48.945838+00:00",
+  "sourceParent": "0d6c5596f1006fb6166eb9b4e33bc10d1d11c8ed",
+  "host": "afz-zbook",
+  "newTests": {"tests": 15, "failures": 0, "errors": 0, "skipped": 0},
+  "fullTests": {"tests": 398, "failures": 0, "errors": 0, "skipped": 0, "includesNewTests": true},
+  "sourceSHA256": {
+    "src/server_subtitles.py": "d589fc59e5f0cb6384a08519c1fb68fa6596291b4cc8d2e2fd2ab92ea91bf0dc",
+    "src/subtitle_service_entry.py": "bf38ba3f2db87b9989c491e87e4c23619036da3813720acfcf892cd958f03e91",
+    "src/subtitle_prewarm.py": "fd9c9080ad9062645b70123f2512b918243f532e084fb4d60691fd49e9f730c3",
+    "gateway/nuvio_subtitle_bridge.py": "72319d088bff6bfe83cd945eada8900a02a5bf9933456a59a64479e18a53ffac",
+    "gateway/subtitle_gateway_entry.py": "bfc660965bb0bfbda15cdc06a4ed99e5e014eb542e99981ff3740dab30652f3c",
+    "tests/test_subtitle_runtime.py": "0d16afe74f18018d44fe30517463de0dd2c31a03bffb5ec6f3dfd85d8eb89e80"
+  },
+  "fullPrivateRelayFixturePassed": true,
+  "startupArgumentPreservationPassed": true,
+  "hardPrewarmDeadlinePassed": true,
+  "tvExtrasContractPassed": true,
+  "productionActivated": false,
+  "productionServicesRestarted": false,
+  "realMoviePlayedOrDeleted": false,
+  "phoneOrTVRenderingVerified": false,
+  "apkInstalled": false
+}
