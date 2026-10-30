@@ -140,14 +140,30 @@ class CacheTests(CacheFixture):
 
     def test_changed_source_during_extract_not_published(self):
         original = self.tool
+        before = self.file.stat()
+        extractions = []
         def replace(args,fd,**kwargs):
             value=original(args,fd,**kwargs)
             if '-show_entries' not in args:
-                self.file.write_bytes(b'Z'*self.file.stat().st_size)
+                # The tool callback runs after _movie captures its fingerprint
+                # and before its exit check. Same-size writes alone can keep
+                # both timestamps on a coarse filesystem clock tick; control
+                # mtime explicitly instead of waiting for the clock to advance.
+                self.file.write_bytes(b'Z'*before.st_size)
+                os.utime(self.file, ns=(before.st_atime_ns,
+                                        before.st_mtime_ns + 2_000_000_000))
+                changed = os.fstat(fd)
+                self.assertEqual(changed.st_ino, before.st_ino)
+                self.assertEqual(changed.st_size, before.st_size)
+                self.assertNotEqual(changed.st_mtime_ns, before.st_mtime_ns)
+                extractions.append(fd)
             return value
         self.cache.tool=replace
-        with self.assertRaises(ValueError): self.cache.prepare(ID)
+        with self.assertRaisesRegex(SubtitleUnavailable, 'Movie identity changed'):
+            self.cache.prepare(ID)
+        self.assertTrue(extractions)
         self.assertFalse(list(self.cache.directory.glob('*.json')))
+        self.assertEqual(self.cache.tracks(ID), [])
 
     def test_single_preparation_worker_and_no_partial_manifest(self):
         self.cache.prepare_lock.acquire()
