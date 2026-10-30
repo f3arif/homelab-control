@@ -798,6 +798,9 @@ function render(data){
     if(excluded.has(movie.id)){const note=document.createElement('p');note.className='genre-excluded muted';note.textContent=movie.name+' — outside your current filters. Any existing server file remains in downloads.';$('finalized-movies').append(note);continue;}
     const card=cardBody(movie,'h3');if(data.reviewEnabled&&f.ids.length>1)card.prepend(rankControls(movie,f.ids));if(data.actionsEnabled&&(f.valid||autoDownloads))card.append(watchButtons(movie,true));$('finalized-movies').append(card);
   }
+  const ready=data.ready||[];$('ready-rank').hidden=!(data.reviewEnabled&&ready.length);$('ready-rank-list').replaceChildren();
+  const readyIds=ready.map(m=>m.id);
+  for(const movie of ready){const li=document.createElement('li'),name=document.createElement('span');name.className='ready-rank-name';name.textContent=movie.name+(movie.releaseInfo?` (${movie.releaseInfo})`:'');li.append(name);if(ready.length>1)li.prepend(rankControls(movie,readyIds));$('ready-rank-list').append(li);}
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
   syncSimilar(data);

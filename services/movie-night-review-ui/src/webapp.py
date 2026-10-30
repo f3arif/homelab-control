@@ -98,7 +98,7 @@ class Controller:
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
                     'finalized':{'ids':saved['ids'],'valid':valid,'excludedIds':[i for i in saved['ids'] if i in genre_blocked],'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
-                    'rank':rank,'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
+                    'rank':rank,'ready':self.ready_list(principal),'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
                     'reserveCount':max(0,len(eligible)-len(visible)),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
                     'replacementAvailable':len(eligible)>VISIBLE_MOVIES}
@@ -140,6 +140,11 @@ class Controller:
         with self.lock:
             self.feedback.set_rank(principal,ids)
             return self.review(principal)
+
+    def ready_list(self,principal):
+        # Read-only Ready on Server list for ranking; an index error must not block the page.
+        try:return [{'id':m['id'],'name':m['name'],'releaseInfo':m.get('releaseInfo','')} for m in self.ready_metas(principal)]
+        except Exception:return []
 
     def ready_metas(self,principal):
         from feedback import by_rank

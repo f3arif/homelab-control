@@ -49,6 +49,22 @@ class UserRankTests(unittest.TestCase):
             self.h.post('rank',{'ids':['tt12346']})
             self.assertEqual(['tt12346','tt12345','tt12347'],[m['id'] for m in self.h.client.get('/movie-night/catalog/movie/downloaded.json').json()['metas']])
 
+    def test_ready_list_ranked_independent_of_picks(self):
+        ready=['tt8000001','tt8000002','tt8000003','tt8000004','tt8000005']  # not today's picks
+        metas=[{'id':i,'type':'movie','name':'M'+i[-1],'releaseInfo':'2020'} for i in ready]
+        with patch.object(self.h.index,'metas',return_value=metas):
+            self.assertEqual(ready,[m['id'] for m in self.h.client.get('/movie-night/api/shortlist').json()['ready']])
+            r=self.h.post('rank',{'ids':['tt8000004','tt8000002']})
+            self.assertEqual(200,r.status_code)
+            want=['tt8000004','tt8000002','tt8000001','tt8000003','tt8000005']
+            self.assertEqual(want,[m['id'] for m in r.json()['ready']])
+            self.assertEqual(want,[m['id'] for m in self.h.client.get('/movie-night/catalog/movie/downloaded.json').json()['metas']])
+            self.assertEqual(IDS,self.h.controller.feedback.saved('fixture')['ids'])  # picks untouched
+
+    def test_ready_index_failure_does_not_block_page(self):
+        with patch.object(self.h.index,'metas',side_effect=OSError('down')):
+            self.assertEqual([],self.h.client.get('/movie-night/api/shortlist').json()['ready'])
+
     def test_rank_table_is_additive(self):
         with sqlite3.connect(self.h.db) as db:
             tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
