@@ -8,7 +8,7 @@ import copy
 import http.client
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 
 from movie_gateway import PRINCIPAL, UnixConnection
 from standalone_server import Handler
@@ -22,6 +22,42 @@ FILE = re.compile(r'/movie-night/subtitle-files/(tt[0-9]{5,12})/([a-f0-9]{32}-s[
 STREAM = re.compile(r'/movie-night/stream/movie/(tt[0-9]{5,12})\.json\Z')
 MAX_TEXT = 1_900_000
 MAX_META = 131_072
+
+
+LIST_EXTRAS = re.compile(r'/movie-night/subtitles/movie/(tt[0-9]{5,12})/([^/?#]{1,1024})\.json\Z')
+
+
+def subtitle_request_id(path):
+    """Accept the real TV client's bounded hints, never use them as a target."""
+    if not isinstance(path, str):
+        return None
+    plain = LIST.fullmatch(path)
+    if plain:
+        return plain[1]
+    match = LIST_EXTRAS.fullmatch(path)
+    if not match:
+        return None
+    seen = set()
+    for pair in match[2].split('&'):
+        key, separator, raw = pair.partition('=')
+        if not separator or key in seen or key not in ('videoHash', 'videoSize', 'filename'):
+            return None
+        seen.add(key)
+        if key == 'videoHash' and not re.fullmatch(r'[a-fA-F0-9]{16}', raw):
+            return None
+        if key == 'videoSize' and (not re.fullmatch(r'[0-9]{1,12}', raw) or not 0 < int(raw) <= 15_000_000_000):
+            return None
+        if key == 'filename':
+            if re.search(r'%(?![a-fA-F0-9]{2})', raw):
+                return None
+            try:
+                filename = unquote(raw, encoding='utf-8', errors='strict')
+            except UnicodeError:
+                return None
+            if (not 1 <= len(filename) <= 255 or any(not c.isprintable() for c in filename)
+                    or any(c in filename for c in ('/', chr(92), '%')) or '..' in filename):
+                return None
+    return match[1]
 
 
 def _read_private(handler, path, mime, cap):
@@ -63,6 +99,7 @@ def descriptors(origin, imdb, data):
         seen.add(t['id'])
         out.append({'id': 'afz-' + t['id'], 'lang': t['lang'],
                     'label': (label or t['lang']) + ' · Server',
+                    'name': (label or t['lang']) + ' · Server', 'language': t['lang'],
                     'url': origin + PREFIX + '/subtitle-files/' + imdb + '/' + t['id'] + '.vtt'})
     return out
 
@@ -138,9 +175,10 @@ class SubtitleHandler(Handler):
             self._subtitle_file(*found.groups())
 
     def do_GET(self):
-        file_match, list_match, stream_match = (p.fullmatch(self.path) for p in (FILE, LIST, STREAM))
+        file_match, stream_match = (p.fullmatch(self.path) for p in (FILE, STREAM))
+        list_id = subtitle_request_id(self.path)
         is_manifest = self.path == PREFIX + '/manifest.json'
-        if not any((file_match, list_match, stream_match, is_manifest)):
+        if not any((file_match, list_id, stream_match, is_manifest)):
             return super().do_GET()
         if not self._authorize_subtitle():
             return
@@ -150,8 +188,8 @@ class SubtitleHandler(Handler):
         try:
             if is_manifest:
                 value = with_subtitle_resource(ready_payload(self, 'manifest', None))
-            elif list_match:
-                value = {'subtitles': read_descriptors(self, list_match[1]),
+            elif list_id:
+                value = {'subtitles': read_descriptors(self, list_id),
                          'cacheMaxAge': 0, 'staleRevalidate': 0, 'staleError': 0}
             else:
                 imdb = stream_match[1]
