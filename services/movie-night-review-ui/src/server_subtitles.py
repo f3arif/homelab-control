@@ -187,11 +187,11 @@ class SubtitleCache:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _probe(self, fd):
+    def _probe(self, fd, *, timeout=15):
         raw = self.tool([self.ffprobe, '-v', 'error', '-protocol_whitelist', 'file,pipe',
             '-select_streams', 's', '-show_entries',
             'stream=index,codec_name:stream_tags=language,title:stream_disposition=default,forced',
-            '-of', 'json', '/proc/self/fd/' + str(fd)], fd, cap=MAX_META, timeout=15)
+            '-of', 'json', '/proc/self/fd/' + str(fd)], fd, cap=MAX_META, timeout=timeout)
         try:
             streams = json.loads(raw)['streams']
         except (ValueError, KeyError, TypeError) as exc:
@@ -221,7 +221,22 @@ class SubtitleCache:
                            'forced': forced, 'hearingImpaired': sdh})
         return result
 
-    def prepare(self, imdb, *, languages=None, max_tracks=8):
+    def prepared(self, imdb, *, languages=None, max_tracks=8):
+        """A fingerprint- and policy-bound completed pass, including no-track results."""
+        try:
+            with self._movie(imdb) as (_, key):
+                doc = json.loads(self._read(key + '.json', MAX_META))
+                expected = {'languages': sorted(languages) if languages is not None else None,
+                            'maxTracks': max_tracks, 'extractor': 'copyts-v1'}
+                if doc.get('policy') != expected:
+                    return False
+                expected_count = len(self._manifest(imdb, key))
+            # Missing outputs must be regenerated rather than remembered as ready.
+            return len(self.tracks(imdb)) == expected_count
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def prepare(self, imdb, *, languages=None, max_tracks=8, budget_seconds=None):
         """Explicit local prewarming. HTTP reads NEVER invoke this method.
 
         languages=None retains every available language up to max_tracks;
@@ -232,15 +247,25 @@ class SubtitleCache:
         if languages is not None and (not isinstance(languages, (set, frozenset)) or
                 any(not isinstance(x, str) or not re.fullmatch(r'[a-z]{3}', x) for x in languages)):
             raise SubtitleUnavailable('Invalid language set')
+        if budget_seconds is not None and (isinstance(budget_seconds, bool)
+                or not isinstance(budget_seconds, (int, float)) or not 0 < budget_seconds <= 900):
+            raise SubtitleUnavailable('Invalid time budget')
+        deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
+        def remaining(limit):
+            left = limit if deadline is None else min(limit, deadline - time.monotonic())
+            if left <= 0:
+                raise SubtitleUnavailable('Subtitle preparation time budget reached')
+            return left
         if not self.prepare_lock.acquire(blocking=False):
             raise SubtitleUnavailable('Subtitle preparation already active')
         try:
             with self._movie(imdb) as (fd, key):
-                tracks = self._probe(fd)
+                tracks = self._probe(fd, timeout=remaining(15))
                 if languages is not None:
                     tracks = [x for x in tracks if x['lang'] in languages]
                 output = []
                 for track in tracks[:max_tracks]:
+                    remaining(90)
                     tid = key + '-s' + str(track['index'])
                     existing = None
                     try: existing = _vtt(self._read(tid + '.vtt', MAX_TEXT))
@@ -249,13 +274,15 @@ class SubtitleCache:
                         raw = self.tool([self.ffmpeg, '-nostdin', '-v', 'error', '-copyts',
                             '-protocol_whitelist', 'file,pipe', '-i', '/proc/self/fd/' + str(fd),
                             '-map', '0:' + str(track['index']), '-vn', '-an', '-dn',
-                            '-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1'], fd, cap=MAX_TEXT, timeout=90)
+                            '-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1'], fd, cap=MAX_TEXT, timeout=remaining(90))
                         existing = _vtt(raw)
                         self._write(tid + '.vtt', existing)
                     output.append(dict(track, id=tid, sha256=hashlib.sha256(existing).hexdigest()))
             # Commit listing only after the source still matches; interrupted work is invisible.
             self._write(key + '.json', json.dumps({'version': 1, 'movie': imdb,
-                'fingerprint': key, 'tracks': output}, ensure_ascii=False).encode())
+                'fingerprint': key, 'tracks': output,
+                'policy': {'languages': sorted(languages) if languages is not None else None,
+                           'maxTracks': max_tracks, 'extractor': 'copyts-v1'}}, ensure_ascii=False).encode())
             return self.tracks(imdb)
         finally:
             self.prepare_lock.release()
