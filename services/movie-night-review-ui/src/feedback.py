@@ -1,6 +1,7 @@
 """Per-user preferences and finalized selections; never resolve or acquire media."""
 from contextlib import closing
 import json
+import re
 import sqlite3
 import time
 from seen_policy import canonical_id
@@ -9,6 +10,14 @@ from genre_settings import GENRES, genres_of, defaults
 MIN_PICKS = 3
 MAX_PICKS = 10
 VISIBLE_MOVIES = 10
+MAX_RANKED = 500
+RANK_ID = re.compile(r'tt[0-9]{5,12}')
+
+
+def by_rank(items,rank,key=lambda x:x):
+    """Stable: ranked items first in the owner's order, unranked keep their existing order after."""
+    pos={k:i for i,k in enumerate(rank)}
+    return [x for _,x in sorted(enumerate(items),key=lambda p:(pos.get(key(p[1]),len(pos)),p[0]))]
 
 class FeedbackStore:
     def __init__(self,path):
@@ -17,6 +26,8 @@ class FeedbackStore:
             db.execute('CREATE TABLE IF NOT EXISTS movie_feedback(principal TEXT NOT NULL,imdb TEXT NOT NULL,value TEXT NOT NULL,metadata TEXT NOT NULL,updated INTEGER NOT NULL,PRIMARY KEY(principal,imdb))')
             db.execute('CREATE TABLE IF NOT EXISTS movie_refill_requests(principal TEXT PRIMARY KEY,requested REAL NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS movie_finalized(principal TEXT PRIMARY KEY,ids TEXT NOT NULL,valid INTEGER NOT NULL,updated INTEGER NOT NULL)')
+            # Additive: the owner's own priority order. Never changes picks, likes or downloads.
+            db.execute('CREATE TABLE IF NOT EXISTS movie_rank(principal TEXT PRIMARY KEY,ids TEXT NOT NULL,updated INTEGER NOT NULL)')
     def connect(self):
         return sqlite3.connect(self.path,timeout=10)
     @staticmethod
@@ -44,6 +55,23 @@ class FeedbackStore:
         with closing(self.connect()) as db:
             row=db.execute('SELECT ids,valid FROM movie_finalized WHERE principal=?',(principal,)).fetchone()
         return {'ids':json.loads(row[0]),'valid':bool(row[1])} if row else {'ids':[],'valid':False}
+    def rank(self,principal):
+        self.principal(principal)
+        with closing(self.connect()) as db:
+            row=db.execute('SELECT ids FROM movie_rank WHERE principal=?',(principal,)).fetchone()
+        return json.loads(row[0]) if row else []
+    def set_rank(self,principal,ids):
+        """Save ids first, in order; previously ranked titles not listed keep their relative order after."""
+        self.principal(principal)
+        if (not isinstance(ids,list) or not 1<=len(ids)<=MAX_RANKED or len(set(ids))!=len(ids)
+                or any(not isinstance(x,str) or not RANK_ID.fullmatch(x) for x in ids)):
+            raise ValueError('Invalid movie ranking.')
+        with closing(self.connect()) as db,db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT ids FROM movie_rank WHERE principal=?',(principal,)).fetchone()
+            merged=(ids+[x for x in json.loads(row[0]) if x not in ids] if row else ids)[:MAX_RANKED]
+            db.execute('INSERT INTO movie_rank VALUES(?,?,?) ON CONFLICT(principal) DO UPDATE SET ids=excluded.ids,updated=excluded.updated',(principal,json.dumps(merged),int(time.time())))
+        return merged
     def finalize(self,principal,ids,eligible,on_saved=None):
         self.principal(principal)
         if not isinstance(ids,list) or not MIN_PICKS<=len(ids)<=MAX_PICKS or any(not isinstance(x,str) for x in ids) or len(set(ids))!=len(ids):

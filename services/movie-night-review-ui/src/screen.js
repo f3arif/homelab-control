@@ -193,6 +193,19 @@ async function reviewWrite(path,data){
   catch(error){showFailure(error,true);return false;}
   finally{reviewBusy=false;selectionCount();}
 }
+// Your ranking: order picks (and the Ready on Server catalog) by priority; never starts or deletes downloads.
+function rankControls(movie,ids){
+  const i=ids.indexOf(movie.id),row=document.createElement('div');row.className='rank-controls';
+  const label=document.createElement('span');label.className='rank-badge';label.textContent='#'+(i+1);row.append(label);
+  for(const [text,step] of [['↑ Higher',-1],['↓ Lower',1]]){
+    const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=text;
+    b.setAttribute('aria-label',`Move ${movie.name} ${step<0?'higher':'lower'} in your ranking`);
+    b.disabled=i+step<0||i+step>=ids.length;
+    b.onclick=async()=>{const next=[...ids];[next[i],next[i+step]]=[next[i+step],next[i]];if(await reviewWrite('rank',{ids:next}))toast(`${movie.name} is now #${i+step+1}.`);};
+    row.append(b);
+  }
+  return row;
+}
 function watchButtons(movie,enabled){
   const actions=document.createElement('div');actions.className='buttons';
   if(!enabled){actions.hidden=true;return actions;}
@@ -783,8 +796,11 @@ function render(data){
   const excluded=new Set(f.excludedIds||[]);
   for(const movie of f.movies){
     if(excluded.has(movie.id)){const note=document.createElement('p');note.className='genre-excluded muted';note.textContent=movie.name+' — outside your current filters. Any existing server file remains in downloads.';$('finalized-movies').append(note);continue;}
-    const card=cardBody(movie,'h3');if(data.actionsEnabled&&(f.valid||autoDownloads))card.append(watchButtons(movie,true));$('finalized-movies').append(card);
+    const card=cardBody(movie,'h3');if(data.reviewEnabled&&f.ids.length>1)card.prepend(rankControls(movie,f.ids));if(data.actionsEnabled&&(f.valid||autoDownloads))card.append(watchButtons(movie,true));$('finalized-movies').append(card);
   }
+  const ready=data.ready||[];$('ready-rank').hidden=!(data.reviewEnabled&&ready.length);$('ready-rank-list').replaceChildren();
+  const readyIds=ready.map(m=>m.id);
+  for(const movie of ready){const li=document.createElement('li'),name=document.createElement('span');name.className='ready-rank-name';name.textContent=movie.name+(movie.releaseInfo?` (${movie.releaseInfo})`:'');li.append(name);if(ready.length>1)li.prepend(rankControls(movie,readyIds));$('ready-rank-list').append(li);}
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
   syncSimilar(data);

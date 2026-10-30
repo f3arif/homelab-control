@@ -90,7 +90,15 @@ class AutoDownloads:
             # The controller lock closes the empty-queue/enqueue race with start().
             with self.c.lock,closing(self.c.feedback.connect()) as db,db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT id,principal,imdb FROM movie_download_queue WHERE state='queued' ORDER BY rowid LIMIT 1").fetchone()
+                # Owner's ranking first; unranked requests keep first-in order.
+                rows=db.execute("SELECT id,principal,imdb FROM movie_download_queue WHERE state='queued' ORDER BY rowid").fetchall()
+                rank={}
+                for r in rows:
+                    if r[1] not in rank:
+                        got=db.execute('SELECT ids FROM movie_rank WHERE principal=?',(r[1],)).fetchone()
+                        rank[r[1]]=json.loads(got[0]) if got else []
+                from feedback import by_rank
+                row=(by_rank(rows,[x for v in rank.values() for x in v],key=lambda r:r[2]) or [None])[0]
                 if not row:
                     self.future=None
                     return

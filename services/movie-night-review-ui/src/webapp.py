@@ -61,7 +61,7 @@ class Controller:
         return shortlist(self.shortlist_payload(),int(self.clock()),self.seen_policy,limit=None,genre_settings=self.genre_settings.read())
 
     def review(self,principal):
-        from feedback import rank_reviewed
+        from feedback import rank_reviewed, by_rank
         with self.lock, (self.refill_provider.lock if hasattr(self.refill_provider,'lock') else nullcontext()):
             if self.review_enabled and hasattr(self.refill_provider,'maintain'):
                 try:self.refill_provider.maintain()
@@ -81,6 +81,8 @@ class Controller:
             saved_rows.update(genre_blocked)
             eligible={r['id']:r for r in pool if ratings.get(r['id'],{}).get('value') not in ('dislike','seen')}
             saved=self.feedback.saved(principal)
+            rank=self.feedback.rank(principal)
+            saved=dict(saved,ids=by_rank(saved['ids'],rank))
             refill_at=self.feedback.refill_requested(principal)
             refill_pending=refill_at is not None and refill_at>payload.get('publishedEpoch',0)
             valid=saved['valid'] and MIN_PICKS<=len(saved['ids'])<=MAX_PICKS and set(saved['ids'])<=set(eligible)
@@ -96,7 +98,7 @@ class Controller:
                     'seen':[dict(v['metadata'],id=k) for k,v in ratings.items() if v['value']=='seen'],
                     'finalized':{'ids':saved['ids'],'valid':valid,'excludedIds':[i for i in saved['ids'] if i in genre_blocked],'reason':None if valid else ('genre-filter' if set(saved['ids']) & set(genre_blocked) else 'shortlist-stale' if not fresh else 'eligibility-changed'),
                                  'movies':[saved_rows.get(i,ratings.get(i,{}).get('metadata',{'id':i,'name':'Saved selection','releaseInfo':''})) for i in saved['ids']]},
-                    'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
+                    'rank':rank,'ready':self.ready_list(principal),'excludedGenres':settings['excluded'],'genreSettings':dict(settings,options=list(GENRES)),
                     'reserveCount':max(0,len(eligible)-len(visible)),
                     'refillRequest':{'pending':refill_pending,'requested':refill_at is not None, **(self.refill_provider.status() if self.refill_provider else {})},
                     'replacementAvailable':len(eligible)>VISIBLE_MOVIES}
@@ -132,6 +134,21 @@ class Controller:
             if value in ('dislike','seen') and getattr(self.refill_provider,'automatic',False) and len(result['eligibleIds'])<VISIBLE_MOVIES:
                 return self.request_refill(principal,'auto-'+secrets.token_hex(16))
             return result
+
+    def set_rank(self,principal,ids):
+        if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
+        with self.lock:
+            self.feedback.set_rank(principal,ids)
+            return self.review(principal)
+
+    def ready_list(self,principal):
+        # Read-only Ready on Server list for ranking; an index error must not block the page.
+        try:return [{'id':m['id'],'name':m['name'],'releaseInfo':m.get('releaseInfo','')} for m in self.ready_metas(principal)]
+        except Exception:return []
+
+    def ready_metas(self,principal):
+        from feedback import by_rank
+        return by_rank(self.index.metas(),self.feedback.rank(principal),key=lambda m:m['id'])
 
     def finalize(self,principal,ids,*,start_downloads=False,request_id=None,retry=None):
         if not self.review_enabled:raise ValueError('Movie review is disabled pending activation.')
@@ -357,7 +374,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
                      'No cancellable transfer. Existing completed files are preserved.',
                      'Server deletion is unavailable.','Owner session unavailable.',
                      'Owner intentionally removed server copy; no automatic re-download',
-                     'Invalid movie ID.','Transfer state unavailable; no movie was deleted.',
+                     'Invalid movie ID.','Invalid movie ranking.','Transfer state unavailable; no movie was deleted.',
                      'A transfer is active; no movie was deleted.',
                      'Server file no longer available. Refresh Movie Night.',
                      'Server file identity changed; no movie was deleted.',
@@ -419,6 +436,10 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
             except OSError:raise HTTPException(503,'Genre settings could not be saved. Reload to check before trying again.')
         if data.get('action')=='request-refill':return safe(lambda:controller.request_refill(principal,data.get('requestId')))
         return safe(lambda:controller.rate(principal,str(data.get('imdb','')),str(data.get('value',''))))
+    @app.post(prefix+'/api/rank')
+    async def rank(request:Request):
+        principal=identity(request,True);data=await body(request)
+        return safe(lambda:controller.set_rank(principal,data.get('ids')))
     @app.post(prefix+'/api/finalize')
     async def finalize(request:Request):
         principal=identity(request,True);data=await body(request)
@@ -479,7 +500,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         if not controller.stream_validator: raise HTTPException(409,'Stream validator unavailable')
         return safe(lambda:controller.stream_validator.play(lease,principal,request.headers.get('range')))
     @app.get(prefix+'/catalog/movie/downloaded.json')
-    def downloaded(request:Request): identity(request);return {'metas':controller.index.metas()}
+    def downloaded(request:Request): return {'metas':controller.ready_metas(identity(request))}
     @app.api_route(prefix+'/media/{imdb}',methods=['GET','HEAD'])
     def media(imdb:str,request:Request):
         identity(request)
