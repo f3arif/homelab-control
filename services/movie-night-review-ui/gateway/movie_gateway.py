@@ -10,7 +10,7 @@ import time
 
 DEFAULT_SOCKET = '/home/coolyo/afz-stremio-secondhost-20260918/state/movie-night-review/run/review.sock'
 GET_PATHS = frozenset(('/movie-night', '/movie-night/', '/movie-night/screen.js', '/movie-night/screen.css', '/movie-night/api/shortlist','/movie-night/api/downloads','/movie-night/catalog/movie/downloaded.json'))
-POST_PATHS = frozenset(('/movie-night/api/feedback', '/movie-night/api/finalize','/movie-night/api/propose','/movie-night/api/approve','/movie-night/api/cancel','/movie-night/api/delete-server'))
+POST_PATHS = frozenset(('/movie-night/api/feedback', '/movie-night/api/finalize','/movie-night/api/rank','/movie-night/api/propose','/movie-night/api/approve','/movie-night/api/cancel','/movie-night/api/delete-server'))
 PRINCIPAL = 'billing-owner'
 MAX_RESPONSE = 1024 * 1024
 POSTER_PATH = re.compile(r'/movie-night/posters/tt[0-9]{5,12}\.img\Z')

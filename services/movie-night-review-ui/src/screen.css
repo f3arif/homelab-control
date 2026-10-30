@@ -206,3 +206,4 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 #similar-movies .movie-card{margin:0}
 .similar-reasons{padding-left:20px;font-size:.86rem;color:var(--muted)}
 #similar-results-title{overflow-wrap:anywhere}
+.rank-controls{display:flex;align-items:center;gap:8px;margin:0 0 8px}.rank-badge{font-weight:700;min-width:2.5em}
