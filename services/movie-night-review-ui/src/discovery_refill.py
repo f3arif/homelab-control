@@ -5,7 +5,7 @@ import fcntl,hashlib,json,os,sqlite3,tempfile,threading,time
 from pathlib import Path
 from reviewed_refill import ReviewedRefill
 from publish_reviewed import read_json,validate_rows,inspect_state
-from feedback import FeedbackStore,rank_reviewed
+from feedback import FeedbackStore,rank_reviewed,VISIBLE_MOVIES
 from seen_policy import KNOWN_SEEN_IDS
 from metadata_discovery import DiscoveryUnavailable
 from movie_night import shortlist
@@ -47,7 +47,7 @@ class DiscoveryRefill(ReviewedRefill):
         blocked={r['id'] for r in snap['ratings'] if r['value'] in ('dislike','seen')}|set(snap['knownSeenIds'])
         return len({r['id'] for r in shortlist(current,int(time.time()),limit=None,genre_settings=self.genre_settings.read())}-blocked)
     def maintain(self):
-        """Keep five cards from the local bank at once; top up the bank in the background when low."""
+        """Fill the visible shelf from reviewed reserves; discover more when the bank runs low."""
         with self.lock:
             if self.future and not self.future.done():return
             saved=self.saved_status()
@@ -56,7 +56,7 @@ class DiscoveryRefill(ReviewedRefill):
                 saved.update(genreRevision=revision,cursor=0,retryAt=0,outcome='ready')
                 atomic_json(self.path,saved)
             try:
-                if self.visible_count()<5:
+                if self.visible_count()<VISIBLE_MOVIES:
                     result=super().fulfill()
                     if result.get('fulfilled'):saved.update(outcome='refilled',added=result['added'],retryAt=0);atomic_json(self.path,saved)
                 available=super().status().get('available',0)
