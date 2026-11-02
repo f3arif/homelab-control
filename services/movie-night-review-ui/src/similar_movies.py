@@ -134,6 +134,18 @@ class CinemetaSimilar:
                 result.setdefault(item['id'], item)
         return rank_titles(result.values(), query)[:40]
 
+    def admission(self, imdb):
+        """Resolve a directly chosen movie; client-supplied metadata is never trusted."""
+        if not isinstance(imdb, str) or not ID.fullmatch(imdb):
+            raise ValueError('Choose a valid movie from the search results.')
+        meta = self.metadata.get('/meta/movie/' + imdb + '.json', time.monotonic() + 20).get('meta')
+        chosen = reference(meta)
+        row = normalize(meta, unrestricted=True)
+        if not chosen or chosen['id'] != imdb or not row or row['id'] != imdb:
+            raise ValueError('This movie does not have verified, released movie metadata yet.')
+        row['presentation'] = normalize_info(meta, imdb)
+        return row
+
     def preview(self, imdb):
         if not isinstance(imdb, str) or not ID.fullmatch(imdb):
             raise ValueError('Choose a movie from the title search results.')
@@ -288,7 +300,7 @@ class SimilarMovies:
                 if now - job['created'] > 900 and job['future'].done():
                     del self.jobs[job_id]
             for job_id, job in self.jobs.items():
-                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision:
+                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision and (kind != 'add' or not job['future'].done()):
                     return {'jobId': job_id, 'state': 'searching'}
             if kind == 'preview' and any(j['kind'] == 'preview' and not j['future'].done() for j in self.jobs.values()):
                 raise ValueError('Movie details are loading. Try again shortly.')
@@ -336,6 +348,8 @@ class SimilarMovies:
             return {'jobId': job_id, 'state': 'ready', 'titles': result, 'previewsEnabled': True}
         if job['kind'] == 'preview':
             return {'jobId': job_id, 'state': 'ready', 'title': result}
+        if job['kind'] == 'add':
+            return dict(result, jobId=job_id, state='ready')
         existing = {r['id'] for r in self.controller.review_pool()}
         eligible = {r['id'] for r in self.eligible(result['rows'], principal)}
         ratings = self.controller.feedback.ratings(principal)
@@ -352,12 +366,36 @@ class SimilarMovies:
         return {'jobId': job_id, 'state': 'ready', 'reference': result['reference'], 'movies': movies,
                 'searchScope': 'all-genres-and-years', 'partial': result.get('partial', False)}
 
+    def add_title(self, principal, imdb):
+        c = self.controller
+        with c.lock:
+            saved = next((r for r in self.store.read() if r['id'] == imdb), None)
+        row = saved if saved and screened(saved, int(c.clock()), unrestricted=True) else self.source.admission(imdb)
+        with c.lock:
+            if not self.eligible([row], principal):
+                raise ValueError('Watched and Not for me movies cannot be added. Undo that feedback first.')
+            # Recheck after metadata lookup: another request may already have saved it.
+            existing = next((r for r in self.store.read() if r['id'] == imdb), None)
+            if existing and screened(existing, int(c.clock()), unrestricted=True):
+                row = existing
+            try:
+                self.store.add(row)
+            except (OSError, ValueError):
+                raise ValueError('Movie Night could not be saved. Reload before trying again.') from None
+            return {'added': True, 'alreadyAdded': existing is not None,
+                    'movie': present_movie(row, int(c.clock()), 'Added to your Movie Night shortlist.')}
+
     def action(self, principal, data):
         c = self.controller
         if not c.review_enabled:
             raise ValueError('Movie review is disabled pending activation.')
         c.feedback.principal(principal)
         action = data['action']
+        if action == 'add-title':
+            imdb = data.get('imdb')
+            if not isinstance(imdb, str) or not ID.fullmatch(imdb):
+                raise ValueError('Choose a valid movie from the search results.')
+            return self.start(principal, 'add', imdb, lambda: self.add_title(principal, imdb))
         if action == 'search-titles':
             query = query_text(data.get('query'))
             return self.start(principal, 'titles', query.casefold(), lambda: self.source.search(query))

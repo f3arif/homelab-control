@@ -16,6 +16,16 @@
 <li><strong>Pick</strong> __MIN_PICKS__–__MAX_PICKS__ movies, then finalize.</li><li id="download-step"><strong>Review server download</strong> on a finalized movie. Confirm its exact file to start.</li></ol>
 <p>Horror, creature and crime movies can include frightening scenes and strong violence. <span id="download-rule">Likes and finalized picks never start a download.</span></p></details></header>
 <div id="notice" role="status" aria-live="polite"></div>
+<section class="panel" aria-labelledby="add-movie-heading"><h2 id="add-movie-heading">Add a movie</h2>
+<p class="muted">Know what you want to watch? Search by title and year, then add it to Movie Night. Adding a movie does not start a download.</p>
+<button id="open-add-movie" type="button" disabled>Add a movie to Movie Night</button></section>
+<dialog id="add-movie-dialog" aria-labelledby="manual-add-heading" aria-describedby="manual-add-help">
+<div class="manual-add-heading"><h2 id="manual-add-heading" tabindex="-1">Add to Movie Night</h2><button id="close-add-movie-top" type="button" class="secondary" aria-label="Close add movie">×</button></div>
+<p id="manual-add-help" class="muted">Search for the exact movie. It will appear in your shortlist, ready for Pick and Finalize.</p>
+<form id="manual-add-form" role="search"><label for="manual-add-query">Movie title or title and year</label>
+<div class="manual-add-search"><input id="manual-add-query" type="search" minlength="2" maxlength="120" required autocomplete="off" placeholder="For example, Holiday 2014"><button id="manual-add-search" type="submit">Search movies</button></div></form>
+<p id="manual-add-status" role="status" aria-live="polite"></p><div id="manual-add-results" class="manual-add-results"></div>
+<button id="close-add-movie" class="secondary" type="button">Done</button></dialog>
 <section id="similar-search" class="panel" aria-labelledby="similar-title">
 <h2 id="similar-title">Find movies like…</h2>
 <p class="muted" id="similar-help">Start typing a movie you enjoyed, then choose it from the popup. Find related movies across all genres and years, including films connected through its cast, director and country. Your shortlist filters do not limit this search.</p>

@@ -1,0 +1,23 @@
+{
+  "sourceCodeCommit": "90a67f00cbb2ac5a4ec39a560a7ea6c1c1942650",
+  "live": true,
+  "ownerHttpsVerified": true,
+  "addSessionVersion": 1,
+  "addEnabled": true,
+  "privateNoStore": true,
+  "pageAndScriptUpdated": true,
+  "publicMetadataSearchSucceeded": true,
+  "searchResults": 20,
+  "yearDisambiguation": true,
+  "invalidMovieRejected": true,
+  "missingCsrfRejected": true,
+  "unsafeOriginRejected": true,
+  "finalizedPreserved": true,
+  "genresPreserved": true,
+  "feedbackPreserved": true,
+  "downloadRowsUnchanged": true,
+  "liveManualMovieAdded": false,
+  "liveAddPersistence": "fixture-only: no pre-existing manual movie available for non-mutating live duplicate test",
+  "regularOnnUsed": false,
+  "recordedUtc": "2026-11-02T05:31:31.788919+00:00"
+}

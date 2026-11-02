@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "width": 360,
+      "emptySearch": true,
+      "yearDisambiguation": true,
+      "retryAfterFailure": true,
+      "addedOnlyAfterAck": true,
+      "persisted": true,
+      "cancelledSearchIgnored": true,
+      "noOverflow": true,
+      "noFinalizeOrDownload": true,
+      "errors": []
+    },
+    {
+      "width": 412,
+      "emptySearch": true,
+      "yearDisambiguation": true,
+      "retryAfterFailure": true,
+      "addedOnlyAfterAck": true,
+      "persisted": true,
+      "cancelledSearchIgnored": true,
+      "noOverflow": true,
+      "noFinalizeOrDownload": true,
+      "errors": []
+    },
+    {
+      "width": 1280,
+      "emptySearch": true,
+      "yearDisambiguation": true,
+      "retryAfterFailure": true,
+      "addedOnlyAfterAck": true,
+      "persisted": true,
+      "cancelledSearchIgnored": true,
+      "noOverflow": true,
+      "noFinalizeOrDownload": true,
+      "errors": []
+    }
+  ]
+}
