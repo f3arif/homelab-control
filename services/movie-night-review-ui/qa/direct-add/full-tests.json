@@ -1,0 +1,11 @@
+{
+  "sourceCommit": "90a67f00cbb2ac5a4ec39a560a7ea6c1c1942650",
+  "python": "/home/coolyo/afz-movie-night-runtime-312/bin/python",
+  "tests": 346,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "passed": 346,
+  "success": true,
+  "completedUtc": "2026-11-02T05:28:48.284416+00:00"
+}
