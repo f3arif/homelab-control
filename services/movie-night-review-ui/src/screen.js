@@ -448,6 +448,7 @@ function manualAddControls(){
   $('manual-add-search').textContent=manualSaving?'Saving…':manualSearching?'Searching…':'Search movies';
   for(const button of $('manual-add-results').querySelectorAll('button'))button.disabled=manualSaving||button.dataset.added==='true';
   $('close-add-movie').disabled=manualSaving;
+  $('close-add-movie-top').disabled=manualSaving;
   $('add-movie-dialog').setAttribute('aria-busy',String(manualSearching||manualSaving));
 }
 function syncManualAdd(data){manualAddEnabled=!!data.directAddEnabled;manualAddControls();}
@@ -456,6 +457,8 @@ $('open-add-movie').onclick=()=>{
   $('add-movie-dialog').showModal();$('manual-add-query').focus();
 };
 $('close-add-movie').onclick=()=>{if(!manualSaving)$('add-movie-dialog').close();};
+$('close-add-movie-top').onclick=()=>{if(!manualSaving)$('add-movie-dialog').close();};
+$('add-movie-dialog').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();if(!manualSaving)$('add-movie-dialog').close();}});
 $('add-movie-dialog').addEventListener('cancel',event=>{if(manualSaving)event.preventDefault();});
 $('add-movie-dialog').addEventListener('close',()=>{++manualSequence;manualSearching=false;manualAddControls();$('open-add-movie').focus();});
 $('manual-add-form').onsubmit=async event=>{
@@ -468,7 +471,7 @@ $('manual-add-form').onsubmit=async event=>{
     if(!Array.isArray(result.titles))throw new Error('Movie search could not be read. Try again.');
     $('manual-add-status').textContent=result.titles.length?'Choose the title and year you want to add.':'No matching movies. Try another title or add its year.';
     for(const movie of result.titles){
-      const card=cardBody(movie,'h3'),button=document.createElement('button');
+      const card=document.createElement('article'),button=document.createElement('button');card.className='manual-add-card';card.append(movieOverview(movie,'h3'));
       button.type='button';button.textContent='Add to Movie Night';button.setAttribute('aria-label','Add '+movie.name+' '+(movie.releaseInfo||'')+' to Movie Night');
       button.onclick=()=>addDirectMovie(movie,button);
       card.append(button);$('manual-add-results').append(card);

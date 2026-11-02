@@ -65,6 +65,7 @@ class DirectAddTests(unittest.TestCase):
         self.assertEqual({'tt90000000', 'tt90000003'}, {r['id'] for r in self.c.similar.store.read()})
 
     def test_duplicate_request_is_one_job_and_does_not_rewrite_or_repeat_metadata(self):
+        self.metadata.delay = 0.1  # Prove in-flight requests share one actual lookup.
         first = self.start()
         second = self.start()
         self.assertEqual(first.json()['jobId'], second.json()['jobId'])
@@ -161,6 +162,19 @@ class DirectAddTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.c.similar.status('another-owner', response.json()['jobId'])
         self.assertEqual(200, self.finish(response).status_code)
+
+    def test_new_add_after_success_rechecks_later_feedback(self):
+        self.assertEqual(200, self.finish(self.start()).status_code)
+        self.c.feedback.rate('fixture', {'id':'tt90000001','name':'Fixture'}, 'dislike')
+        response = self.finish(self.start())
+        self.assertEqual(400, response.status_code)
+        self.assertIn('Undo that feedback first', response.text)
+
+    def test_rejected_add_can_be_retried_immediately_after_feedback_is_restored(self):
+        self.c.feedback.rate('fixture', {'id':'tt90000001','name':'Fixture'}, 'seen')
+        self.assertEqual(400, self.finish(self.start()).status_code)
+        self.c.feedback.rate('fixture', {'id':'tt90000001','name':'Fixture'}, 'clear')
+        self.assertEqual(200, self.finish(self.start()).status_code)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@
 <p class="muted">Know what you want to watch? Search by title and year, then add it to Movie Night. Adding a movie does not start a download.</p>
 <button id="open-add-movie" type="button" disabled>Add a movie to Movie Night</button></section>
 <dialog id="add-movie-dialog" aria-labelledby="manual-add-heading" aria-describedby="manual-add-help">
-<h2 id="manual-add-heading" tabindex="-1">Add to Movie Night</h2>
+<div class="manual-add-heading"><h2 id="manual-add-heading" tabindex="-1">Add to Movie Night</h2><button id="close-add-movie-top" type="button" class="secondary" aria-label="Close add movie">×</button></div>
 <p id="manual-add-help" class="muted">Search for the exact movie. It will appear in your shortlist, ready for Pick and Finalize.</p>
 <form id="manual-add-form" role="search"><label for="manual-add-query">Movie title or title and year</label>
 <div class="manual-add-search"><input id="manual-add-query" type="search" minlength="2" maxlength="120" required autocomplete="off" placeholder="For example, Holiday 2014"><button id="manual-add-search" type="submit">Search movies</button></div></form>
