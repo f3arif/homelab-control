@@ -99,7 +99,7 @@ def main():
     config = release[args.role]
     if socket.gethostname().lower() != config['hostname']:
         raise RuntimeError('Wrong release host')
-    live = Path(config['live']); stage = QA / ('release-' + args.role)
+    live = Path(config['live']); stage = QA / ('release-' + release['releaseId'] + '-' + args.role)
     stage.mkdir(parents=True, exist_ok=True, mode=0o700); stage.chmod(0o700)
     with (stage / '.release.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
