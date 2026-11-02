@@ -87,6 +87,7 @@ class Controller:
             added=set(payload.get('requestedSuggestionIds',[]))
             visible=[r for r in ranked if r['id'] in added]+[r for r in ranked if r['id'] not in added][:VISIBLE_MOVIES]
             return {'movies':visible,'reviewEnabled':self.review_enabled,'similarSearchEnabled':self.review_enabled,
+                    'directAddEnabled':self.review_enabled,
                     'downloadPolicy':{'minBytes':5_000_000_000,'maxBytes':CAP,'quality':'1080p','storage':'8 TB drive','host':'afz-zbook'},
                     'actionsEnabled':self.enabled,'autoDownloads':bool(self.auto_downloads and self.enabled),
                     'downloadRequestedIds':[x['imdb'] for x in self.auto_downloads.requests(principal)] if self.auto_downloads else [],'shortlistFresh':fresh,'seenStateComplete':self.seen_policy.complete,
@@ -342,10 +343,16 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     def rows(request:Request):
         principal=identity(request)
         return JSONResponse(safe(lambda:controller.review(principal)),headers={'Cache-Control':'private, no-store'})
+    @app.get(prefix+'/api/add-session')
+    def add_session(request:Request):
+        principal=identity(request)
+        return JSONResponse({'version':1,'addEnabled':controller.review_enabled,
+                             'csrfToken':controller.token(principal)},
+                            headers={'Cache-Control':'private, no-store'})
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
-        if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar'):
+        if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar','add-title'):
             try:return controller.similar.action(principal,data)
             except ValueError as exc:raise HTTPException(400,str(exc))
             except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')

@@ -440,6 +440,58 @@ function clearSimilar(message=''){
   $('similar-titles').replaceChildren();$('similar-movies').replaceChildren();$('similar-results').hidden=true;
   $('similar-status').textContent=message;$('clear-similar').hidden=!message;searchControls();
 }
+let manualAddEnabled=false,manualSearching=false,manualSaving=false,manualSequence=0;
+function manualAddControls(){
+  $('open-add-movie').disabled=!manualAddEnabled||reviewBusy;
+  $('manual-add-search').disabled=manualSearching||manualSaving;
+  $('manual-add-query').disabled=manualSaving;
+  $('manual-add-search').textContent=manualSaving?'Saving…':manualSearching?'Searching…':'Search movies';
+  for(const button of $('manual-add-results').querySelectorAll('button'))button.disabled=manualSaving||button.dataset.added==='true';
+  $('close-add-movie').disabled=manualSaving;
+  $('add-movie-dialog').setAttribute('aria-busy',String(manualSearching||manualSaving));
+}
+function syncManualAdd(data){manualAddEnabled=!!data.directAddEnabled;manualAddControls();}
+$('open-add-movie').onclick=()=>{
+  if(!manualAddEnabled||reviewBusy)return;
+  $('add-movie-dialog').showModal();$('manual-add-query').focus();
+};
+$('close-add-movie').onclick=()=>{if(!manualSaving)$('add-movie-dialog').close();};
+$('add-movie-dialog').addEventListener('cancel',event=>{if(manualSaving)event.preventDefault();});
+$('add-movie-dialog').addEventListener('close',()=>{++manualSequence;manualSearching=false;manualAddControls();$('open-add-movie').focus();});
+$('manual-add-form').onsubmit=async event=>{
+  event.preventDefault();if(manualSearching||manualSaving||!manualAddEnabled)return;
+  const sequence=++manualSequence;manualSearching=true;manualAddControls();
+  $('manual-add-results').replaceChildren();$('manual-add-status').textContent='Finding matching movie titles…';
+  try{
+    const result=await searchJob({action:'search-titles',query:$('manual-add-query').value},null,true);
+    if(sequence!==manualSequence||!$('add-movie-dialog').open)return;
+    if(!Array.isArray(result.titles))throw new Error('Movie search could not be read. Try again.');
+    $('manual-add-status').textContent=result.titles.length?'Choose the title and year you want to add.':'No matching movies. Try another title or add its year.';
+    for(const movie of result.titles){
+      const card=cardBody(movie,'h3'),button=document.createElement('button');
+      button.type='button';button.textContent='Add to Movie Night';button.setAttribute('aria-label','Add '+movie.name+' '+(movie.releaseInfo||'')+' to Movie Night');
+      button.onclick=()=>addDirectMovie(movie,button);
+      card.append(button);$('manual-add-results').append(card);
+    }
+  }catch(error){if(sequence===manualSequence)$('manual-add-status').textContent=error.message;}
+  finally{if(sequence===manualSequence){manualSearching=false;manualAddControls();}}
+};
+async function addDirectMovie(movie,button){
+  if(manualSaving||reviewBusy)return;
+  manualSaving=true;reviewBusy=true;++loadGeneration;manualAddControls();selectionCount();
+  button.disabled=true;$('manual-add-status').textContent='Checking and saving “'+movie.name+'”…';
+  let saved=false;
+  try{
+    const result=await searchJob({action:'add-title',imdb:movie.id},null,true);
+    if(result.added!==true||result.movie?.id!==movie.id)throw new Error('Save could not be confirmed. Reload Movie Night before trying again.');
+    saved=true;button.textContent='Added';button.dataset.added='true';
+    const message=(result.alreadyAdded?'Already in Movie Night: “':'Added to Movie Night: “')+result.movie.name+'”. Choose Pick and Finalize when you are ready.';
+    $('manual-add-status').textContent=message;toast(message);
+    try{render(await api('shortlist'));}
+    catch(error){$('manual-add-status').textContent=message+' Saved successfully; refresh the page to reload your shortlist.';}
+  }catch(error){$('manual-add-status').textContent=error.message+' No download was started.';if(error.kind==='session'||error.kind==='page')showFailure(error);}
+  finally{manualSaving=false;reviewBusy=false;button.disabled=saved;manualAddControls();selectionCount();}
+}
 function syncSimilar(data){
   similarEnabled=!!data.similarSearchEnabled;
   const seen=new Set((data.seen||[]).map(r=>r.id)),disliked=new Set((data.disliked||[]).map(r=>r.id));
@@ -788,6 +840,7 @@ function render(data){
   const removed=[...(data.disliked||[]),...(data.seen||[]).map(m=>({...m,seenIt:true}))];$('removed').hidden=!removed.length;$('removed-count').textContent=removed.length?`(${removed.length})`:'';
   for(const movie of removed){const li=document.createElement('li'),name=document.createElement('span'),restore=document.createElement('button');name.textContent=movie.name+(movie.seenIt?' · Seen':'');restore.type='button';restore.className='secondary';restore.textContent='Restore';restore.setAttribute('aria-label','Restore '+movie.name);restore.onclick=()=>reviewWrite('feedback',{imdb:movie.id,value:'clear'});li.append(name,restore);$('removed-movies').append(li);}
   syncSimilar(data);
+  syncManualAdd(data);
   updateCardDownloads();
 }
 $('request-refill').onclick=()=>reviewWrite('feedback',{action:'request-refill',requestId:crypto.randomUUID()});
