@@ -10,7 +10,7 @@ from reviewed_refill import ReviewedRefill
 from movie_presentation import with_cached_info
 
 PRINCIPAL = 'billing-owner'
-GET_PATHS = frozenset(('/movie-night', '/movie-night/', '/movie-night/screen.js', '/movie-night/screen.css', '/movie-night/api/shortlist', '/movie-night/posters/{imdb}.img'))
+GET_PATHS = frozenset(('/movie-night', '/movie-night/', '/movie-night/screen.js', '/movie-night/screen.css', '/movie-night/api/shortlist', '/movie-night/api/add-session', '/movie-night/posters/{imdb}.img'))
 POST_PATHS = frozenset(('/movie-night/api/feedback', '/movie-night/api/finalize'))
 
 def build_app(state, origin, discovery=None, downloads=False, provider=None, media_root=None, auto_downloads=False, volume=None):
@@ -65,13 +65,18 @@ def build_app(state, origin, discovery=None, downloads=False, provider=None, med
             controller.enable_auto_downloads(CachedSources(provider,controller.shortlist_payload).acquire)
     app = create_app(controller, authorize=lambda r: PRINCIPAL if r.headers.get('x-afz-review-principal') == PRINCIPAL else None,
                      allowed_origin=origin)
+    restrict_routes(app, downloads)
+    return app, controller
+
+def restrict_routes(app, downloads=False):
+    """One route boundary shared by production construction and HTTP browser QA."""
     app.router.routes = [r for r in app.routes if
                         (r.path in GET_PATHS and r.methods == {'GET'}) or
                         (downloads and r.path in DOWNLOAD_GET and r.methods == {'GET'}) or
                         (downloads and r.path == '/movie-night/media/{imdb}' and r.methods == {'GET','HEAD'}) or
                         (r.path in POST_PATHS | (DOWNLOAD_POST if downloads else set()) and r.methods == {'POST'})]
     app.router.redirect_slashes = False
-    return app, controller
+    return app
 
 def main():
     import uvicorn

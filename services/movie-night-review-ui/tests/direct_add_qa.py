@@ -5,6 +5,7 @@ BASE=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(BASE/'src'),str(BASE/'tests'),str(BASE/'gateway')]
 from test_downloads import Harness
 from webapp import create_app
+from review_service import restrict_routes
 from standalone_server import MovieNightServer
 import uvicorn
 
@@ -27,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix='afz-direct-add-qa-') as td:
     front=MovieNightServer('http://localhost',backend_origin,'owner@example.test',0,str(endpoint))
     origin='http://localhost:'+str(front.server_port);front.public_origin=origin;front.host='localhost:'+str(front.server_port)
     app=create_app(h.controller,lambda r:'billing-owner' if r.headers.get('x-afz-review-principal')=='billing-owner' else None,allowed_origin=backend_origin)
+    restrict_routes(app, downloads=True)
     server=uvicorn.Server(uvicorn.Config(app,uds=str(endpoint),access_log=False,log_level='error',lifespan='off'))
     backend=threading.Thread(target=server.run,daemon=True);backend.start()
     for _ in range(100):

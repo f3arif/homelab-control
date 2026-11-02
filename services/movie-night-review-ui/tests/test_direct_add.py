@@ -177,5 +177,48 @@ class DirectAddTests(unittest.TestCase):
         self.assertEqual(200, self.finish(self.start()).status_code)
 
 
+class ProductionDirectAddRoutesTests(unittest.TestCase):
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from review_service import build_app
+        self.tmp = tempfile.TemporaryDirectory()
+        app, self.controller = build_app(self.tmp.name, 'http://testserver')
+        self.metadata = MetadataFixture()
+        self.controller.similar.source = CinemetaSimilar(CinemetaDiscovery(self.metadata))
+        self.client = TestClient(app)
+        self.owner = {'x-afz-review-principal': 'billing-owner'}
+
+    def tearDown(self):
+        self.client.close()
+        self.controller.close()
+        self.tmp.cleanup()
+
+    def test_production_route_filter_allows_native_session_and_persisted_add(self):
+        response = self.client.get('/movie-night/api/add-session', headers=self.owner)
+        self.assertEqual(200, response.status_code, response.text)
+        headers = dict(self.owner, origin='http://testserver', **{'x-movie-night-csrf': response.json()['csrfToken']})
+        before = self.controller.feedback.saved('billing-owner')
+        response = self.client.post('/movie-night/api/feedback', json={'action':'add-title','imdb':'tt90000001'}, headers=headers)
+        self.assertEqual(200, response.status_code, response.text)
+        job = response.json()['jobId']
+        self.controller.similar.jobs[job]['future'].result(5)
+        result = self.client.post('/movie-night/api/feedback', json={'action':'similar-status','jobId':job}, headers=headers)
+        self.assertEqual(200, result.status_code, result.text)
+        self.assertIs(result.json()['added'], True)
+        self.assertEqual(['tt90000001'], [r['id'] for r in SuggestionStore(Path(self.tmp.name)).read()])
+        self.assertEqual(before, self.controller.feedback.saved('billing-owner'))
+        self.assertIsNone(self.controller.auto_downloads)
+
+    def test_production_native_session_still_requires_owner_and_write_guards(self):
+        self.assertEqual(403, self.client.get('/movie-night/api/add-session').status_code)
+        response = self.client.get('/movie-night/api/add-session', headers=self.owner)
+        self.assertEqual(200, response.status_code)
+        self.assertIn('private, no-store', response.headers['cache-control'])
+        headers = dict(self.owner, origin='http://evil.test', **{'x-movie-night-csrf':response.json()['csrfToken']})
+        self.assertEqual(403, self.client.post('/movie-night/api/feedback', json={'action':'add-title','imdb':'tt90000001'}, headers=headers).status_code)
+        self.assertEqual(404, self.client.get('/unlisted-route', headers=self.owner).status_code)
+        self.assertFalse(self.metadata.calls)
+
+
 if __name__ == '__main__':
     unittest.main()
