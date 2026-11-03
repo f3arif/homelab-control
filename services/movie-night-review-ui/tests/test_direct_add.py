@@ -131,7 +131,7 @@ class DirectAddTests(unittest.TestCase):
         response = self.h.client.get('/movie-night/api/add-session')
         self.assertEqual(200, response.status_code)
         self.assertIn('no-store', response.headers['cache-control'])
-        self.assertEqual({'version':1,'addEnabled':True,'csrfToken':self.h.headers['x-movie-night-csrf']}, response.json())
+        self.assertEqual({'version':1,'addEnabled':True,'selectionDownloadEnabled':False,'csrfToken':self.h.headers['x-movie-night-csrf']}, response.json())
         self.assertTrue(self.c.review('fixture')['directAddEnabled'])
 
     def test_disabled_review_does_not_admit_or_advertise_addition(self):

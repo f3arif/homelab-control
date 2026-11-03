@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "productionFactory": true,
+  "realOwnerGateway": true,
+  "generatedClipBytes": 1959,
+  "generatedClipSha256": "633dda5327d094a01cc355a4aad75efc6971db73d249938a1d08f0594948cb15",
+  "actualFfprobeValidation": true,
+  "mediaTransfers": 1,
+  "duplicateTransferPrevented": true,
+  "groupUnchanged": true,
+  "readyCatalogVerified": true,
+  "range206": true,
+  "ownerCsrfEnforced": true,
+  "restartPersistence": true,
+  "realMoviesUsed": false,
+  "productionDataUsed": false
+}

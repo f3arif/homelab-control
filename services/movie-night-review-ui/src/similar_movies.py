@@ -300,7 +300,7 @@ class SimilarMovies:
                 if now - job['created'] > 900 and job['future'].done():
                     del self.jobs[job_id]
             for job_id, job in self.jobs.items():
-                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision and (kind != 'add' or not job['future'].done()):
+                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision and (kind not in ('add','selection') or not job['future'].done()):
                     return {'jobId': job_id, 'state': 'searching'}
             if kind == 'preview' and any(j['kind'] == 'preview' and not j['future'].done() for j in self.jobs.values()):
                 raise ValueError('Movie details are loading. Try again shortly.')
@@ -348,7 +348,7 @@ class SimilarMovies:
             return {'jobId': job_id, 'state': 'ready', 'titles': result, 'previewsEnabled': True}
         if job['kind'] == 'preview':
             return {'jobId': job_id, 'state': 'ready', 'title': result}
-        if job['kind'] == 'add':
+        if job['kind'] in ('add','selection'):
             return dict(result, jobId=job_id, state='ready')
         existing = {r['id'] for r in self.controller.review_pool()}
         eligible = {r['id'] for r in self.eligible(result['rows'], principal)}
@@ -391,6 +391,20 @@ class SimilarMovies:
             raise ValueError('Movie review is disabled pending activation.')
         c.feedback.principal(principal)
         action = data['action']
+        if action == 'select-download':
+            from mobile_selection import MobileSelections
+            imdb = data.get('imdb'); request_id = data.get('requestId'); retry = data.get('retryDownload')
+            if not isinstance(imdb, str) or not ID.fullmatch(imdb):
+                raise ValueError('Choose a valid movie from the search results.')
+            MobileSelections.intent(request_id, retry)
+            c.require_enabled()
+            if not c.auto_downloads or not c.mobile_selections:
+                raise ValueError('Movie Night server downloads are unavailable. Try again later.')
+            def select_download():
+                added = self.add_title(principal, imdb)
+                selected = c.mobile_selections.select(principal, imdb, request_id, retry)
+                return dict(added, **selected)
+            return self.start(principal, 'selection', (imdb,request_id,retry), select_download)
         if action == 'add-title':
             imdb = data.get('imdb')
             if not isinstance(imdb, str) or not ID.fullmatch(imdb):

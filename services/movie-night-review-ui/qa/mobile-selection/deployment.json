@@ -1,0 +1,28 @@
+{
+  "sourceCodeCommit": "3ca5bfe9dfbaf7bd696fa092503bc53b4dd8ff9f",
+  "checkedUtc": "2026-11-03T02:10:38Z",
+  "live": true,
+  "existingUserStateUnchanged": true,
+  "oldTablesPreserved": [
+    "archived_jobs",
+    "cancellations",
+    "jobs",
+    "movie_download_queue",
+    "movie_download_requests",
+    "movie_feedback",
+    "movie_finalized",
+    "movie_mobile_selections",
+    "movie_refill_requests",
+    "plans",
+    "storage_migrations"
+  ],
+  "downloadIndexPreserved": true,
+  "genreFeedbackAndGroupPreserved": true,
+  "existingJobs": 5,
+  "readyCatalogMovies": 5,
+  "arbitraryMovieSelectionsOrDownloadsForQA": 0,
+  "installed": {
+    "mobile_selection.py": "d9ccea4df6d5df480c096792249998cffccb02672a93327b4cec34b44a87660f"
+  },
+  "rollback": "Source only; never restore a database over newer user choices."
+}

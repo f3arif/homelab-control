@@ -55,8 +55,10 @@ class AutoDownloads:
     def requests(self, principal, db=None):
         with (closing(self.c.feedback.connect()) if db is None else nullcontext(db)) as db:
             rows=db.execute('SELECT id,imdb,name,state,job_id,message FROM movie_download_queue WHERE principal=? ORDER BY rowid DESC LIMIT 100',(principal,)).fetchall()
-        return [dict(id=r[0],imdb=r[1],name=r[2],state=r[3],jobId=r[4],message=r[5],
-                     canRetry=r[4] is None and r[3] in ('unavailable','failed','cancelled')) for r in rows]
+            result=[dict(id=r[0],imdb=r[1],name=r[2],state=r[3],jobId=r[4],message=r[5],
+                         canRetry=r[4] is None and r[3] in ('unavailable','failed','cancelled')) for r in rows]
+            mobile=getattr(self.c,'mobile_selections',None)
+            return mobile.enrich(principal,result,db) if mobile else result
 
     def cancel(self, request_id, principal):
         with self.c.lock,closing(self.c.feedback.connect()) as db,db:
@@ -72,7 +74,10 @@ class AutoDownloads:
         with closing(self.c.feedback.connect()) as db:
             row=db.execute('SELECT state FROM movie_download_queue WHERE id=? AND principal=?',(request_id,principal)).fetchone()
         if row!=('checking',):raise ValueError('download request no longer active')
-        self.c.require_enabled();self.c.require_finalized(imdb,principal)
+        self.c.require_enabled()
+        mobile=getattr(self.c,'mobile_selections',None)
+        if mobile and mobile.selected(principal,imdb):mobile.require_eligible(principal,imdb)
+        else:self.c.require_finalized(imdb,principal)
 
     def _finish(self, request_id, state, message):
         with closing(self.c.feedback.connect()) as db,db:
@@ -117,7 +122,9 @@ class AutoDownloads:
                     path=self.c.worker.root/'Movies'/Path(choice.destination).name
                     if any(p.exists() or p.is_symlink() for p in (path,Path(str(path)+'.part'))):raise ValueError('existing file')
                     with closing(ApprovalStore(self.c.db)) as store:
-                        pid=store.approve_finalized(choice,principal,request_id,int(self.c.clock()),self.c.free(),checked)
+                        mobile=getattr(self.c,'mobile_selections',None)
+                        authorization='movie-night-selection' if mobile and mobile.selected(principal,imdb) else 'finalize-and-download'
+                        pid=store.approve_finalized(choice,principal,request_id,int(self.c.clock()),self.c.free(),checked,authorization=authorization)
                     self.c.futures[pid]=self.c.pool.submit(self.c.worker.run,pid)
             except Exception as exc:
                 if self.closed:return # leave a checking request recoverable after shutdown
