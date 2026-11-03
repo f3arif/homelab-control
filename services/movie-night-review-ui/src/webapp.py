@@ -37,7 +37,7 @@ class Controller:
         self.shortlist_payload=lambda:self.similar.store.merge(original_payload())
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
         self.csrf={}; self.lock=threading.RLock();self.futures={}
-        self.auto_downloads=None
+        self.auto_downloads=None;self.mobile_selections=None
         self.lookups={}; self.lookup_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-sources')
         with closing(ApprovalStore(self.db)): pass
 
@@ -45,6 +45,8 @@ class Controller:
         self.require_enabled()
         from auto_downloads import AutoDownloads
         self.auto_downloads=AutoDownloads(self,acquire)
+        from mobile_selection import MobileSelections
+        self.mobile_selections=MobileSelections(self)
         self.auto_downloads.recover()
 
     def close(self):
@@ -347,12 +349,13 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     def add_session(request:Request):
         principal=identity(request)
         return JSONResponse({'version':1,'addEnabled':controller.review_enabled,
+                             'selectionDownloadEnabled':bool(controller.review_enabled and controller.enabled and controller.auto_downloads and controller.mobile_selections),
                              'csrfToken':controller.token(principal)},
                             headers={'Cache-Control':'private, no-store'})
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
-        if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar','add-title'):
+        if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar','add-title','select-download'):
             try:return controller.similar.action(principal,data)
             except ValueError as exc:raise HTTPException(400,str(exc))
             except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')

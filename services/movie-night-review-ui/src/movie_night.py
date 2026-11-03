@@ -180,7 +180,7 @@ class ApprovalStore:
 
     def close(self): self.db.close()
 
-    def approve_finalized(self, choice, principal, request_id, now, free, provider_checked_at):
+    def approve_finalized(self, choice, principal, request_id, now, free, provider_checked_at, *, authorization='finalize-and-download'):
         """Bind a concrete file to the owner's durable Finalize & download request.
 
         Queue linkage, plan and job commit together. This is an explicit alternate
@@ -192,13 +192,17 @@ class ApprovalStore:
             request=self.db.execute('SELECT imdb,state FROM movie_download_queue WHERE id=? AND principal=?',(request_id,principal)).fetchone()
             if not request or request!=(choice.imdb,'checking'):
                 raise ValueError('download request no longer active')
+            if authorization not in ('finalize-and-download','movie-night-selection'):
+                raise ValueError('invalid download authorization')
+            if authorization=='movie-night-selection' and not self.db.execute('SELECT 1 FROM movie_mobile_selections WHERE principal=? AND imdb=?',(principal,choice.imdb)).fetchone():
+                raise ValueError('download selection unavailable')
             if not 0<=now-provider_checked_at<=300:raise ValueError('provider verification expired')
             reserved=sum(json.loads(x[0])['choice']['size']-x[1] for x in self.db.execute("SELECT payload,bytes FROM jobs WHERE state IN ('approved','downloading')"))
             committed=sum(json.loads(x[0])['choice']['size']+1 for x in self.db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
             if free-reserved-choice.size<RESERVE or QUOTA-committed<choice.size+1:
                 raise ValueError('insufficient storage or quota')
             pid=str(uuid4())
-            payload=canonical({'choice':asdict(choice),'authorization':'finalize-and-download',
+            payload=canonical({'choice':asdict(choice),'authorization':authorization,
                                'requestId':request_id,'authorizedBy':principal,'authorizedEpoch':now,
                                'freeBytes':free,'quotaRemainingBytes':QUOTA-committed,'reserveBytes':RESERVE})
             self.db.execute('INSERT INTO plans VALUES(?,?,?,?)',(pid,principal,payload,now+900))
