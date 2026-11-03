@@ -208,6 +208,18 @@ class MobileSelectionTests(unittest.TestCase):
         self.c.enabled = False
         self.assertFalse(self.h.client.get('/movie-night/api/add-session').json()['selectionDownloadEnabled'])
 
+    def test_retained_old_requests_do_not_create_a_lifetime_selection_limit(self):
+        with sqlite3.connect(self.h.db) as db:
+            for i in range(100):
+                identity = 'tt8' + str(i).zfill(6)
+                db.execute('INSERT INTO movie_mobile_selections VALUES(?,?,?,?)',
+                           ('fixture', identity, json.dumps({'id':identity,'name':'Historical fixture'}), 1))
+                db.execute('INSERT INTO movie_download_queue VALUES(?,?,?,?,?,NULL,?,?)',
+                           (str(uuid4()), 'fixture', identity, 'Historical fixture', 'cancelled', '', 1))
+        self.assertEqual(200, self.finish(self.start()).status_code)
+        self.assertTrue(self.settle()['jobs'][0]['indexed'])
+        self.assertEqual(1, self.h.provider.resolves)
+
 
 if __name__ == '__main__':
     unittest.main()

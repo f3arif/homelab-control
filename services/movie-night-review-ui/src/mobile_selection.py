@@ -39,9 +39,6 @@ class MobileSelections:
             # and previously accepted requests are never replaced by a mobile tap.
             with closing(c.feedback.connect()) as db, db:
                 db.execute('BEGIN IMMEDIATE')
-                if not db.execute('SELECT 1 FROM movie_mobile_selections WHERE principal=? AND imdb=?', (principal, imdb)).fetchone():
-                    if db.execute('SELECT count(*) FROM movie_mobile_selections WHERE principal=?', (principal,)).fetchone()[0] >= 100:
-                        raise ValueError('Movie Night selection limit reached. Review your server list.')
                 saved = c.auto_downloads.enqueue(db, principal, [imdb], {imdb:row}, request_id, [imdb] if retry else [])
                 if saved:
                     metadata = present_movie(row, int(c.clock()), 'Selected for Movie Night; server download requested.')
@@ -57,5 +54,11 @@ class MobileSelections:
             return {'selected':True, 'downloadRequested':True, 'download':download}
 
     def enrich(self, principal, requests, db):
-        metadata = {r[0]:json.loads(r[1]) for r in db.execute('SELECT imdb,metadata FROM movie_mobile_selections WHERE principal=?', (principal,))}
+        ids = [r['imdb'] for r in requests]
+        if not ids:
+            return requests
+        # The existing request API returns at most100 recent requests. Read only
+        # their metadata; retained history must never impose a lifetime pick cap.
+        sql = 'SELECT imdb,metadata FROM movie_mobile_selections WHERE principal=? AND imdb IN (' + ','.join('?' for _ in ids) + ')'
+        metadata = {r[0]:json.loads(r[1]) for r in db.execute(sql, [principal, *ids])}
         return [dict(r, selectionSource='nuvio-selection', movie=metadata[r['imdb']]) if r['imdb'] in metadata else r for r in requests]
