@@ -1,0 +1,43 @@
+{
+  "releaseId": "mobile-selection-r62-20261103",
+  "sourceCommit": "c3107773d22bd3842e1c6367b50a21ba2203f954",
+  "hostname": "afz-zbook",
+  "live": "/home/coolyo/afz-stremio-secondhost-20260918/movie-night-review-service/src",
+  "candidate": "/home/coolyo/AFZ/QA/MovieNight/20261103-mobile-selection/candidate/src",
+  "baseline": {
+    "seen_policy.py": "4770304d88712563d5851eef547c092ca72138be93525c43e444dbfdd9f79bbd",
+    "movie_presentation.py": "7165c2fea3637ba5659e56abcc6c40077abeecad31158df201144e331b6215a4",
+    "publish_reviewed.py": "bf845f15d753680c49a6849e1c356f1223c03de44aeab2cb8fde5fab0d23c11e",
+    "auto_downloads.py": "2ebaf20e923ddbb9a6579ed1ebf65df649b1ca3f4a058a96257126536bb415d7",
+    "genre_settings.py": "0bf673212dfbcce5405973a4f082a9543eef4ffd44c3341c1ad0e99a33782c42",
+    "movie_posters.py": "e914ae2318c643dec7539cef81672107ddcc14de0dc33f7bc1f10acde962ad82",
+    "webapp.py": "5895a2f7573f3ba05239acb22f9e0d4ca0d590885b22eb037b79f3524b740911",
+    "movie_night.py": "d033aa6d9c65c61f1028be29f77a5f9b9428299b03ec32e8940786be5c415719",
+    "download_provider.py": "13c5d88a902c2ad2e8e20aeccd1be717c636ef6b97501b5e675d01ac33934d6d",
+    "movie_transport.py": "76e97d522faa386f4bb5cd45209517ab55cea60a25d3a47750f69a91e97d707a",
+    "feedback.py": "ce6658b4fdb1a495853605e0245314030661e427b0f484a8544371b61056c97e",
+    "reviewed_refill.py": "056029a5dca0b11fdcf1b67a88cdcd50c249dd3fd9e1be6acd433375471f403b",
+    "metadata_discovery.py": "9c1dd1f6fa04304880f7fd9b92e29c6ffca1b884026057a9556bdbc30115933b",
+    "review_service.py": "44411db96dc780bd4b8e630b80ca9b60f0153b638b0da534e683083f05fd33ac",
+    "worker_candidate.py": "57f39a7526ef7a037e4b18f66fb674ccf5f641763a2476b72d34bce967d40bfa",
+    "screen.css": "e80c86fa086c962e709907b09273e2eb245a0daf4ddd3da99c4b7ac8ef977a56",
+    "screen.html": "6221ad7b35d6f314c45d7ae4579264281980c795bc6671e2f5d865fc3cb1d8e2",
+    "screen.js": "71726b3cdabf4428e6e0587a0377c126c1dbec97ccef150e4a6804d3dafe00ea",
+    "adapters.py": "e01d65da19d1ed8c2e467b0200f78b45861d8a85ff5fbca6cc66cd4e1e6c161e",
+    "similar_movies.py": "97c95537718ccab5ce776b1f66f3b28c7bba7257963bbd334c136dd378b7966e",
+    "discovery_policy.py": "9b0aec19e3062baa71d5932b3a0878a61c83f2560075b9850f4683ad05ebf50d",
+    "trailer_policy.py": "36bcce2afa83ef6b3679d4e5e32454a20f59b09b7410c0f54e4d175661ce6dea",
+    "cached_sources.py": "49c2969001f097d1fe9ff77f38d68694f157fa72ece8e85873deac330a48f9f7",
+    "storage_volume.py": "4f56dce65144858fc1edbf4e430d7dc8086970a8c6f1b3ab34ccfae00e9c9582",
+    "discovery_refill.py": "b4f9eca96cc36cafdaea09b7685936d81d3567187f1299c064d45b81dc3a3acb",
+    "private_relay.py": "a6eb563a0355141c5152780e3e3e518b7f3d036934f02f121e91fb198290ce8d",
+    "mobile_selection.py": null
+  },
+  "after": {
+    "webapp.py": "c95a960060534c67d164dc3ed235e8b9195b6b5125d8ae84e255ec58fc61294a",
+    "auto_downloads.py": "8727f084a220e4a6553227294cc60c8b5907eabf4d4940be75f6059dfef96463",
+    "similar_movies.py": "ec62e946e6a75141fcbdc4ff1f69f0d2b06b82e38902d51f63387a15b0729b99",
+    "movie_night.py": "da9e0f33e3af67618e75d0fc3f0c318967a91fd8d7332ecd11d5a566dd31e300",
+    "mobile_selection.py": "45f6c37ba1ccd84762c1c45f2712f245f59754e2b990d9b8872d22fcfb0d7a79"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "checkedUtc": "2026-11-03T02:11:57Z",
+  "ownerHttpsSession": true,
+  "selectionDownloadEnabled": true,
+  "privateNoStore": true,
+  "newActionReachedThroughProductionGateway": true,
+  "invalidIdRejectedBeforeLookup": true,
+  "originCsrfEnforced": true,
+  "jobs": 5,
+  "readyCatalogMovies": 5,
+  "newMovieSelectionsPerformed": 0,
+  "newMovieDownloadsPerformed": 0,
+  "deploymentSource": "3ca5bfe9dfbaf7bd696fa092503bc53b4dd8ff9f",
+  "allRuntimeSourceHashesMatchFinalCommit": true
+}
