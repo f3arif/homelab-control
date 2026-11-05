@@ -68,6 +68,25 @@ class TmdbSignalsTests(unittest.TestCase):
         self.assertIn('Shared themes: deep sea, shark', found['reasons']['tt4779682'])
         for noise in rel.NOISE[:3]:
             self.assertNotIn(noise['name'], names)
+    def test_heretic_single_weak_theme_does_not_carry_a_match(self):
+        heretic = movie(600, name='Heretic', genres=['Horror', 'Thriller'], country='United States', director=['Scott Beck'],
+                        cast=['Hugh Grant'], description='Two young missionaries are forced to prove their faith when they knock on the wrong door.')
+        heretic['themes'] = {'sociopath', 'held captive', 'faith', 'trapped in a house'}
+        skyfall = movie(601, name='Skyfall', genres=['Action', 'Thriller'], country='United Kingdom', director=['Sam Mendes'],
+                        cast=['Daniel Craig'], description="Bond's loyalty to M is tested as her past comes back to haunt her.")
+        skyfall['themes'] = {'sociopath', 'mi6'}
+        sin_city = dict(movie(602, name='Sin City', genres=['Crime', 'Thriller'], country='United States', director=['Frank Miller'],
+                              cast=['Bruce Willis'], description='A cop protects a girl from a powerful senator.'), themes={'held captive'})
+        dont_breathe = dict(movie(603, name="Don't Breathe", genres=['Horror', 'Thriller'], country='United States', director=['Fede Alvarez'],
+                                  cast=['Stephen Lang'], description='Teens break into a blind man\'s house.'), themes={'held captive', 'trapped in a house'})
+        for weak in (skyfall, sin_city):
+            with self.subTest(weak['name']):
+                self.assertEqual((0, []), related_score(heretic, weak, {}, 60))
+        self.assertGreater(related_score(heretic, dont_breathe, {}, 60)[0], 3)
+        # A single theme central to the candidate's own story still counts.
+        shallows = dict(movie(604, name='The Shallows', genres=['Horror'], description='A surfer is attacked by a great white shark.'), themes={'shark'})
+        self.assertGreater(related_score(dict(rel.SEED, themes={'shark'}), shallows, {}, 60)[0], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

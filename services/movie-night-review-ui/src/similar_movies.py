@@ -139,6 +139,13 @@ def related_score(seed, meta, frequency=None, total=1):
     # never carry a match. Story evidence needs a genre plus two rare story words
     # (one may be in the title); a genre-only fallback needs most genres and ranks last.
     genre_only = not people_link and not themes and story < 2 and len(common) >= 2 and genre_score >= 2 / 3
+    # One TMDB theme alone ("sociopath") is weak: it needs two shared genres, or the
+    # theme must be central enough to appear in the candidate's own synopsis or title.
+    own = words(meta) | title_words(meta)
+    weak_theme = (themes and not people_link and not distinctive and not titled and len(themes) == 1
+                  and len(common) < 2 and not all(stem(w) in own for w in re.findall(r'[^\W\d_]{4,}', themes[0])))
+    if weak_theme:
+        return 0, []
     if not people_link and not genre_only and not (story >= 2 and (distinctive or themes) and common) and not (themes and common) and len(distinctive) < 3:
         return 0, []
     reasons = ['Shared genres: ' + ', '.join(sorted(common))] if common else []
