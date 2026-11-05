@@ -252,7 +252,7 @@ async function loadDownloads(){
     downloadItems.clear();
     // Requests refer to the current attempt; an older verified file remains usable.
     for(const item of items)if(!downloadItems.has(item.imdb)||serverReady(item))downloadItems.set(item.imdb,item);
-    downloadDataState='current';downloadFailures=0;updateCardDownloads();
+    downloadDataState='current';downloadFailures=0;updateCardDownloads();renderWatchedPrompts(data.watchedPrompts);
     const priority={downloading:0,approved:1,checking:2,queued:3,indexed:4,'playback-tested':4,downloaded:4,unavailable:6,failed:6,cancelled:7};
     items.sort((a,b)=>(priority[a.state]??5)-(priority[b.state]??5));
     if(!items.length){const p=document.createElement('p');p.textContent=autoDownloads?'No downloads requested yet. Finalize & download sends your selected movies to the 8 TB drive.':'No downloads started. Finalize your picks, then review each server download.';list.append(p);}
@@ -285,6 +285,41 @@ async function loadDownloads(){
     downloadDataState='unavailable';updateCardDownloads();showFailure(error);
     if(error.kind==='connection'&&downloadFailures<5)downloadTimer=setTimeout(loadDownloads,[3000,6000,12000,20000,30000][downloadFailures++]);
   }}
+}
+// Watched in AFZ Nuvio -> ask, never delete automatically. Confirm opens the
+// separate server preview, then a second explicit "Delete server copy" tap.
+function renderWatchedPrompts(info){
+  const box=$('watched-prompts');if(!box)return;box.replaceChildren();
+  const prompts=(info&&info.prompts)||[];
+  for(const p of prompts){
+    const row=document.createElement('article');row.className='download-row watched-prompt';row.dataset.imdb=p.imdb;
+    const title=document.createElement('h3');title.textContent=p.title;
+    const ask=document.createElement('p');ask.setAttribute('role','status');
+    ask.textContent='Watched — delete from server?';
+    const detail=document.createElement('p');detail.className='muted';
+    detail.textContent=(p.source==='marked'?'Marked watched':'Watched '+p.progressPercent+'%')+' in AFZ Nuvio. Nothing is deleted unless you confirm.';
+    const confirm=document.createElement('button');confirm.type='button';confirm.textContent='Confirm';confirm.className='watched-confirm';
+    const keep=document.createElement('button');keep.type='button';keep.className='secondary watched-keep';keep.textContent='Keep';
+    if(!info.deleteAvailable){confirm.disabled=true;detail.textContent+=' Server deletion is not switched on yet.';}
+    keep.onclick=async()=>{keep.disabled=confirm.disabled=true;try{await api('feedback',{action:'keep-watched',imdb:p.imdb});toast('Kept on the server.');row.remove();}catch(e){keep.disabled=false;confirm.disabled=!info.deleteAvailable;showFailure(e,true);}};
+    confirm.onclick=async()=>{
+      keep.disabled=confirm.disabled=true;
+      let preview;
+      try{preview=await api('delete-server/'+encodeURIComponent(p.imdb));}
+      catch(e){keep.disabled=false;confirm.disabled=false;showFailure(e);return;}
+      ask.textContent='Delete the server copy of '+preview.title+' ('+(preview.sizeBytes/1e9).toFixed(2)+' GB)?';
+      detail.textContent='This removes the file from the 8 TB drive. Your picks, likes, watch history and phone downloads stay.';
+      const really=document.createElement('button');really.type='button';really.className='danger watched-delete';really.textContent='Delete server copy';
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='secondary';cancel.textContent='Cancel';
+      cancel.onclick=()=>loadDownloads();
+      really.onclick=async()=>{really.disabled=cancel.disabled=true;
+        try{await api('delete-server',{imdb:p.imdb,confirmationToken:preview.confirmationToken,confirmedTitle:preview.title});toast('Removed from server.');}
+        catch(e){showFailure(e,true);}
+        await loadDownloads();};
+      confirm.replaceWith(really);keep.replaceWith(cancel);really.focus();
+    };
+    row.append(title,ask,detail,confirm,keep);box.append(row);
+  }
 }
 function movieOverview(movie,heading='h2'){
   const overview=document.createElement('div');overview.className='movie-overview';

@@ -33,6 +33,8 @@ class Controller:
         self.refill_provider=refill_provider
         from similar_movies import SimilarMovies
         self.similar=SimilarMovies(self)
+        from watched_prompts import WatchedPrompts
+        self.watched=WatchedPrompts(self.db,lambda:self.clock())
         original_payload=self.shortlist_payload
         self.shortlist_payload=lambda:self.similar.store.merge(original_payload())
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
@@ -179,6 +181,31 @@ class Controller:
         with self.lock:
             return self.delete_service.delete(principal, imdb, token, confirmed_title)
 
+    def ready_titles(self):
+        if not self.index:return {}
+        return {m['id']:m['name'] for m in self.index.metas()}
+
+    def watched_action(self,principal,data):
+        action=data.get('action')
+        if action=='keep-watched':return self.watched.keep(principal,data.get('imdb'))
+        ready=self.ready_titles();removed=self.removed_media_ids()
+        if action=='report-watched':
+            imdb=str(data.get('imdb','')).strip()
+            if imdb not in ready or imdb in removed:
+                self.watched._imdb(imdb)
+                return {'imdb':imdb,'watched':False,'onServer':False}
+            result=self.watched.report(principal,imdb,data.get('progressPercent'),data.get('watched',False))
+            return dict(result,onServer=True,deleteAvailable=bool(self.delete_service))
+        return self.watched_prompts(principal,ready,removed)
+
+    def watched_prompts(self,principal,ready=None,removed=None):
+        ready=self.ready_titles() if ready is None else ready
+        removed=self.removed_media_ids() if removed is None else removed
+        # Prompts are advisory: a busy database must never break the downloads view.
+        try: prompts=self.watched.pending(principal,ready,removed)
+        except sqlite3.Error: return {'prompts':[],'deleteAvailable':bool(self.delete_service),'unavailable':True}
+        return {'prompts':prompts,'deleteAvailable':bool(self.delete_service)}
+
     def removed_media_ids(self):
         reader = getattr(self.index, 'removed_ids', None)
         return reader() if callable(reader) else set()
@@ -259,7 +286,7 @@ class Controller:
                     item['state']='removed'
                     item['canRetry']=False
                     item['message']='Removed from your 8 TB server.'
-            return {'jobs':result,'requests':requests}
+            return {'jobs':result,'watchedPrompts':self.watched_prompts(principal),'requests':requests}
 
     def propose(self, imdb, principal):
         self.require_enabled()
@@ -422,6 +449,10 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
             try:return controller.similar.action(principal,data)
             except ValueError as exc:raise HTTPException(400,str(exc))
             except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')
+        if data.get('action') in ('report-watched','keep-watched','watched-prompts'):
+            try:return controller.watched_action(principal,data)
+            except ValueError as exc:raise HTTPException(400,str(exc))
+            except Exception:raise HTTPException(503,'Watched status is temporarily unavailable. Nothing was deleted.')
         if data.get('action')=='set-genre-settings':
             try:return controller.save_genres(principal,data.get('settings'))
             except SettingsConflict as exc:raise HTTPException(409,str(exc))
