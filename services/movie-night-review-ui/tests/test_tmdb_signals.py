@@ -87,6 +87,14 @@ class TmdbSignalsTests(unittest.TestCase):
         shallows = dict(movie(604, name='The Shallows', genres=['Horror'], description='A surfer is attacked by a great white shark.'), themes={'shark'})
         self.assertGreater(related_score(dict(rel.SEED, themes={'shark'}), shallows, {}, 60)[0], 0)
 
+    def test_up_to_fifty_results_and_cast_ranks_below_story(self):
+        import similar_movies; self.assertEqual(50, similar_movies.RESULT_LIMIT)
+        seed = movie(700, genres=['Action', 'Drama'], cast=['Tom Cruise'], director=['Joseph Kosinski'], description='A navy pilot trains a squad.')
+        seed['themes'] = {'fighter pilot'}
+        cast_link = movie(701, genres=['Action', 'Drama'], cast=['Tom Cruise'], director=['Other'], description='A samurai war.')
+        themed = dict(movie(702, genres=['Action', 'Drama'], cast=['Other'], director=['Other'], description='Pilots in a war.'), themes={'fighter pilot'})
+        self.assertGreater(related_score(seed, themed, {}, 60)[0], related_score(seed, cast_link, {}, 60)[0])
+
 
 if __name__ == '__main__':
     unittest.main()

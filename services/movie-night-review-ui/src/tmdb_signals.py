@@ -45,7 +45,7 @@ class TmdbSignals:
         return {r['name'].casefold() for r in rows[:40] if isinstance(r, dict) and isinstance(r.get('name'), str)
                 and len(r['name']) <= 60} - GENERIC
 
-    def related(self, imdb, deadline, limit=40):
+    def related(self, imdb, deadline, limit=120):
         """Return (seed themes, {imdb_id: themes}) for TMDB-suggested movies."""
         found = self.get('/find/' + imdb, external_source='imdb_id').get('movie_results') or []
         if not found or not isinstance(found[0].get('id'), int):
@@ -58,9 +58,9 @@ class TmdbSignals:
         pages = []
         if ids:
             # Most-voted movies sharing a theme ("shark"): The Meg, The Shallows...
-            pages.append(self.get('/discover/movie', with_keywords='|'.join(map(str, ids)),
-                                  sort_by='vote_count.desc', include_adult='false'))
-        pages += [self.get('/movie/%d/recommendations' % tid), self.get('/movie/%d/similar' % tid)]
+            pages += [self.get('/discover/movie', with_keywords='|'.join(map(str, ids)), page=n,
+                               sort_by='vote_count.desc', include_adult='false') for n in (1, 2, 3)]
+        pages += [self.get('/movie/%d/%s' % (tid, kind), page=n) for n in (1, 2) for kind in ('recommendations', 'similar')]
         order = []
         for page in pages:
             for r in (page.get('results') or [])[:20]:
@@ -72,6 +72,6 @@ class TmdbSignals:
                 return None
             d = self.get('/movie/%d' % mid, append_to_response='keywords')
             return (d.get('imdb_id'), self.themes(d)) if IMDB.fullmatch(str(d.get('imdb_id'))) else None
-        with ThreadPoolExecutor(6) as pool:
+        with ThreadPoolExecutor(10) as pool:
             rows = [r for r in pool.map(detail, order[:limit]) if r]
         return themes, dict(rows)
