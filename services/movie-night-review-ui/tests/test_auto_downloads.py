@@ -158,8 +158,23 @@ class AutoDownloadTests(unittest.TestCase):
         self.h.controller.enable_auto_downloads();self.settle();self.assertEqual(1,self.h.provider.resolves)
     def test_failed_transfer_is_preserved_without_automatic_retry(self):
         self.h.truncated=True;self.finalize();result=self.settle()
-        self.assertEqual('failed',result['jobs'][0]['state']);self.assertFalse(result['requests'][-1]['canRetry'])
-        self.finalize(retryDownloads=[IDS[0]]);self.settle();self.assertEqual(1,self.h.provider.resolves)
+        self.assertEqual('failed',result['jobs'][0]['state']);self.assertTrue(result['requests'][-1]['canRetry'])
+        # Reloads and plain finalization never retry on their own.
+        self.finalize();self.settle();self.assertEqual(1,self.h.provider.resolves)
+    def test_owner_retry_of_failed_transfer_sets_partial_aside_and_downloads_again(self):
+        from pathlib import Path
+        self.h.truncated=True;self.finalize();first=self.settle()
+        failed=first['jobs'][0]['id']
+        root=Path(self.h.controller.worker.root);partials=list((root/'Movies').glob('*.part'))
+        self.h.truncated=False
+        self.finalize(retryDownloads=[IDS[0]]);result=self.settle()
+        self.assertEqual(2,self.h.provider.resolves)
+        self.assertNotIn(failed,[j['id'] for j in result['jobs']])
+        with sqlite3.connect(self.h.db) as db:
+            self.assertEqual(('failed','owner-retry'),db.execute('SELECT state,reason FROM archived_jobs WHERE id=?',(failed,)).fetchone())
+        aside=list((root.parent/'.quarantine').rglob('*.part.'+failed))
+        self.assertEqual(len(partials),len(aside))
+        self.assertTrue(all(not p.exists() for p in partials))
     def test_atomic_link_survives_missing_dispatch(self):
         with patch.object(self.h.controller.pool,'submit') as submit:
             self.finalize()
@@ -169,6 +184,31 @@ class AutoDownloadTests(unittest.TestCase):
         # Simulate crash after DB commit but before dispatch, then recover once.
         self.h.controller.futures.clear();self.h.controller.recover_jobs();self.settle()
         self.assertEqual(1,self.h.provider.resolves)
+    def test_restart_keeps_fully_transferred_file_instead_of_failing(self):
+        from pathlib import Path
+        with patch.object(self.h.controller.pool,'submit'):
+            self.finalize()
+            end=time.monotonic()+5
+            while time.monotonic()<end and self.count('jobs')==0:time.sleep(.01)
+        with sqlite3.connect(self.h.db) as db:
+            pid,raw=db.execute('SELECT id,payload FROM jobs').fetchone()
+            db.execute("UPDATE jobs SET state='downloading' WHERE id=?",(pid,))
+        size=json.loads(raw)['choice']['size'];name=Path(json.loads(raw)['choice']['destination']).name
+        movies=Path(self.h.controller.worker.root)/'Movies';movies.mkdir(exist_ok=True)
+        (movies/(name+'.part')).write_bytes((self.h.body*(size//len(self.h.body)+1))[:size])
+        self.h.controller.futures.clear()
+        with patch.object(self.h.controller.pool,'submit'):self.h.controller.recover_jobs()
+        with sqlite3.connect(self.h.db) as db:state=db.execute('SELECT state FROM jobs WHERE id=?',(pid,)).fetchone()[0]
+        self.assertIn(state,('downloaded','indexed'));self.assertTrue((movies/name).is_file());self.assertFalse((movies/(name+'.part')).exists())
+        self.assertEqual(0,self.h.provider.resolves)
+    def test_restart_still_fails_an_incomplete_transfer(self):
+        with patch.object(self.h.controller.pool,'submit'):
+            self.finalize()
+            end=time.monotonic()+5
+            while time.monotonic()<end and self.count('jobs')==0:time.sleep(.01)
+        with sqlite3.connect(self.h.db) as db:db.execute("UPDATE jobs SET state='downloading'")
+        with patch.object(self.h.controller.pool,'submit'):self.h.controller.recover_jobs()
+        with sqlite3.connect(self.h.db) as db:self.assertEqual('failed',db.execute('SELECT state FROM jobs').fetchone()[0])
     def test_disabled_downloads_reject_finalize(self):
         self.h.controller.enabled=False
         self.assertEqual(409,self.finalize().status_code);self.assertEqual(0,self.count('movie_download_queue'))

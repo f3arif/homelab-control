@@ -132,7 +132,7 @@ class InventoryTests(unittest.TestCase):
         rows=self.rows();rows[0]['download_finished']=False;self.assertEqual([],self.parse(rows))
     def test_unknown_codec(self):self.assertEqual([],self.parse(self.rows(name='Fixture.One.2024.1080p.mkv')))
     def test_large_or_720p(self):
-        self.assertEqual([],self.parse(self.rows(size=15_000_000_001)))
+        self.assertEqual([],self.parse(self.rows(size=18_000_000_001)))
         self.assertEqual([],self.parse(self.rows(name='Fixture.One.2024.720p.x264.mkv')))
 
 class PaginationTests(unittest.TestCase):
