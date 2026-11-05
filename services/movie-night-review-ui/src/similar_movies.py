@@ -19,6 +19,7 @@ from genre_settings import genres_of
 from metadata_discovery import CinemetaDiscovery, DiscoveryUnavailable
 from movie_night import shortlist, present_movie
 from movie_presentation import ID, normalize_info, display_fields
+from tmdb_signals import TmdbSignals
 
 
 def query_text(value):
@@ -122,12 +123,14 @@ def related_score(seed, meta, frequency=None, total=1):
     limit = rare_limit(total)
     seed_words = words(seed)
     shared = {w for w in seed_words & words(meta) if frequency.get(w, 0) <= limit}
-    distinctive = sorted(shared, key=lambda w: (frequency.get(w, 0), w))[:4]
+    # Shared TMDB keywords ("shark", "deep sea") are curated story themes.
+    themes = sorted(set(seed.get('themes', ())) & set(meta.get('themes', ())))[:4]
+    distinctive = sorted(shared - set(themes), key=lambda w: (frequency.get(w, 0), w))[:4]
     # A seed story word in the candidate's own title ("Shark Night") is strong evidence.
-    titled = sorted(seed_words & title_words(meta) - STOP - set(distinctive))[:2]
+    titled = sorted(seed_words & title_words(meta) - STOP - set(distinctive) - set(themes))[:2]
     weight = lambda w: math.log(1 + total / (1 + frequency.get(w, 0)))
-    narrative = sum(weight(w) for w in distinctive + titled)
-    story = len(distinctive) + len(titled)
+    narrative = sum(weight(w) for w in distinctive + titled) + 3 * len(themes)
+    story = len(distinctive) + len(titled) + len(themes)
     directors = sorted(people(seed, 'director') & people(meta, 'director'))
     cast = sorted(people(seed, 'cast') & people(meta, 'cast'))
     genre_score = len(common) / max(1, len(genres_of(seed) | genres_of(meta)))
@@ -135,12 +138,14 @@ def related_score(seed, meta, frequency=None, total=1):
     # One shared genre, one stray synopsis word, a place name or a country can
     # never carry a match. Story evidence needs a genre plus two rare story words
     # (one may be in the title); a genre-only fallback needs most genres and ranks last.
-    genre_only = not people_link and story < 2 and len(common) >= 2 and genre_score >= 2 / 3
-    if not people_link and not genre_only and not (story >= 2 and distinctive and common) and len(distinctive) < 3:
+    genre_only = not people_link and not themes and story < 2 and len(common) >= 2 and genre_score >= 2 / 3
+    if not people_link and not genre_only and not (story >= 2 and (distinctive or themes) and common) and not (themes and common) and len(distinctive) < 3:
         return 0, []
     reasons = ['Shared genres: ' + ', '.join(sorted(common))] if common else []
     if titled and not genre_only:
         reasons.append('Story element in title: ' + ', '.join(titled))
+    if themes:
+        reasons.append('Shared themes: ' + ', '.join(themes))
     if distinctive and not genre_only:
         reasons.append('Shared story words: ' + ', '.join(distinctive))
     if directors:
@@ -158,7 +163,10 @@ def related_score(seed, meta, frequency=None, total=1):
 
 
 class CinemetaSimilar:
-    def __init__(self, metadata=None):
+    def __init__(self, metadata=None, tmdb=None):
+        # TMDB is optional: only the production service (no injected metadata)
+        # reads TMDB_API_KEY from its environment.
+        self.tmdb = tmdb if tmdb is not None or metadata is not None else TmdbSignals.from_env()
         self.metadata = metadata or CinemetaDiscovery()
 
     def search(self, query):
@@ -216,6 +224,8 @@ class CinemetaSimilar:
         genres = sorted(genres_of(seed))
         supported = [g for g in genres if g not in ('Music', 'Musical')]
         failures = 0
+        side = ThreadPoolExecutor(1)
+        tmdb = side.submit(self.tmdb.related, imdb, deadline - 20) if self.tmdb else None
 
         def fetch(paths):
             nonlocal failures
@@ -259,6 +269,17 @@ class CinemetaSimilar:
             if score > 0 and meta['id'] not in candidates:
                 candidates[meta['id']] = (score, meta, reference(meta))
         ordered = [(meta, item) for _, meta, item in sorted(candidates.values(), key=lambda c: (-c[0], c[2]['id']))]
+        try:
+            themes, suggested = tmdb.result() if tmdb else (set(), {})
+        except Exception:
+            themes, suggested = set(), {}
+        side.shutdown(wait=False)
+        seed = dict(seed, themes=themes)
+        if themes:
+            # TMDB suggestions sharing a theme get a detail check ahead of the rest.
+            picked = [(dict(id=i, type='movie', name=i), dict(id=i)) for i, t in suggested.items()
+                      if t & themes and i != imdb][:24]
+            ordered = picked + [o for o in ordered if o[1]['id'] not in suggested]
         verified = []
         def detail_of(pair):
             try:
@@ -279,6 +300,8 @@ class CinemetaSimilar:
             row = normalize(row['discoveryEvidence'], unrestricted=True)
             if not row:
                 continue
+            if catalog['id'] in suggested:
+                detail = dict(detail, themes=suggested[catalog['id']])
             score, reasons = related_score(seed, detail, frequency, total)
             if score <= 0:
                 continue
