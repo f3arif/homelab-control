@@ -144,7 +144,9 @@ def related_score(seed, meta, frequency=None, total=1):
     own = words(meta) | title_words(meta)
     weak_theme = (themes and not people_link and not distinctive and not titled and len(themes) == 1
                   and len(common) < 2 and not all(stem(w) in own for w in re.findall(r'[^\W\d_]{4,}', themes[0])))
-    if weak_theme:
+    # A lone shared actor with no genre, theme, story or director link is not a match.
+    lone_cast = len(cast) == 1 and not directors and not themes and not story and len(common) < 2
+    if weak_theme or lone_cast:
         return 0, []
     if not people_link and not genre_only and not (story >= 2 and (distinctive or themes) and common) and not (themes and common) and len(distinctive) < 3:
         return 0, []
@@ -166,7 +168,11 @@ def related_score(seed, meta, frequency=None, total=1):
         reasons.append('Genre match only; no closer story connection found.')
         return genre_score + 0.25 * bool(country), reasons
     return (3 * genre_score + min(6, narrative) + 6 * bool(directors)
-            + 3 * min(2, len(cast)) + 0.5 * bool(country)), reasons
+            + 1.5 * min(2, len(cast)) + 0.5 * bool(country)), reasons
+
+
+RESULT_LIMIT = 50   # up to 50 verified matches; never padded with weak picks
+DETAIL_LIMIT = 120  # Cinemeta detail checks per search
 
 
 class CinemetaSimilar:
@@ -285,7 +291,7 @@ class CinemetaSimilar:
         if themes:
             # TMDB suggestions sharing a theme get a detail check ahead of the rest.
             picked = [(dict(id=i, type='movie', name=i), dict(id=i)) for i, t in suggested.items()
-                      if t & themes and i != imdb][:24]
+                      if t & themes and i != imdb][:80]
             ordered = picked + [o for o in ordered if o[1]['id'] not in suggested]
         verified = []
         def detail_of(pair):
@@ -293,8 +299,8 @@ class CinemetaSimilar:
                 return self.metadata.get('/meta/movie/' + pair[1]['id'] + '.json', deadline).get('meta')
             except DiscoveryUnavailable:
                 return None
-        top = ordered[:48]
-        with ThreadPoolExecutor(6) as pool:
+        top = ordered[:DETAIL_LIMIT]
+        with ThreadPoolExecutor(12) as pool:
             details = list(pool.map(detail_of, top))
         for (meta, catalog), detail in zip(top, details):
             if detail is None:
@@ -317,7 +323,7 @@ class CinemetaSimilar:
         if not verified and failures:
             raise DiscoveryUnavailable('Metadata provider unavailable')
         verified.sort(key=lambda item: (-item[0], item[1]['id']))
-        verified = verified[:18]
+        verified = verified[:RESULT_LIMIT]
         return {'reference': chosen, 'rows': [r for _, r, _ in verified],
                 'reasons': {r['id']: reason for _, r, reason in verified},
                 'searchScope': 'all-genres-and-years',

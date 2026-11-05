@@ -13,12 +13,15 @@ import test_similar_movies as fixtures
 class RelatedDiscoveryTests(unittest.TestCase):
  def test_cross_genre_and_country_evidence(self):
   seed=movie(0,country='India',genres=['Action'],description='An officer hunts terrorist sleeper cells.')
-  match=movie(1,country='India',genres=['Drama'],description='A courtroom dispute.',director=[],cast=['Fixture Actor'])
+  # One shared actor plus a country is not a match on its own (owner: "need more movies", not weaker ones).
+  lone=movie(1,country='India',genres=['Drama'],description='A courtroom dispute.',director=[],cast=['Fixture Actor'])
+  self.assertEqual((0,[]),related_score(seed,lone))
+  match=dict(lone,director=['Fixture Director'])
   score,reasons=related_score(seed,match)
   self.assertGreater(score,0);self.assertIn('Same country: India',reasons)
   self.assertFalse(any('Shared genres:' in r for r in reasons))
   foreign=dict(match,country='France');self.assertGreater(score,related_score(seed,foreign)[0])
-  self.assertEqual((0,[]),related_score(seed,dict(match,cast=[])))
+  self.assertEqual((0,[]),related_score(seed,dict(match,cast=[],director=[])))
  def test_cast_and_director_searches_expand_pool_and_verify_identity(self):
   seed=movie(0,genres=['Action'],country='India')
   connected=movie(1,genres=['Drama','Comedy'],releaseInfo='2012',released='2012-03-01T00:00:00Z',country='India')
