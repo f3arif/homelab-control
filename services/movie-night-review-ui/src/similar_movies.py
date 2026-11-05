@@ -69,14 +69,36 @@ def rank_titles(items, query):
 
 # Generic synopsis words do not count as evidence of a similar story.
 STOP = set('about after again against also another around attempt attempts away back becomes before being between both come comes could days does down during each even ever every family finds first from gets goes have having help herself himself into just life lives living made make makes many more most much must mysterious needs never next only other over past people person place real same secret secrets several some someone something soon story take takes taking than that their them then there these they this those through time together tries trying turns under very wants were what when where which while whose will with within woman world would year years young team project task plan idea work tragic dangerous mission'.split())
+# Common plot verbs and connectors: real in many synopses, never a story theme.
+STOP |= set('forced force drawn draw group groups hope hopes overcome route international must face faces begin begins find discover discovers follow follows keep leave leaves left look order return returns start starts final last local strange unexpected friend friends home town city night nights everything nothing themselves along among across without enough little long new old big great high better best end ends way ways still'.split())
+
+
+def proper_nouns(text):
+    # Capitalized words that are not sentence starts are names and places
+    # ("Los Angeles", "Shanghai"); they describe setting, not the kind of movie.
+    found = set()
+    for m in re.finditer(r'[^\W\d_]{4,}', text):
+        before = text[:m.start()].rstrip()
+        if m.group()[0].isupper() and before and before[-1] not in '.!?:;"\'(\u201c':
+            found.add(m.group().casefold())
+    return found
+
+
+def stem(w):
+    return w[:-1] if len(w) > 5 and w.endswith('s') and not w.endswith(('ss', 'us', 'is')) else w
 
 
 def words(meta):
     text = meta.get('description', '')
     if not isinstance(text, str) or len(text) > 3000:
         return set()
-    return {w[:-1] if len(w) > 5 and w.endswith('s') and not w.endswith(('ss', 'us', 'is')) else w
-            for w in re.findall(r'[^\W\d_]{4,}', text.casefold()) if w not in STOP}
+    proper = proper_nouns(text)
+    return {stem(w) for w in re.findall(r'[^\W\d_]{4,}', text.casefold()) if w not in STOP and w not in proper}
+
+
+def title_words(meta):
+    name = meta.get('name', '')
+    return {stem(w) for w in re.findall(r'[^\W\d_]{4,}', name.casefold())} if isinstance(name, str) else set()
 
 
 def people(meta, key):
@@ -89,21 +111,38 @@ def countries(meta):
     return {n.strip() for n in value.split(',')[:5] if clean_text(n.strip(), 80)} if isinstance(value, str) and len(value) <= 400 else set()
 
 
+def rare_limit(total):
+    # A word counts as story evidence only when few movies in the pool use it.
+    return max(2, 0.04 * total) if total > 1 else float('inf')
+
+
 def related_score(seed, meta, frequency=None, total=1):
     common = genres_of(seed) & genres_of(meta)
-    shared = words(seed) & words(meta)
     frequency = frequency or {}
+    limit = rare_limit(total)
+    seed_words = words(seed)
+    shared = {w for w in seed_words & words(meta) if frequency.get(w, 0) <= limit}
     distinctive = sorted(shared, key=lambda w: (frequency.get(w, 0), w))[:4]
-    narrative = sum(math.log(1 + total / (1 + frequency.get(w, 0))) for w in distinctive)
+    # A seed story word in the candidate's own title ("Shark Night") is strong evidence.
+    titled = sorted(seed_words & title_words(meta) - STOP - set(distinctive))[:2]
+    weight = lambda w: math.log(1 + total / (1 + frequency.get(w, 0)))
+    narrative = sum(weight(w) for w in distinctive + titled)
+    story = len(distinctive) + len(titled)
     directors = sorted(people(seed, 'director') & people(meta, 'director'))
     cast = sorted(people(seed, 'cast') & people(meta, 'cast'))
-    # Cross-genre cast/director and substantive story connections are valid.
-    # A country alone (or a single stray synopsis word) is not a recommendation.
-    if not common and not directors and not cast and len(distinctive) < 2:
+    genre_score = len(common) / max(1, len(genres_of(seed) | genres_of(meta)))
+    people_link = bool(directors or cast)
+    # One shared genre, one stray synopsis word, a place name or a country can
+    # never carry a match. Story evidence needs a genre plus two rare story words
+    # (one may be in the title); a genre-only fallback needs most genres and ranks last.
+    genre_only = not people_link and story < 2 and len(common) >= 2 and genre_score >= 2 / 3
+    if not people_link and not genre_only and not (story >= 2 and distinctive and common) and len(distinctive) < 3:
         return 0, []
     reasons = ['Shared genres: ' + ', '.join(sorted(common))] if common else []
-    if distinctive:
-        reasons.append('Shared synopsis words: ' + ', '.join(distinctive))
+    if titled and not genre_only:
+        reasons.append('Story element in title: ' + ', '.join(titled))
+    if distinctive and not genre_only:
+        reasons.append('Shared story words: ' + ', '.join(distinctive))
     if directors:
         reasons.append('Same director: ' + ', '.join(directors[:2]))
     if cast:
@@ -111,10 +150,11 @@ def related_score(seed, meta, frequency=None, total=1):
     country = sorted(countries(seed) & countries(meta))
     if country:
         reasons.append('Same country: ' + ', '.join(country[:2]))
-    if not distinctive and not directors and not cast:
+    if genre_only:
         reasons.append('Genre match only; no closer story connection found.')
-    genre_score = len(common) / max(1, len(genres_of(seed) | genres_of(meta)))
-    return 3 * genre_score + min(6, narrative) + 6 * bool(directors) + 3 * min(2, len(cast)) + 2 * bool(country), reasons
+        return genre_score + 0.25 * bool(country), reasons
+    return (3 * genre_score + min(6, narrative) + 6 * bool(directors)
+            + 3 * min(2, len(cast)) + 0.5 * bool(country)), reasons
 
 
 class CinemetaSimilar:
@@ -173,36 +213,63 @@ class CinemetaSimilar:
             if isinstance(value, list):
                 names += [n for n in value[:limit] if clean_text(n, 100)]
         names = list(dict.fromkeys(names))[:5]
-        paths = ['/catalog/movie/top/search=' + quote(n, safe='') + '.json' for n in names]
         genres = sorted(genres_of(seed))
         supported = [g for g in genres if g not in ('Music', 'Musical')]
-        paths += ['/catalog/movie/top/genre=' + quote(g, safe='') + '.json' for g in supported[:3]]
-        if not paths:
-            paths = ['/catalog/movie/top.json']
-        candidates = {}; failures = 0
-        for path in paths:
-            try:
-                metas = self.metadata.get(path, deadline).get('metas')
-                if not isinstance(metas, list):
-                    raise DiscoveryUnavailable('Invalid catalog')
-                for meta in metas[:100]:
-                    item = reference(meta)
-                    if item and item['id'] != imdb:
-                        # Discard literal title-only person-name search hits.
-                        score, _ = related_score(seed, meta)
-                        if score > 0:
-                            candidates.setdefault(item['id'], (meta, item))
-            except DiscoveryUnavailable:
-                failures += 1
-        frequency = Counter(w for meta, _ in candidates.values() for w in words(meta))
-        ordered = sorted(candidates.values(), key=lambda pair: (-related_score(seed, pair[0], frequency, len(candidates))[0], pair[1]['id']))
+        failures = 0
+
+        def fetch(paths):
+            nonlocal failures
+            def one(path):
+                try:
+                    metas = self.metadata.get(path, deadline).get('metas')
+                    if not isinstance(metas, list):
+                        raise DiscoveryUnavailable('Invalid catalog')
+                    return metas[:100]
+                except DiscoveryUnavailable:
+                    return None
+            with ThreadPoolExecutor(6) as pool:
+                results = list(pool.map(one, paths))
+            failures += sum(r is None for r in results)
+            return [m for r in results if r for m in r if reference(m) and reference(m)['id'] != imdb]
+
+        # Several pages per genre form the background pool. Word rarity is measured
+        # against it, so plot words common to the genre ("group") carry no weight.
+        genre_paths = ['/catalog/movie/top/genre=' + quote(g, safe='') + ('&skip=%d' % skip if skip else '') + '.json'
+                       for g in supported[:3] for skip in range(0, 500, 50)]
+        background = {m['id']: m for m in fetch(genre_paths or ['/catalog/movie/top.json'])}
+        frequency = Counter(w for meta in background.values() for w in words(meta))
+        total = len(background)
+        # The seed's rarest story words ("shark", "wreckage") find titles the
+        # popular genre pages miss. Words seen in the genre pool come first.
+        limit = rare_limit(total)
+        concepts = sorted((w for w in words(seed) if frequency.get(w, 0) <= limit),
+                          key=lambda w: (frequency.get(w, 0) == 0, frequency.get(w, 0), -len(w), w))[:6]
+        searched = fetch(['/catalog/movie/top/search=' + quote(n, safe='') + '.json' for n in names + concepts])
+        if not background:
+            frequency = Counter(w for meta in {m['id']: m for m in searched}.values() for w in words(meta))
+            total = len({m['id'] for m in searched})
+        candidates = {}
+        for meta in list(background.values()) + searched:
+            # Discard literal title-only person-name search hits and weak matches.
+            # Search hits carry no genres or synopsis, so a story word in the
+            # title earns a detail lookup; the full details are scored below.
+            score = related_score(seed, meta, frequency, total)[0]
+            if not score and not meta.get('description') and set(concepts) & title_words(meta):
+                score = 3
+            if score > 0 and meta['id'] not in candidates:
+                candidates[meta['id']] = (score, meta, reference(meta))
+        ordered = [(meta, item) for _, meta, item in sorted(candidates.values(), key=lambda c: (-c[0], c[2]['id']))]
         verified = []
-        for meta, catalog in ordered[:30]:
-            if time.monotonic() >= deadline:
-                break
+        def detail_of(pair):
             try:
-                detail = self.metadata.get('/meta/movie/' + catalog['id'] + '.json', deadline).get('meta')
+                return self.metadata.get('/meta/movie/' + pair[1]['id'] + '.json', deadline).get('meta')
             except DiscoveryUnavailable:
+                return None
+        top = ordered[:48]
+        with ThreadPoolExecutor(6) as pool:
+            details = list(pool.map(detail_of, top))
+        for (meta, catalog), detail in zip(top, details):
+            if detail is None:
                 failures += 1
                 continue
             row = normalize(detail, unrestricted=True)
@@ -212,16 +279,15 @@ class CinemetaSimilar:
             row = normalize(row['discoveryEvidence'], unrestricted=True)
             if not row:
                 continue
-            score, reasons = related_score(seed, detail, frequency, len(candidates))
+            score, reasons = related_score(seed, detail, frequency, total)
             if score <= 0:
                 continue
             row['presentation'] = normalize_info(detail, row['id'])
             verified.append((score, row, reasons))
-            if len(verified) >= 18:
-                break
         if not verified and failures:
             raise DiscoveryUnavailable('Metadata provider unavailable')
         verified.sort(key=lambda item: (-item[0], item[1]['id']))
+        verified = verified[:18]
         return {'reference': chosen, 'rows': [r for _, r, _ in verified],
                 'reasons': {r['id']: reason for _, r, reason in verified},
                 'searchScope': 'all-genres-and-years',
