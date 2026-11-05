@@ -4,6 +4,8 @@ from contextlib import closing, nullcontext
 from pathlib import Path
 from uuid import uuid4
 import json
+import os
+import time
 import re
 from movie_night import ApprovalStore, RESERVE, select_compact
 
@@ -44,8 +46,31 @@ class AutoDownloads:
             db.execute('INSERT OR IGNORE INTO movie_download_queue VALUES(?,?,?,?,?,NULL,?,?)',
                        (str(uuid4()),principal,imdb,rows[imdb]['name'],'queued','Waiting for a source check.',now))
             if imdb in retry:
+                self._release_failed_link(db,principal,imdb,now)
                 db.execute("UPDATE movie_download_queue SET state='queued',message='Waiting for a source check.',updated=? WHERE principal=? AND imdb=? AND job_id IS NULL AND state IN ('unavailable','failed','cancelled')",(now,principal,imdb))
         return True
+
+    def _release_failed_link(self, db, principal, imdb, now):
+        """Owner-initiated Retry only: archive a failed/cancelled linked job and set its partial aside."""
+        row=db.execute("SELECT q.job_id,j.payload FROM movie_download_queue q JOIN jobs j ON j.id=q.job_id "
+                       "WHERE q.principal=? AND q.imdb=? AND j.state IN ('failed','cancelled')",(principal,imdb)).fetchone()
+        if not row:return
+        job_id,payload=row
+        name=Path(json.loads(payload)['choice']['destination']).name
+        root=Path(self.c.worker.root)
+        partial=root/'Movies'/(name+'.part')
+        if partial.is_symlink():raise ValueError('existing file')
+        if partial.exists():
+            # Same filesystem, so this is a rename that can be undone; never a delete.
+            aside=root.parent/'.quarantine'/(time.strftime('%Y%m%d',time.localtime(now))+'-'+imdb)
+            aside.mkdir(parents=True,exist_ok=True)
+            target=aside/(partial.name+'.'+job_id)
+            if target.exists():raise ValueError('existing file')
+            os.rename(partial,target)
+        # Archived bytes still count toward the transfer budget (no quota is refunded).
+        db.execute("INSERT INTO archived_jobs SELECT id,title,destination,payload,state,bytes,evidence,'owner-retry',? FROM jobs WHERE id=?",(now,job_id))
+        db.execute('DELETE FROM jobs WHERE id=?',(job_id,))
+        db.execute("UPDATE movie_download_queue SET job_id=NULL,state='failed',updated=? WHERE principal=? AND imdb=? AND job_id=?",(now,principal,imdb,job_id))
 
     def start(self):
         with self.c.lock:
@@ -60,9 +85,9 @@ class AutoDownloads:
 
     def requests(self, principal, db=None):
         with (closing(self.c.feedback.connect()) if db is None else nullcontext(db)) as db:
-            rows=db.execute('SELECT id,imdb,name,state,job_id,message FROM movie_download_queue WHERE principal=? ORDER BY rowid DESC LIMIT 100',(principal,)).fetchall()
+            rows=db.execute('SELECT q.id,q.imdb,q.name,q.state,q.job_id,q.message,j.state FROM movie_download_queue q LEFT JOIN jobs j ON j.id=q.job_id WHERE q.principal=? ORDER BY q.rowid DESC LIMIT 100',(principal,)).fetchall()
             result=[dict(id=r[0],imdb=r[1],name=r[2],state=r[3],jobId=r[4],message=r[5],
-                         canRetry=r[4] is None and r[3] in ('unavailable','failed','cancelled')) for r in rows]
+                         canRetry=(r[4] is None and r[3] in ('unavailable','failed','cancelled')) or r[6] in ('failed','cancelled')) for r in rows]
             mobile=getattr(self.c,'mobile_selections',None)
             return mobile.enrich(principal,result,db) if mobile else result
 
@@ -100,7 +125,7 @@ class AutoDownloads:
                     self.future=None
                     return
                 request_id,principal,imdb=row
-                db.execute("UPDATE movie_download_queue SET state='checking',message='Finding a cached 1080p file (5–15 GB).' WHERE id=?",(request_id,))
+                db.execute("UPDATE movie_download_queue SET state='checking',message='Finding a cached 1080p file (5–18 GB).' WHERE id=?",(request_id,))
             try:
                 self._active(request_id,principal,imdb)
                 with closing(ApprovalStore(self.c.db)) as store:
@@ -120,7 +145,7 @@ class AutoDownloads:
                         if self.c.free()-reserved-size<RESERVE or QUOTA-committed<size+1:raise ValueError('insufficient storage or quota')
                     guard();choice=self.acquire(imdb,guard)
                 if not choice:
-                    self._finish(request_id,'unavailable','No cached 1080p file between 5 and 15 GB is available. Try again later.');continue
+                    self._finish(request_id,'unavailable','No cached 1080p file between 5 and 18 GB is available. Try again later.');continue
                 self._active(request_id,principal,imdb)
                 if self.c.inventory.verify(choice)!=choice:raise ValueError('source changed')
                 checked=int(self.c.clock())

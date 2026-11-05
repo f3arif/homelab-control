@@ -30,7 +30,7 @@ class ProviderInventory:
 
 
 def ffprobe(path):
-    result = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,codec_name,width,height',
+    result = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,codec_name,width,height:stream_disposition=attached_pic',
                              '-of','json',str(path)], capture_output=True, timeout=30, check=True)
     if len(result.stdout)>128000: raise ValueError('probe output limit')
     return json.loads(result.stdout)
@@ -48,7 +48,8 @@ def validate_file(path, choice, probe=ffprobe):
         data=probe(path)
         duration=float(data.get('format',{}).get('duration',0))
         if not math.isfinite(duration) or duration<=0: raise ValueError('invalid media duration')
-        videos=[x for x in data.get('streams',[]) if x.get('codec_type')=='video']
+        # Embedded cover art (attached_pic) is a still image, not a second video track.
+        videos=[x for x in data.get('streams',[]) if x.get('codec_type')=='video' and not (x.get('disposition') or {}).get('attached_pic')]
         codec={'HEVC':'hevc','H.265':'hevc','AVC':'h264','H.264':'h264','AV1':'av1'}.get(choice.codec.upper())
         video=videos[0] if len(videos)==1 else {}
         width,height=video.get('width',0),video.get('height',0)
@@ -127,6 +128,30 @@ class WorkerAdapter:
         self.verify_route=verify_route;self.storage_guard=storage_guard
 
     def _store(self): return ApprovalStore(self.db)
+
+    def finish_transferred(self, pid):
+        """Startup only: publish an interrupted job whose .part already holds every byte."""
+        store=self._store()
+        try:
+            row=store.db.execute("SELECT payload FROM jobs WHERE id=? AND state='downloading'",(pid,)).fetchone()
+            if not row:return False
+            choice=Choice(**json.loads(row[0])['choice']).validate()
+            directory=self.root/'Movies';name=Path(choice.destination).name
+            partial,final=directory/(name+'.part'),directory/name
+            if final.exists() or final.is_symlink() or partial.is_symlink() or not partial.is_file() or partial.stat().st_size!=choice.size:
+                return False
+            if self.storage_guard:self.storage_guard()
+            proof=validate_file(partial,choice,self.probe)
+            os.link(partial,final,follow_symlinks=False);os.unlink(partial)
+            store.transition(pid,'downloaded',bytes_received=choice.size,evidence=proof)
+            self.index.register(choice,proof)
+            if self.verify_route and self.verify_route(choice.imdb,choice.size):
+                self.index.publish(choice.imdb)
+                store.transition(pid,'indexed',evidence={'catalogId':choice.imdb,'existingRouteVerified':True})
+            return True
+        except Exception:
+            return False
+        finally:store.db.close()
 
     def run(self, pid):
         if not self.enabled: raise ValueError('download activation is disabled')
