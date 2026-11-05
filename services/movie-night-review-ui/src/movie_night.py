@@ -13,7 +13,7 @@ from movie_presentation import display_fields
 from genre_settings import genre_match, genres_of, defaults
 
 MIN_BYTES = 5_000_000_000
-CAP = 15_000_000_000
+CAP = 18_000_000_000
 RESERVE = 50 * 1024**3
 QUOTA = 100_000_000_000
 ROOT = '/srv/afzmedia/Media/MovieNight/Movies'
@@ -47,7 +47,7 @@ class Choice:
         if self.provider != 'torbox' or any(type(n) is not int or n < 0 for n in (self.torrent_id, self.file_id)):
             raise ValueError('exact provider file required')
         if type(self.size) is not int or not MIN_BYTES <= self.size <= CAP:
-            raise ValueError('known size between 5,000,000,000 and 15,000,000,000 bytes required')
+            raise ValueError('known size between 5,000,000,000 and 18,000,000,000 bytes required')
         if self.quality != '1080p':
             raise ValueError('Movie Night requires 1080p')
         for value in (self.title, self.edition, self.provider_name, self.codec):
@@ -66,9 +66,9 @@ def select_compact(choices):
             c.validate()
         except (ValueError, TypeError):
             continue
-        # Choose the smallest concrete file within the owner's 5–15 GB range.
+        # Owner rule (2026-11-04): the largest concrete file within 5–18 GB first.
         eligible.append(c)
-    return min(eligible, key=lambda c: (c.size, c.torrent_id, c.file_id)) if eligible else None
+    return max(eligible, key=lambda c: (c.size, -c.torrent_id, -c.file_id)) if eligible else None
 
 
 def stream_status(choice, proof, now, device_id):

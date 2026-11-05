@@ -175,8 +175,13 @@ class Controller:
     def recover_jobs(self):
         # A restart never retries an interrupted media request or switches its source.
         with closing(ApprovalStore(self.db)) as store:
-            for pid, in store.db.execute("SELECT id FROM jobs WHERE state='downloading'").fetchall():
-                store.transition(pid,'failed')
+            interrupted=[x[0] for x in store.db.execute("SELECT id FROM jobs WHERE state='downloading'").fetchall()]
+        for pid in interrupted:
+            # A fully transferred file is verified in place, never re-fetched or failed.
+            finish=getattr(self.worker,'finish_transferred',None)
+            if not (finish and finish(pid)):
+                with closing(ApprovalStore(self.db)) as store:store.transition(pid,'failed')
+        with closing(ApprovalStore(self.db)) as store:
             queued=[x[0] for x in store.db.execute("SELECT id FROM jobs WHERE state='approved'")]
         for pid in queued:self.futures[pid]=self.pool.submit(self.worker.run,pid)
 

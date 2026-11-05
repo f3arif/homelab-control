@@ -26,8 +26,8 @@ class WorkerTests(unittest.TestCase):
  def test_missing_id(self):m=manifest();m['files'][0]['fileId']=None;self.rejected(m)
  def test_unknown_zero_fraction_boolean_sizes(self):
   for s in [None,0,-1,1.5,True]:self.rejected(manifest(s))
- def test_fifteen_billion_boundary(self):self.assertEqual(validate_manifest(manifest(15_000_000_000))[1],15_000_000_001)
- def test_above_fifteen_billion(self):self.rejected(manifest(15_000_000_001))
+ def test_eighteen_billion_boundary(self):self.assertEqual(validate_manifest(manifest(18_000_000_000))[1],18_000_000_001)
+ def test_above_eighteen_billion(self):self.rejected(manifest(18_000_000_001))
  def test_series_policy_not_movie_capped(self):m=manifest(10_000_000_000);m['files'][0]['canonicalId']='tt123:1:1';m['files'][0]['destination']='TV/Fixture/file.mkv';validate_manifest(m)
  def test_batch_cap_includes_eof_byte(self):m=manifest(worker.MAX_BYTES);m['files'][0]['canonicalId']='tt123:1:1';self.rejected(m)
  def test_traversal_absolute_windows(self):
