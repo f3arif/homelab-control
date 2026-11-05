@@ -218,3 +218,4 @@ main{padding-bottom:calc(144px + env(safe-area-inset-bottom))}
 .manual-add-card>button{min-height:48px;margin-top:10px}
 .manual-add-results button{white-space:normal;width:100%}
 @media(max-width:480px){.manual-add-search{flex-direction:column;align-items:stretch}.manual-add-results{grid-template-columns:minmax(0,1fr)}}
+.danger{background:#b42318;color:#fff}
