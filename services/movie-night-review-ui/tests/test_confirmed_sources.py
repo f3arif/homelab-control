@@ -86,6 +86,7 @@ class SourceTests(MobileSelectionTests):
 
     def test_transfer_timeout_is_classified_and_secrets_are_discarded(self):
         self.assertEqual('network-timeout',worker.transfer_error(TimeoutError('https://secret/token')))
+        self.assertEqual('network-timeout',worker.transfer_error(worker.Rejected('network-timeout')))
         self.assertEqual('transfer-failed',worker.transfer_error(ValueError('https://secret/token')))
         # A timeout raised while using parent_fd must retain its own category.
         with tempfile.TemporaryDirectory() as tmp:

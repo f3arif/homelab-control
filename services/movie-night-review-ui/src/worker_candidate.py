@@ -20,7 +20,8 @@ def transfer_error(exc):
     if isinstance(exc, sqlite3.OperationalError): return 'state-database-unavailable'
     if isinstance(exc, ssl.SSLError): return 'tls-error'
     if isinstance(exc, OSError): return 'io-error'
-    known={'cancelled','transfer-deadline','media-truncated-or-oversized',
+    known={'network-timeout','connection-reset','response-truncated','state-database-unavailable',
+           'tls-error','io-error','transfer-failed','cancelled','transfer-deadline','media-truncated-or-oversized',
            'media-length-or-encoding','media-oversized','provider-http-status',
            'storage-reserve','destination-exists','worker-already-running',
            'unsafe-or-unavailable-parent'}
