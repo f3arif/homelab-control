@@ -30,7 +30,7 @@ class ProviderInventory:
 
 
 def ffprobe(path):
-    result = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,codec_name,width,height',
+    result = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,codec_name,width,height:stream_disposition=attached_pic',
                              '-of','json',str(path)], capture_output=True, timeout=30, check=True)
     if len(result.stdout)>128000: raise ValueError('probe output limit')
     return json.loads(result.stdout)
@@ -48,11 +48,13 @@ def validate_file(path, choice, probe=ffprobe):
         data=probe(path)
         duration=float(data.get('format',{}).get('duration',0))
         if not math.isfinite(duration) or duration<=0: raise ValueError('invalid media duration')
-        videos=[x for x in data.get('streams',[]) if x.get('codec_type')=='video']
+        # Embedded cover art (attached_pic) is a still image, not a second video track.
+        videos=[x for x in data.get('streams',[]) if x.get('codec_type')=='video' and not (x.get('disposition') or {}).get('attached_pic')]
         codec={'HEVC':'hevc','H.265':'hevc','AVC':'h264','H.264':'h264','AV1':'av1'}.get(choice.codec.upper())
         video=videos[0] if len(videos)==1 else {}
         width,height=video.get('width',0),video.get('height',0)
-        full_hd=(type(width) is int and type(height) is int and 0<width<=1920 and 0<height<=1080 and (width==1920 or height==1080))
+        max_width,max_height=(3840,2160) if choice.quality=='2160p' else (1920,1080)
+        full_hd=(type(width) is int and type(height) is int and 0<width<=max_width and 0<height<=max_height and (width==max_width or height==max_height))
         if len(videos)!=1 or not codec or video.get('codec_name')!=codec or not full_hd:
             raise ValueError('confirmed quality/codec mismatch')
         after=os.stat(path,follow_symlinks=False)
@@ -128,6 +130,30 @@ class WorkerAdapter:
 
     def _store(self): return ApprovalStore(self.db)
 
+    def finish_transferred(self, pid):
+        """Startup only: publish an interrupted job whose .part already holds every byte."""
+        store=self._store()
+        try:
+            row=store.db.execute("SELECT payload FROM jobs WHERE id=? AND state='downloading'",(pid,)).fetchone()
+            if not row:return False
+            choice=Choice(**json.loads(row[0])['choice']).validate()
+            directory=self.root/'Movies';name=Path(choice.destination).name
+            partial,final=directory/(name+'.part'),directory/name
+            if final.exists() or final.is_symlink() or partial.is_symlink() or not partial.is_file() or partial.stat().st_size!=choice.size:
+                return False
+            if self.storage_guard:self.storage_guard()
+            proof=validate_file(partial,choice,self.probe)
+            os.link(partial,final,follow_symlinks=False);os.unlink(partial)
+            store.transition(pid,'downloaded',bytes_received=choice.size,evidence=proof)
+            self.index.register(choice,proof)
+            if self.verify_route and self.verify_route(choice.imdb,choice.size):
+                self.index.publish(choice.imdb)
+                store.transition(pid,'indexed',evidence={'catalogId':choice.imdb,'existingRouteVerified':True})
+            return True
+        except Exception:
+            return False
+        finally:store.db.close()
+
     def run(self, pid):
         if not self.enabled: raise ValueError('download activation is disabled')
         store=self._store(); owned=False
@@ -168,11 +194,11 @@ class WorkerAdapter:
                 self.index.publish(choice.imdb)
                 store.transition(pid,'indexed',evidence={'catalogId':choice.imdb,'existingRouteVerified':True})
             return store.status(pid)
-        except Exception:
+        except Exception as exc:
             status=store.status(pid)
             if owned and status and status['state'] in {'approved','downloading'}:
                 cancelled_flag=bool(store.db.execute('SELECT 1 FROM cancellations WHERE id=?',(pid,)).fetchone())
-                store.transition(pid,'cancelled' if cancelled_flag else 'failed')
+                store.transition(pid,'cancelled' if cancelled_flag else 'failed',evidence={'failureCode':worker.transfer_error(exc)})
             # No exception text: provider errors may include signed URLs.
             return store.status(pid) or {'state':'failed'}
         finally: store.db.close()

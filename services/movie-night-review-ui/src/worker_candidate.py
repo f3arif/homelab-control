@@ -2,7 +2,7 @@
 Execution requires recorded owner authorization; credentials and signed URLs remain RAM-only.
 """
 import argparse, base64, contextlib, fcntl, hashlib, http.client, ipaddress
-import json, os, re, shutil, socket, ssl, time
+import json, os, re, shutil, socket, ssl, time, sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit, unquote, urlencode
 
@@ -12,6 +12,20 @@ MAX_BYTES = 100_000_000_000
 RESERVE = 50 * 1024**3
 CONFIG = Path('/home/coolyo/afz-stremio-secondhost-20260918/private/addon-collection-private.json')
 class Rejected(Exception): pass
+
+def transfer_error(exc):
+    if isinstance(exc, TimeoutError): return 'network-timeout'
+    if isinstance(exc, ConnectionResetError): return 'connection-reset'
+    if isinstance(exc, http.client.IncompleteRead): return 'response-truncated'
+    if isinstance(exc, sqlite3.OperationalError): return 'state-database-unavailable'
+    if isinstance(exc, ssl.SSLError): return 'tls-error'
+    if isinstance(exc, OSError): return 'io-error'
+    known={'cancelled','transfer-deadline','media-truncated-or-oversized',
+           'media-length-or-encoding','media-oversized','provider-http-status',
+           'storage-reserve','destination-exists','worker-already-running',
+           'unsafe-or-unavailable-parent'}
+    return str(exc) if isinstance(exc,Rejected) and str(exc) in known else 'transfer-failed'
+
 
 def validate_manifest(m):
     if m.get('approved') is not True: raise Rejected('manifest-not-approved')
@@ -142,8 +156,11 @@ def parent_fd(root,relative):
             except FileExistsError:pass
             child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
             os.close(fd);fd=child
+    except OSError:
+        os.close(fd)
+        raise Rejected('unsafe-or-unavailable-parent') from None
+    try:
         yield fd,Path(relative).name
-    except OSError:raise Rejected('unsafe-or-unavailable-parent') from None
     finally:os.close(fd)
 
 def exists_at(fd,name):
@@ -187,8 +204,9 @@ def run(m,root,state,provider,open_media=https_get,free=lambda p:shutil.disk_usa
                     os.unlink(name+'.part',dir_fd=directory);os.fsync(directory)
                     receipt['completed'].append({'canonicalId':row['canonicalId'],'destination':row['destination'],'bytes':size})
                     write_receipt(state,receipt)
-        except Exception:
-            receipt['status']='stopped';write_receipt(state,receipt);raise Rejected('transfer-stopped-partial-preserved') from None
+        except Exception as exc:
+            receipt['status']='stopped';receipt['errorCode']=transfer_error(exc)
+            write_receipt(state,receipt);raise Rejected(receipt['errorCode']) from None
         receipt['status']='completed';write_receipt(state,receipt)
     return receipt
 

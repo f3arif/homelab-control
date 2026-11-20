@@ -33,11 +33,13 @@ class Controller:
         self.refill_provider=refill_provider
         from similar_movies import SimilarMovies
         self.similar=SimilarMovies(self)
+        from watched_prompts import WatchedPrompts
+        self.watched=WatchedPrompts(self.db,lambda:self.clock())
         original_payload=self.shortlist_payload
         self.shortlist_payload=lambda:self.similar.store.merge(original_payload())
         self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-night')
         self.csrf={}; self.lock=threading.RLock();self.futures={}
-        self.auto_downloads=None;self.mobile_selections=None
+        self.auto_downloads=None;self.mobile_selections=None;self.confirmed_sources=None
         self.delete_service=None  # Owner-only, mounted-media delete confirmation
         self.lookups={}; self.lookup_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='movie-sources')
         with closing(ApprovalStore(self.db)): pass
@@ -48,6 +50,8 @@ class Controller:
         self.auto_downloads=AutoDownloads(self,acquire)
         from mobile_selection import MobileSelections
         self.mobile_selections=MobileSelections(self)
+        from confirmed_sources import ConfirmedSources
+        self.confirmed_sources=ConfirmedSources(self)
         self.auto_downloads.recover()
 
     def close(self):
@@ -179,6 +183,31 @@ class Controller:
         with self.lock:
             return self.delete_service.delete(principal, imdb, token, confirmed_title)
 
+    def ready_titles(self):
+        if not self.index:return {}
+        return {m['id']:m['name'] for m in self.index.metas()}
+
+    def watched_action(self,principal,data):
+        action=data.get('action')
+        if action=='keep-watched':return self.watched.keep(principal,data.get('imdb'))
+        ready=self.ready_titles();removed=self.removed_media_ids()
+        if action=='report-watched':
+            imdb=str(data.get('imdb','')).strip()
+            if imdb not in ready or imdb in removed:
+                self.watched._imdb(imdb)
+                return {'imdb':imdb,'watched':False,'onServer':False}
+            result=self.watched.report(principal,imdb,data.get('progressPercent'),data.get('watched',False))
+            return dict(result,onServer=True,deleteAvailable=bool(self.delete_service))
+        return self.watched_prompts(principal,ready,removed)
+
+    def watched_prompts(self,principal,ready=None,removed=None):
+        ready=self.ready_titles() if ready is None else ready
+        removed=self.removed_media_ids() if removed is None else removed
+        # Prompts are advisory: a busy database must never break the downloads view.
+        try: prompts=self.watched.pending(principal,ready,removed)
+        except sqlite3.Error: return {'prompts':[],'deleteAvailable':bool(self.delete_service),'unavailable':True}
+        return {'prompts':prompts,'deleteAvailable':bool(self.delete_service)}
+
     def removed_media_ids(self):
         reader = getattr(self.index, 'removed_ids', None)
         return reader() if callable(reader) else set()
@@ -203,10 +232,15 @@ class Controller:
     def recover_jobs(self):
         # A restart never retries an interrupted media request or switches its source.
         with closing(ApprovalStore(self.db)) as store:
-            for pid, in store.db.execute("SELECT id FROM jobs WHERE state='downloading'").fetchall():
-                store.transition(pid,'failed')
-            removed=self.removed_media_ids()
-            queued=[]
+            interrupted=[x[0] for x in store.db.execute("SELECT id FROM jobs WHERE state='downloading'").fetchall()]
+        for pid in interrupted:
+            # A fully transferred file is verified in place, never re-fetched or failed.
+            finish=getattr(self.worker,'finish_transferred',None)
+            if not (finish and finish(pid)):
+                with closing(ApprovalStore(self.db)) as store:store.transition(pid,'failed')
+        removed=self.removed_media_ids()
+        queued=[]
+        with closing(ApprovalStore(self.db)) as store:
             for pid, imdb in store.db.execute("SELECT id,title FROM jobs WHERE state='approved'").fetchall():
                 if imdb in removed:store.transition(pid,'failed')
                 else:queued.append(pid)
@@ -259,7 +293,7 @@ class Controller:
                     item['state']='removed'
                     item['canRetry']=False
                     item['message']='Removed from your 8 TB server.'
-            return {'jobs':result,'requests':requests}
+            return {'jobs':result,'watchedPrompts':self.watched_prompts(principal),'requests':requests}
 
     def propose(self, imdb, principal):
         self.require_enabled()
@@ -418,10 +452,19 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
     @app.post(prefix+'/api/feedback')
     async def feedback(request:Request):
         principal=identity(request,True);data=await body(request)
+        if data.get('action') in ('source-options','confirm-source'):
+            if not controller.confirmed_sources:raise HTTPException(503,'Source choices are unavailable.')
+            try:return controller.confirmed_sources.action(principal,data)
+            except ValueError as exc:raise HTTPException(400,str(exc))
+            except Exception:raise HTTPException(503,'Source choices are temporarily unavailable. Check status before retrying.')
         if data.get('action') in ('search-titles','title-preview','find-similar','similar-status','add-similar','add-title','select-download'):
             try:return controller.similar.action(principal,data)
             except ValueError as exc:raise HTTPException(400,str(exc))
             except Exception:raise HTTPException(503,'Movie search is temporarily unavailable. Try again shortly.')
+        if data.get('action') in ('report-watched','keep-watched','watched-prompts'):
+            try:return controller.watched_action(principal,data)
+            except ValueError as exc:raise HTTPException(400,str(exc))
+            except Exception:raise HTTPException(503,'Watched status is temporarily unavailable. Nothing was deleted.')
         if data.get('action')=='set-genre-settings':
             try:return controller.save_genres(principal,data.get('settings'))
             except SettingsConflict as exc:raise HTTPException(409,str(exc))
