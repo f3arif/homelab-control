@@ -13,7 +13,7 @@ from movie_presentation import display_fields
 from genre_settings import genre_match, genres_of, defaults
 
 MIN_BYTES = 5_000_000_000
-CAP = 15_000_000_000
+CAP = 18_000_000_000
 RESERVE = 50 * 1024**3
 QUOTA = 100_000_000_000
 ROOT = '/srv/afzmedia/Media/MovieNight/Movies'
@@ -47,9 +47,9 @@ class Choice:
         if self.provider != 'torbox' or any(type(n) is not int or n < 0 for n in (self.torrent_id, self.file_id)):
             raise ValueError('exact provider file required')
         if type(self.size) is not int or not MIN_BYTES <= self.size <= CAP:
-            raise ValueError('known size between 5,000,000,000 and 15,000,000,000 bytes required')
-        if self.quality != '1080p':
-            raise ValueError('Movie Night requires 1080p')
+            raise ValueError('known size between 5,000,000,000 and 18,000,000,000 bytes required')
+        if self.quality not in ('1080p', '2160p'):
+            raise ValueError('Movie Night requires 1080p or 2160p')
         for value in (self.title, self.edition, self.provider_name, self.codec):
             if not isinstance(value, str) or not value.strip() or any(ord(c) < 32 for c in value):
                 raise ValueError('complete printable confirmation metadata required')
@@ -62,13 +62,15 @@ class Choice:
 def select_compact(choices):
     eligible = []
     for c in choices:
+        if c.quality != '1080p':
+            continue
         try:
             c.validate()
         except (ValueError, TypeError):
             continue
-        # Choose the smallest concrete file within the owner's 5–15 GB range.
+        # Owner rule (2026-11-04): the largest concrete file within 5–18 GB first.
         eligible.append(c)
-    return min(eligible, key=lambda c: (c.size, c.torrent_id, c.file_id)) if eligible else None
+    return max(eligible, key=lambda c: (c.size, -c.torrent_id, -c.file_id)) if eligible else None
 
 
 def stream_status(choice, proof, now, device_id):
@@ -258,6 +260,8 @@ class ApprovalStore:
             if type(count) is not int or not row[2] <= count <= choice['size']:
                 raise ValueError('invalid byte count')
             proof = json.loads(row[3]); event = evidence or {}
+            if state=='failed' and isinstance(event.get('failureCode'),str) and re.fullmatch('[a-z-]{3,60}',event['failureCode']):
+                proof['failureCode']=event['failureCode']
             if state == 'downloaded':
                 if count != choice['size'] or event.get('actualSize') != count or event.get('mediaProbePassed') is not True or not re.fullmatch('[a-f0-9]{64}', str(event.get('sha256', ''))) or event.get('destination') != choice['destination']:
                     raise ValueError('complete-file validation required')
@@ -279,5 +283,6 @@ class ApprovalStore:
             return None
         proof = json.loads(row[2])
         return {'state': row[0], 'bytesReceived': row[1], 'downloaded': 'file' in proof,
-                'indexed': 'index' in proof, 'playbackTested': 'playback' in proof}
+                'indexed': 'index' in proof, 'playbackTested': 'playback' in proof,
+                **({'errorCode':proof['failureCode']} if 'failureCode' in proof else {})}
 

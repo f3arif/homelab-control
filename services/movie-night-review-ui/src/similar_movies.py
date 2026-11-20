@@ -402,7 +402,7 @@ class SimilarMovies:
                 if now - job['created'] > 900 and job['future'].done():
                     del self.jobs[job_id]
             for job_id, job in self.jobs.items():
-                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision and (kind not in ('add','selection') or not job['future'].done()):
+                if job['principal'] == principal and job['kind'] == kind and job['key'] == key and job['revision'] == revision and (kind not in ('add','selection','source-options') or not job['future'].done()):
                     return {'jobId': job_id, 'state': 'searching'}
             if kind == 'preview' and any(j['kind'] == 'preview' and not j['future'].done() for j in self.jobs.values()):
                 raise ValueError('Movie details are loading. Try again shortly.')
@@ -450,7 +450,7 @@ class SimilarMovies:
             return {'jobId': job_id, 'state': 'ready', 'titles': result, 'previewsEnabled': True}
         if job['kind'] == 'preview':
             return {'jobId': job_id, 'state': 'ready', 'title': result}
-        if job['kind'] in ('add','selection'):
+        if job['kind'] in ('add','selection','source-options','source-confirmation'):
             return dict(result, jobId=job_id, state='ready')
         existing = {r['id'] for r in self.controller.review_pool()}
         eligible = {r['id'] for r in self.eligible(result['rows'], principal)}

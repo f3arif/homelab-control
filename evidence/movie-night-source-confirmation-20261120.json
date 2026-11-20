@@ -1,0 +1,182 @@
+{
+  "project": "Movie Night",
+  "request": "Owner-selected Inception (2010) cached 7.13 GB 4K HEVC file",
+  "backend_commit": "e84a09a54a49412132214a3c4de9e7a51ff7996f",
+  "connector_commit": "614f97345cff01d4bbb62e35ad76fa300cfec5bc",
+  "backend_tests": 182,
+  "mcp_tests": 7,
+  "live_ready_on_server": true,
+  "owner_selected_download_job": "4bdfef9b-a4d0-4ca8-ab1d-8eb2626e91f8",
+  "additional_file_transfer_authorization_bytes": 4166143639,
+  "verification": {
+    "verified_epoch": 1795149232,
+    "file_bytes": 7132210155,
+    "sha256": "cd70e2e5ffdd29b2911cfa332b8b5cce2ccfa9694d7cfc2504edf4976b3758f4",
+    "probe": {
+      "programs": [],
+      "streams": [
+        {
+          "codec_name": "hevc",
+          "codec_type": "video",
+          "width": 3840,
+          "height": 1598,
+          "pix_fmt": "yuv420p10le",
+          "tags": {}
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "channels": 6,
+          "tags": {}
+        },
+        {
+          "codec_name": "hdmv_pgs_subtitle",
+          "codec_type": "subtitle",
+          "tags": {
+            "language": "eng"
+          }
+        }
+      ],
+      "format": {
+        "duration": "8888.341000"
+      }
+    },
+    "samples": [
+      {
+        "offset_seconds": 60,
+        "video_decode_exit": 0,
+        "error_bytes": 0
+      },
+      {
+        "offset_seconds": 3600,
+        "video_decode_exit": 0,
+        "error_bytes": 0
+      },
+      {
+        "offset_seconds": 60,
+        "audio_decode_exit": 0,
+        "error_bytes": 0
+      }
+    ],
+    "ready_in_catalog": true,
+    "head": {
+      "status": 200,
+      "length": 7132210155
+    },
+    "range": {
+      "status": 206,
+      "length": 65536
+    },
+    "physical_playback_verified": false
+  },
+  "dispatch_race": {
+    "reproduced_with_actual_worker": true,
+    "fix": "Close the response read transaction before submitting the download worker",
+    "regression_passed": true,
+    "activation": "Live after owner restart on 2026-11-20T15:30:00Z"
+  },
+  "activation": {
+    "status": "live",
+    "verified_utc": "2026-11-20T15:30:38Z",
+    "main_pid": 3075055,
+    "service_started_utc": "2026-11-20T15:30:00Z",
+    "dispatch_fix_hash_matches": true,
+    "native": {
+      "tools": [
+        "add_movie",
+        "movie_download_options",
+        "movie_night_status",
+        "search_movies"
+      ],
+      "ready_count": 11,
+      "inception": {
+        "ready_on_server": true,
+        "ready_movies": [
+          {
+            "imdb_id": "tt1375666",
+            "title": "Inception",
+            "year": "2010"
+          }
+        ],
+        "downloads": [
+          {
+            "request_id": "45afda83-c4e4-4345-99a8-002e64b0be09",
+            "imdb_id": "tt1375666",
+            "state": "indexed",
+            "size_bytes": 7132210155,
+            "bytes_received": 7132210155,
+            "movie": {
+              "imdb_id": "tt1375666",
+              "title": "Inception",
+              "year": ""
+            }
+          }
+        ]
+      },
+      "confirmation_required": true,
+      "source_choices": [
+        {
+          "quality": "1080p",
+          "codec": "AVC",
+          "size_gb": 5.32
+        },
+        {
+          "quality": "1080p",
+          "codec": "HEVC",
+          "size_gb": 5.54
+        },
+        {
+          "quality": "1080p",
+          "codec": "AVC",
+          "size_gb": 5.77
+        },
+        {
+          "quality": "1080p",
+          "codec": "HEVC",
+          "size_gb": 8.16
+        },
+        {
+          "quality": "1080p",
+          "codec": "HEVC",
+          "size_gb": 17.05
+        },
+        {
+          "quality": "1080p",
+          "codec": "HEVC",
+          "size_gb": 17.05
+        },
+        {
+          "quality": "2160p",
+          "codec": "HEVC",
+          "size_gb": 7.13
+        },
+        {
+          "quality": "2160p",
+          "codec": "HEVC",
+          "size_gb": 7.49
+        },
+        {
+          "quality": "2160p",
+          "codec": "HEVC",
+          "size_gb": 7.8
+        },
+        {
+          "quality": "2160p",
+          "codec": "AV1",
+          "size_gb": 9.56
+        },
+        {
+          "quality": "2160p",
+          "codec": "HEVC",
+          "size_gb": 13.59
+        },
+        {
+          "quality": "2160p",
+          "codec": "HEVC",
+          "size_gb": 13.69
+        }
+      ],
+      "title_only_add_rejected": true
+    }
+  }
+}
