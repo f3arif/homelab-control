@@ -94,6 +94,21 @@ class SourceTests(MobileSelectionTests):
                 with worker.parent_fd(Path(tmp),'Movies/clip.mkv'):
                     raise TimeoutError('private')
 
+    def test_http_confirmation_runs_the_real_worker_to_an_indexed_file(self):
+        from adapters import WorkerAdapter
+        self.h.worker.run=WorkerAdapter.run.__get__(self.h.worker,WorkerAdapter)
+        self.h.worker.probe=lambda _:dict(format={'duration':'8880'},streams=[dict(codec_type='video',codec_name='h264',width=3840,height=1600)])
+        token=self.offer()
+        response=self.h.post('feedback',dict(action='confirm-source',imdb=self.id,optionId=token,confirmed=True))
+        self.c.similar.jobs[response.json()['jobId']]['future'].result(15)
+        answer=self.h.post('feedback',dict(action='similar-status',jobId=response.json()['jobId']))
+        self.assertEqual(200,answer.status_code,answer.text)
+        job_id=answer.json()['download']['jobId']
+        result=self.c.futures[job_id].result(5)
+        self.assertTrue(result['indexed'],result)
+        self.assertEqual(self.h.body,self.h.client.get('/movie-night/media/'+self.id).content)
+        self.assertEqual(1,self.adds)
+
     def test_http_options_are_read_only_and_confirmation_requires_token(self):
         with patch.object(self.source,'choices',return_value=[self.item]):
             response=self.h.post('feedback',dict(action='source-options',imdb=self.id))

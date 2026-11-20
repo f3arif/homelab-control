@@ -215,9 +215,12 @@ class ConfirmedSources:
                 db.execute("UPDATE movie_download_queue SET state='linked',job_id=?,message='',updated=? WHERE principal=? AND imdb=?",
                            (job_id, now, principal, imdb))
                 db.execute("UPDATE movie_source_offers SET state='confirmed',job_id=? WHERE id=?", (job_id, option))
+            # Finish the response's read transaction before the worker claims its
+            # write transaction. SQLite lock upgrades otherwise leave it approved.
+            snapshot = self.snapshot(principal, imdb, job_id)
             with c.lock:
                 c.futures[job_id] = c.pool.submit(c.worker.run, job_id)
-            return self.snapshot(principal, imdb, job_id)
+            return snapshot
         except Exception:
             with closing(c.feedback.connect()) as db, db:
                 db.execute("UPDATE movie_source_offers SET state='needs-review' WHERE id=? AND job_id IS NULL", (option,))
