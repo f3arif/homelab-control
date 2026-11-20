@@ -62,6 +62,8 @@ class Choice:
 def select_compact(choices):
     eligible = []
     for c in choices:
+        if c.quality != '1080p':
+            continue
         try:
             c.validate()
         except (ValueError, TypeError):
