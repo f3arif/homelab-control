@@ -70,8 +70,8 @@ class SourceTests(MobileSelectionTests):
         self.assertEqual(0,self.count('jobs'))
 
     def test_confirmation_includes_only_selected_additional_budget(self):
-        token=self.offer()
         with patch.object(self.source,'committed',return_value=100_000_000_000):
+            token=self.offer()
             self.source.confirm('fixture',self.id,token)
         with sqlite3.connect(self.h.db) as db:data=json.loads(db.execute('SELECT payload FROM jobs').fetchone()[0])
         self.assertEqual(self.h.choice.size+1,data['additionalTransferAuthorizationBytes'])
@@ -93,6 +93,49 @@ class SourceTests(MobileSelectionTests):
             with self.assertRaises(TimeoutError):
                 with worker.parent_fd(Path(tmp),'Movies/clip.mkv'):
                     raise TimeoutError('private')
+
+    def test_zero_automatic_budget_still_returns_confirmable_sources(self):
+        with patch.object(self.source,'choices',return_value=[self.item]), patch.object(self.source,'committed',return_value=100_000_000_000):
+            result=self.source.options('fixture',self.id)
+        self.assertEqual(0,result['remaining_budget_bytes'])
+        self.assertTrue(result['explicit_source_confirmation_allowed'])
+        self.assertEqual(self.h.choice.size+1,result['source_options'][0]['additional_budget_bytes'])
+        self.assertEqual(0,self.adds)
+        self.assertEqual(0,self.count('jobs'))
+
+    def test_small_owner_source_keeps_the_automatic_minimum(self):
+        from movie_night import select_compact
+        from test_worker import manifest
+        small=replace(self.h.choice,size=2_585_807_653)
+        with patch('movie_night.MIN_BYTES',5_000_000_000),patch('worker_candidate.MIN_BYTES',5_000_000_000):
+            with self.assertRaises(ValueError):small.validate()
+            self.assertEqual(small,small.validate(owner_selected=True))
+            self.assertIsNone(select_compact([small]))
+            data=manifest(2_585_807_653)
+            with self.assertRaises(worker.Rejected):worker.validate_manifest(data)
+            data['ownerSelectedSource']=True
+            self.assertEqual(2_585_807_654,worker.validate_manifest(data)[1])
+            with self.assertRaises(ValueError):replace(small,size=0).validate(owner_selected=True)
+
+    def test_new_file_does_not_reauthorize_previous_extra_allowance(self):
+        prior=dict(choice=dict(self.item['choice'],size=7_132_210_155),additionalTransferAuthorizationBytes=4_166_143_639)
+        with sqlite3.connect(self.h.db) as db:
+            db.execute('INSERT INTO archived_jobs VALUES(?,?,?,?,?,?,?,?,?)',
+                       ('old-allowance','tt123456','old-file',json.dumps(prior),'failed',0,'{}','fixture',0))
+        with patch.object(self.source,'committed',return_value=104_166_143_639):
+            token=self.offer()
+            self.source.confirm('fixture',self.id,token)
+        with sqlite3.connect(self.h.db) as db:
+            payload=json.loads(db.execute('SELECT payload FROM jobs').fetchone()[0])
+        self.assertEqual(self.h.choice.size+1,payload['additionalTransferAuthorizationBytes'])
+
+    def test_changed_allowance_requires_fresh_confirmation(self):
+        token=self.offer()
+        with patch.object(self.source,'committed',return_value=100_000_000_000):
+            with self.assertRaisesRegex(ValueError,'allowance changed'):
+                self.source.confirm('fixture',self.id,token)
+        self.assertEqual(0,self.count('jobs'))
+        self.assertEqual(0,self.count('movie_download_queue'))
 
     def test_http_confirmation_runs_the_real_worker_to_an_indexed_file(self):
         from adapters import WorkerAdapter

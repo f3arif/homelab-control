@@ -87,7 +87,7 @@ class ConfirmedSources:
                 try:
                     choice = Choice(imdb, movie['name'], movie['year'], 'Exact owner-selected release',
                                     'torbox', 0, 0, name, quality[1].lower(), codec, file.get('size'),
-                                    ROOT + '/' + imdb + '.' + str(movie['year']) + Path(name).suffix.lower()).validate()
+                                    ROOT + '/' + imdb + '.' + str(movie['year']) + Path(name).suffix.lower()).validate(owner_selected=True)
                 except (ValueError, TypeError):
                     continue
                 found.setdefault((name, choice.size), {'hash': source_hash, 'choice': asdict(choice), 'movie': movie})
@@ -102,7 +102,7 @@ class ConfirmedSources:
         now = int(c.clock())
         output = []
         with closing(c.feedback.connect()) as db, db:
-            committed = self.committed(db)
+            remaining = self.remaining(db)
             db.execute("DELETE FROM movie_source_offers WHERE expires<? AND state='offered'", (now,))
             # A bounded spread preserves small, medium and large files at both resolutions.
             selected = []
@@ -113,21 +113,35 @@ class ConfirmedSources:
             for candidate in selected:
                 option = secrets.token_hex(16)
                 choice = candidate['choice']
+                extra = max(0, choice['size'] + 1 - remaining)
+                offered = dict(candidate, additional_budget_bytes=extra)
                 db.execute('INSERT INTO movie_source_offers(id,principal,imdb,payload,expires) VALUES(?,?,?,?,?)',
-                           (option, principal, imdb, canonical(candidate), now + LIFETIME))
+                           (option, principal, imdb, canonical(offered), now + LIFETIME))
                 output.append(dict(option_id=option, quality=choice['quality'], codec=choice['codec'],
                     size_bytes=choice['size'], size_gb=round(choice['size']/1e9, 2),
                     release=Path(choice['provider_name']).name[:200],
-                    additional_budget_bytes=max(0, committed + choice['size'] + 1 - QUOTA)))
+                    additional_budget_bytes=extra))
         return dict(movie={'id': imdb, 'name': movie['name'], 'releaseInfo': str(movie['year'])},
                     source_options=output, confirmation_required=True, expires_epoch=now + LIFETIME,
-                    remaining_budget_bytes=max(0, QUOTA - committed),
-                    instruction='Show sizes, quality and release details. Ask which one to send. A choice authorizes that exact file and its displayed additional transfer budget.')
+                    remaining_budget_bytes=remaining,
+                    budget_scope='local-automatic-transfers',
+                    explicit_source_confirmation_allowed=True,
+                    instruction='Show sizes, quality and release details, then wait for the owner to choose. The remaining budget is a local automatic-download allowance, separate from disk space or TorBox account limits. A zero automatic allowance still permits the owner to confirm a listed exact file with its displayed additional transfer amount.')
 
     @staticmethod
     def committed(db):
         return sum(json.loads(row[0])['choice']['size'] + 1 for row in
                    db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'))
+
+    def remaining(self, db):
+        allowances = 0
+        for raw, in db.execute('SELECT payload FROM jobs UNION ALL SELECT payload FROM archived_jobs'):
+            record = json.loads(raw)
+            extra = record.get('additionalTransferAuthorizationBytes', 0)
+            if type(extra) is int and extra > 0:
+                # Legacy confirmations could include earlier overage again.
+                allowances += min(extra, record['choice']['size'] + 1)
+        return max(0, QUOTA + allowances - self.committed(db))
 
     def snapshot(self, principal, imdb, job_id):
         state = self.c.downloads(principal)
@@ -158,7 +172,7 @@ class ConfirmedSources:
         if job_id:
             return self.snapshot(principal, imdb, job_id)
         candidate = json.loads(offer[0])
-        expected = Choice(**candidate['choice']).validate()
+        expected = Choice(**candidate['choice']).validate(owner_selected=True)
         try:
             c.index.require_not_removed(imdb)
             c.free()
@@ -176,7 +190,7 @@ class ConfirmedSources:
                     for file in torrent.get('files', []):
                         if (file.get('name'), file.get('size'), file.get('infected'), file.get('zipped')) == (
                                 expected.provider_name, expected.size, False, False):
-                            choice = Choice(**dict(candidate['choice'], torrent_id=torrent_id, file_id=file['id'])).validate()
+                            choice = Choice(**dict(candidate['choice'], torrent_id=torrent_id, file_id=file['id'])).validate(owner_selected=True)
                 if choice:
                     break
                 if attempt < 7:
@@ -194,6 +208,11 @@ class ConfirmedSources:
                     raise ValueError('Not enough free storage for this file.')
                 if db.execute("SELECT 1 FROM jobs WHERE title=? AND state NOT IN ('failed','cancelled')", (imdb,)).fetchone():
                     raise ValueError('This movie already has a server file or an active transfer. Check its status.')
+                remaining = self.remaining(db)
+                extra = max(0, choice.size + 1 - remaining)
+                offered_extra = candidate.get('additional_budget_bytes')
+                if type(offered_extra) is not int or extra > offered_extra:
+                    raise ValueError('Transfer allowance changed. Refresh source choices before confirming.')
                 request_id = 'confirmed-source-' + option
                 c.auto_downloads.enqueue(db, principal, [imdb], {imdb: row}, request_id, [imdb])
                 metadata = present_movie(row, now, 'Owner chose this exact server file.')
@@ -204,11 +223,10 @@ class ConfirmedSources:
                     raise ValueError('An existing file needs review before this download.')
                 from uuid import uuid4
                 job_id = str(uuid4())
-                committed = self.committed(db)
                 payload = canonical(dict(choice=asdict(choice), authorization='owner-selected-source',
                     sourceOfferId=option, authorizedBy=principal, authorizedEpoch=now, requestId=request_id,
                     freeBytes=free, reserveBytes=RESERVE, quotaRemainingBytes=choice.size+1,
-                    additionalTransferAuthorizationBytes=max(0, committed+choice.size+1-QUOTA)))
+                    additionalTransferAuthorizationBytes=extra))
                 db.execute('INSERT INTO plans VALUES(?,?,?,?)', (job_id, principal, payload, now+LIFETIME))
                 db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?)',
                            (job_id, imdb, choice.destination, payload, 'approved', 0, '{}'))

@@ -39,15 +39,16 @@ class Choice:
     size: int
     destination: str
 
-    def validate(self):
+    def validate(self, *, owner_selected=False):
         if not re.fullmatch(r'tt\d+', self.imdb):
             raise ValueError('canonical title required')
         if type(self.year) is not int or not 1888 <= self.year <= 2100:
             raise ValueError('release year required')
         if self.provider != 'torbox' or any(type(n) is not int or n < 0 for n in (self.torrent_id, self.file_id)):
             raise ValueError('exact provider file required')
-        if type(self.size) is not int or not MIN_BYTES <= self.size <= CAP:
-            raise ValueError('known size between 5,000,000,000 and 18,000,000,000 bytes required')
+        minimum = 1 if owner_selected is True else MIN_BYTES
+        if type(self.size) is not int or not minimum <= self.size <= CAP:
+            raise ValueError(f'known size between {minimum:,} and {CAP:,} bytes required')
         if self.quality not in ('1080p', '2160p'):
             raise ValueError('Movie Night requires 1080p or 2160p')
         for value in (self.title, self.edition, self.provider_name, self.codec):

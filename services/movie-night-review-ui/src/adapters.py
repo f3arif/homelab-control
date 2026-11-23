@@ -136,7 +136,8 @@ class WorkerAdapter:
         try:
             row=store.db.execute("SELECT payload FROM jobs WHERE id=? AND state='downloading'",(pid,)).fetchone()
             if not row:return False
-            choice=Choice(**json.loads(row[0])['choice']).validate()
+            payload=json.loads(row[0])
+            choice=Choice(**payload['choice']).validate(owner_selected=payload.get('authorization')=='owner-selected-source')
             directory=self.root/'Movies';name=Path(choice.destination).name
             partial,final=directory/(name+'.part'),directory/name
             if final.exists() or final.is_symlink() or partial.is_symlink() or not partial.is_file() or partial.stat().st_size!=choice.size:
@@ -165,7 +166,8 @@ class WorkerAdapter:
                 claimed=store.db.execute("UPDATE jobs SET state='downloading' WHERE id=? AND state='approved'",(pid,)).rowcount
             if claimed!=1: raise ValueError('job already claimed')
             owned=True
-            choice=Choice(**json.loads(row[0])['choice']).validate()
+            payload=json.loads(row[0])
+            choice=Choice(**payload['choice']).validate(owner_selected=payload.get('authorization')=='owner-selected-source')
             # Reject stale jobs before provider resolution or transfer.
             self.index.require_not_removed(choice.imdb)
             if self.storage_guard:self.storage_guard()
@@ -181,7 +183,7 @@ class WorkerAdapter:
                 if now-last[0]>=1 or count==choice.size:
                     if self.storage_guard:self.storage_guard()
                     store.transition(pid,'downloading',bytes_received=count);last[0]=now
-            manifest={'approved':True,'files':[{'canonicalId':choice.imdb,'torrentId':choice.torrent_id,'fileId':choice.file_id,
+            manifest={'approved':True,'ownerSelectedSource':payload.get('authorization')=='owner-selected-source','files':[{'canonicalId':choice.imdb,'torrentId':choice.torrent_id,'fileId':choice.file_id,
                       'providerName':choice.provider_name,'sizeBytes':choice.size,'editionConfirmed':True,
                       'destination':'Movies/'+Path(choice.destination).name}]}
             args={'open_media':self.open_media,'progress':progress,'cancelled':cancelled,'validate_complete':validate}
