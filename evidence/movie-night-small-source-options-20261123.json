@@ -1,0 +1,45 @@
+{
+  "project": "Movie Night",
+  "title": "Mission Mangal",
+  "year": 2019,
+  "imdb_id": "tt9248972",
+  "backend_source": "a8c94477b58c61fc5616afe1a46a606b190df2cb",
+  "guidance_source": "c290df0b7d9e7308965ee074522031e8c84ca7de",
+  "tests": {
+    "backend": 200,
+    "failed": 0
+  },
+  "source_discovery": {
+    "cached_options": [
+      {
+        "quality": "1080p",
+        "codec": "AVC",
+        "bytes": 2585807653,
+        "release": "Mission.Mangal.2019.1080p.WEBRip.x264.AAC5.1-[YTS.MX].mp4"
+      },
+      {
+        "quality": "1080p",
+        "codec": "AVC",
+        "bytes": 4055824188,
+        "release": "Mission Mangal 2019 NF WebRip Hindi 1080p x264 AC3 5.1 ESub - mkvCinemas [Telly].mkv"
+      }
+    ],
+    "automatic_remaining_bytes": 0
+  },
+  "explanation": "The manual picker reused the automatic 5 GB minimum and hid smaller cached sources. The local automatic allowance is exhausted; explicit exact-file confirmation can authorize its displayed per-file allowance.",
+  "largest_cached_listing": {
+    "size_bytes": 4695686006,
+    "quality": "1080p",
+    "codec": "not reported in cache filename metadata",
+    "selectable": false
+  },
+  "state": {
+    "backend_files_staged": true,
+    "backend_restart_pending": true,
+    "bot_guidance_registered": true,
+    "ready_catalog_count": 10,
+    "mission_jobs": 0,
+    "mission_selections": 0,
+    "source_choice_not_yet_given": true
+  }
+}
