@@ -35,11 +35,49 @@
   },
   "state": {
     "backend_files_staged": true,
-    "backend_restart_pending": true,
+    "backend_restart_pending": false,
     "bot_guidance_registered": true,
     "ready_catalog_count": 10,
     "mission_jobs": 0,
     "mission_selections": 0,
-    "source_choice_not_yet_given": true
+    "source_choice_not_yet_given": true,
+    "backend_active": true,
+    "runtime_source_hashes_match": true,
+    "backend_pid": 3781366,
+    "active_since_utc": "2026-11-23T03:02:48Z",
+    "activation_verified_at_utc": "2026-11-23T03:03:21Z",
+    "native_confirmation_verified": true
+  },
+  "native_verification": {
+    "tools": [
+      "add_movie",
+      "movie_download_options",
+      "movie_night_status",
+      "search_movies"
+    ],
+    "ready_count": 10,
+    "confirmation_required": true,
+    "automatic_remaining_bytes": 0,
+    "budget_scope": "local-automatic-transfers",
+    "explicit_confirmation_allowed": true,
+    "choices": [
+      {
+        "quality": "1080p",
+        "codec": "AVC",
+        "size_bytes": 2585807653,
+        "size_gb": 2.59,
+        "release": "Mission.Mangal.2019.1080p.WEBRip.x264.AAC5.1-[YTS.MX].mp4",
+        "additional_budget_bytes": 2585807654
+      },
+      {
+        "quality": "1080p",
+        "codec": "AVC",
+        "size_bytes": 4055824188,
+        "size_gb": 4.06,
+        "release": "Mission Mangal 2019 NF WebRip Hindi 1080p x264 AC3 5.1 ESub - mkvCinemas [Telly].mkv",
+        "additional_budget_bytes": 4055824189
+      }
+    ],
+    "unconfirmed_add_rejected": true
   }
 }
