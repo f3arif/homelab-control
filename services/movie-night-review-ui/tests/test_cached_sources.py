@@ -44,7 +44,7 @@ class CachedSourceTests(unittest.TestCase):
         self.provider.cached={};self.assertIsNone(self.sources.acquire('tt12345',self.guard))
         self.assertEqual([],self.provider.added)
     def test_mismatched_title_year_quality_and_size_are_excluded(self):
-        for name,size in [('Wrong.2024.1080p.x264.mkv',5_000_000_000),('Fixture.One.2023.1080p.x264.mkv',5_000_000_000),('Fixture.One.2024.2160p.x264.mkv',5_000_000_000),(NAME,15_000_000_001),(NAME,None)]:
+        for name,size in [('Wrong.2024.1080p.x264.mkv',5_000_000_000),('Fixture.One.2023.1080p.x264.mkv',5_000_000_000),('Fixture.One.2024.2160p.x264.mkv',5_000_000_000),(NAME,18_000_000_001),(NAME,None)]:
             self.provider.cached[HASH]['files']=[{'name':name,'size':size}]
             self.assertIsNone(self.sources.acquire('tt12345',self.guard))
         self.assertEqual([],self.provider.added)
