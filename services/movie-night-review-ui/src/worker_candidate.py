@@ -31,6 +31,7 @@ def transfer_error(exc):
 def validate_manifest(m):
     if m.get('approved') is not True: raise Rejected('manifest-not-approved')
     rows=m.get('files');seen=set();ids=set();provider_ids=set();cost=0
+    minimum=1 if m.get('ownerSelectedSource') is True else MIN_BYTES
     if not isinstance(rows,list) or not 1<=len(rows)<=72: raise Rejected('empty-manifest')
     for row in rows:
         if any(type(row.get(k)) is not int or row[k]<0 for k in ('torrentId','fileId')): raise Rejected('missing-provider-identity')
@@ -38,7 +39,7 @@ def validate_manifest(m):
         if type(size) is not int or size<=0: raise Rejected('unknown-size')
         cid=row.get('canonicalId','')
         if not re.fullmatch(r'tt\d+(?::\d+:\d+)?',cid): raise Rejected('canonical-id')
-        if ':' not in cid and not MIN_BYTES <= size <= CAP: raise Rejected('movie-outside-five-to-fifteen-GB')
+        if ':' not in cid and not minimum <= size <= CAP: raise Rejected('movie-outside-five-to-fifteen-GB')
         rel=row.get('destination','');p=Path(rel)
         if p.is_absolute() or '..' in p.parts or not p.parts or p.parts[0] not in ('Movies','TV') or '\\' in rel: raise Rejected('unsafe-destination')
         if p.parts[0]!=('TV' if ':' in cid else 'Movies'): raise Rejected('media-kind-destination')

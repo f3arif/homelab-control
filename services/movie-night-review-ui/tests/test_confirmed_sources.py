@@ -70,8 +70,8 @@ class SourceTests(MobileSelectionTests):
         self.assertEqual(0,self.count('jobs'))
 
     def test_confirmation_includes_only_selected_additional_budget(self):
-        token=self.offer()
         with patch.object(self.source,'committed',return_value=100_000_000_000):
+            token=self.offer()
             self.source.confirm('fixture',self.id,token)
         with sqlite3.connect(self.h.db) as db:data=json.loads(db.execute('SELECT payload FROM jobs').fetchone()[0])
         self.assertEqual(self.h.choice.size+1,data['additionalTransferAuthorizationBytes'])
@@ -94,20 +94,79 @@ class SourceTests(MobileSelectionTests):
                 with worker.parent_fd(Path(tmp),'Movies/clip.mkv'):
                     raise TimeoutError('private')
 
-    def test_http_confirmation_runs_the_real_worker_to_an_indexed_file(self):
-        from adapters import WorkerAdapter
-        self.h.worker.run=WorkerAdapter.run.__get__(self.h.worker,WorkerAdapter)
-        self.h.worker.probe=lambda _:dict(format={'duration':'8880'},streams=[dict(codec_type='video',codec_name='h264',width=3840,height=1600)])
+    def test_zero_automatic_budget_still_returns_confirmable_sources(self):
+        with patch.object(self.source,'choices',return_value=[self.item]), patch.object(self.source,'committed',return_value=100_000_000_000):
+            result=self.source.options('fixture',self.id)
+        self.assertEqual(0,result['remaining_budget_bytes'])
+        self.assertTrue(result['explicit_source_confirmation_allowed'])
+        self.assertEqual(self.h.choice.size+1,result['source_options'][0]['additional_budget_bytes'])
+        self.assertEqual(0,self.adds)
+        self.assertEqual(0,self.count('jobs'))
+
+    def test_small_owner_source_keeps_the_automatic_minimum(self):
+        from movie_night import select_compact
+        from test_worker import manifest
+        small=replace(self.h.choice,size=2_585_807_653)
+        with patch('movie_night.MIN_BYTES',5_000_000_000),patch('worker_candidate.MIN_BYTES',5_000_000_000):
+            with self.assertRaises(ValueError):small.validate()
+            self.assertEqual(small,small.validate(owner_selected=True))
+            self.assertIsNone(select_compact([small]))
+            data=manifest(2_585_807_653)
+            with self.assertRaises(worker.Rejected):worker.validate_manifest(data)
+            data['ownerSelectedSource']=True
+            self.assertEqual(2_585_807_654,worker.validate_manifest(data)[1])
+            with self.assertRaises(ValueError):replace(small,size=0).validate(owner_selected=True)
+
+    def test_new_file_does_not_reauthorize_previous_extra_allowance(self):
+        prior=dict(choice=dict(self.item['choice'],size=7_132_210_155),additionalTransferAuthorizationBytes=4_166_143_639)
+        with sqlite3.connect(self.h.db) as db:
+            db.execute('INSERT INTO archived_jobs VALUES(?,?,?,?,?,?,?,?,?)',
+                       ('old-allowance','tt123456','old-file',json.dumps(prior),'failed',0,'{}','fixture',0))
+        with patch.object(self.source,'committed',return_value=104_166_143_639):
+            token=self.offer()
+            self.source.confirm('fixture',self.id,token)
+        with sqlite3.connect(self.h.db) as db:
+            payload=json.loads(db.execute('SELECT payload FROM jobs').fetchone()[0])
+        self.assertEqual(self.h.choice.size+1,payload['additionalTransferAuthorizationBytes'])
+
+    def test_changed_allowance_requires_fresh_confirmation(self):
         token=self.offer()
-        response=self.h.post('feedback',dict(action='confirm-source',imdb=self.id,optionId=token,confirmed=True))
-        self.c.similar.jobs[response.json()['jobId']]['future'].result(15)
-        answer=self.h.post('feedback',dict(action='similar-status',jobId=response.json()['jobId']))
-        self.assertEqual(200,answer.status_code,answer.text)
-        job_id=answer.json()['download']['jobId']
-        result=self.c.futures[job_id].result(5)
-        self.assertTrue(result['indexed'],result)
-        self.assertEqual(self.h.body,self.h.client.get('/movie-night/media/'+self.id).content)
-        self.assertEqual(1,self.adds)
+        with patch.object(self.source,'committed',return_value=100_000_000_000):
+            with self.assertRaisesRegex(ValueError,'allowance changed'):
+                self.source.confirm('fixture',self.id,token)
+        self.assertEqual(0,self.count('jobs'))
+        self.assertEqual(0,self.count('movie_download_queue'))
+
+    def test_http_confirmation_runs_the_real_worker_to_an_indexed_file(self):
+        with patch('movie_night.MIN_BYTES',5_000_000_000),patch('worker_candidate.MIN_BYTES',5_000_000_000):
+            from adapters import WorkerAdapter
+            self.h.worker.run=WorkerAdapter.run.__get__(self.h.worker,WorkerAdapter)
+            self.h.worker.probe=lambda _:dict(format={'duration':'8880'},streams=[dict(codec_type='video',codec_name='h264',width=3840,height=1600)])
+            token=self.offer()
+            response=self.h.post('feedback',dict(action='confirm-source',imdb=self.id,optionId=token,confirmed=True))
+            self.c.similar.jobs[response.json()['jobId']]['future'].result(15)
+            answer=self.h.post('feedback',dict(action='similar-status',jobId=response.json()['jobId']))
+            self.assertEqual(200,answer.status_code,answer.text)
+            job_id=answer.json()['download']['jobId']
+            result=self.c.futures[job_id].result(5)
+            self.assertTrue(result['indexed'],result)
+            self.assertEqual(self.h.body,self.h.client.get('/movie-night/media/'+self.id).content)
+            self.assertEqual(1,self.adds)
+    def test_full_partial_recovery_preserves_explicit_small_file_authorization(self):
+        from movie_night import ApprovalStore
+        self.h.worker.probe=lambda _:dict(format={'duration':'8880'},streams=[dict(codec_type='video',codec_name='h264',width=3840,height=1600)])
+        with patch('movie_night.MIN_BYTES',5_000_000_000),patch('worker_candidate.MIN_BYTES',5_000_000_000):
+            token=self.offer()
+            answer=self.source.confirm('fixture',self.id,token)
+            job=answer['download']['jobId']
+            store=ApprovalStore(self.h.db)
+            try:store.transition(job,'downloading',bytes_received=len(self.h.body))
+            finally:store.close()
+            directory=self.h.media/'Movies'
+            directory.mkdir(exist_ok=True)
+            (directory/(Path(self.item['choice']['destination']).name+'.part')).write_bytes(self.h.body)
+            self.assertTrue(self.h.worker.finish_transferred(job))
+            self.assertTrue(self.c.downloads('fixture')['jobs'][0]['indexed'])
 
     def test_http_options_are_read_only_and_confirmation_requires_token(self):
         with patch.object(self.source,'choices',return_value=[self.item]):
