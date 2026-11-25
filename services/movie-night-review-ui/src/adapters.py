@@ -36,7 +36,7 @@ def ffprobe(path):
     return json.loads(result.stdout)
 
 
-def validate_file(path, choice, probe=ffprobe):
+def validate_file(path, choice, probe=ffprobe, *, owner_selected=False):
     """Validate completed bytes before publication, without modifying the file."""
     worker.safe_directory(path.parent)
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
@@ -55,12 +55,17 @@ def validate_file(path, choice, probe=ffprobe):
         width,height=video.get('width',0),video.get('height',0)
         max_width,max_height=(3840,2160) if choice.quality=='2160p' else (1920,1080)
         full_hd=(type(width) is int and type(height) is int and 0<width<=max_width and 0<height<=max_height and (width==max_width or height==max_height))
-        if len(videos)!=1 or not codec or video.get('codec_name')!=codec or not full_hd:
+        discover = owner_selected is True and choice.codec == 'AUTO'
+        actual = video.get('codec_name')
+        if len(videos)!=1 or not full_hd or (actual not in ('h264','hevc','av1') if discover else not codec or actual!=codec):
             raise ValueError('confirmed quality/codec mismatch')
         after=os.stat(path,follow_symlinks=False)
         if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns):
             raise ValueError('file changed during validation')
-        return {'actualSize':choice.size,'sha256':digest.hexdigest(),'mediaProbePassed':True,'destination':choice.destination}
+        proof = {'actualSize':choice.size,'sha256':digest.hexdigest(),'mediaProbePassed':True,'destination':choice.destination}
+        if discover:
+            proof.update(actualCodec={'h264':'AVC','hevc':'HEVC','av1':'AV1'}[actual], actualWidth=width, actualHeight=height)
+        return proof
     finally: os.close(fd)
 
 
@@ -97,7 +102,9 @@ class MediaIndex:
             existing=c.execute('SELECT filename,size,sha FROM media WHERE id=?',(choice.imdb,)).fetchone()
             expected=(path.name,choice.size,proof['sha256'])
             if existing and existing!=expected: raise ValueError('index conflict; preserve existing entry')
-            c.execute('INSERT OR IGNORE INTO media VALUES (?,?,?,?,?,0)',(choice.imdb,path.name,json.dumps(asdict(choice)),choice.size,proof['sha256']))
+            metadata=asdict(choice)
+            if choice.codec=='AUTO':metadata['codec']=proof['actualCodec']
+            c.execute('INSERT OR IGNORE INTO media VALUES (?,?,?,?,?,0)',(choice.imdb,path.name,json.dumps(metadata),choice.size,proof['sha256']))
         return {'catalogId':choice.imdb,'existingRouteVerified':False}
 
     def resolve(self, imdb, include_pending=False):
@@ -143,7 +150,7 @@ class WorkerAdapter:
             if final.exists() or final.is_symlink() or partial.is_symlink() or not partial.is_file() or partial.stat().st_size!=choice.size:
                 return False
             if self.storage_guard:self.storage_guard()
-            proof=validate_file(partial,choice,self.probe)
+            proof=validate_file(partial,choice,self.probe,owner_selected=payload.get('authorization')=='owner-selected-source')
             os.link(partial,final,follow_symlinks=False);os.unlink(partial)
             store.transition(pid,'downloaded',bytes_received=choice.size,evidence=proof)
             self.index.register(choice,proof)
@@ -176,7 +183,7 @@ class WorkerAdapter:
             proof={}
             def validate(destination,partial,entry):
                 if self.storage_guard:self.storage_guard()
-                proof.update(validate_file(partial,choice,self.probe))
+                proof.update(validate_file(partial,choice,self.probe,owner_selected=payload.get('authorization')=='owner-selected-source'))
             last=[0.0]
             def progress(count):
                 now=time.monotonic()
