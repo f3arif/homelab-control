@@ -6,7 +6,8 @@ import json
 import re
 import secrets
 import time
-from movie_night import Choice, ROOT, QUOTA, RESERVE, canonical, present_movie
+from movie_night import Choice, ROOT, QUOTA, RESERVE, CAP, OWNER_CAP, canonical, present_movie
+from selected_stream import parse_hint, matches as selected_matches, matches_title, source_metadata
 from download_provider import norm
 from cached_sources import configured_comet
 import worker_candidate as worker
@@ -33,15 +34,17 @@ class ConfirmedSources:
         if not isinstance(imdb, str) or not ID.fullmatch(imdb):
             raise ValueError('Choose a valid movie from the title search.')
         if data['action'] == 'source-options':
-            return c.similar.start(principal, 'source-options', (imdb, int(c.clock()) // 60),
-                                  lambda: self.options(principal, imdb))
+            selection = parse_hint(data['selectedSource']) if 'selectedSource' in data else None
+            key = (imdb, canonical(selection), int(c.clock()) // 60)
+            return c.similar.start(principal, 'source-options', key,
+                                  lambda: self.options(principal, imdb, selection))
         option = data.get('optionId')
         if not isinstance(option, str) or not OPTION.fullmatch(option) or data.get('confirmed') is not True:
             raise ValueError('Show the source sizes and qualities, then ask the owner to choose one before adding.')
         return c.similar.start(principal, 'source-confirmation', (imdb, option),
                               lambda: self.confirm(principal, imdb, option))
 
-    def choices(self, imdb, movie):
+    def choices(self, imdb, movie, selection=None):
         provider = self.c.worker.provider
         with worker.https_get(configured_comet() + '/stream/movie/' + imdb + '.json') as response:
             raw = response.read(2_000_001)
@@ -49,6 +52,7 @@ class ConfirmedSources:
             raise ValueError('Source response is too large. Try again later.')
         streams = json.loads(raw).get('streams', [])
         hashes = []
+        metadata = {}
         for stream in streams[:500]:
             if not isinstance(stream, dict):
                 continue
@@ -57,6 +61,10 @@ class ConfirmedSources:
             value = match[1] if match else stream.get('infoHash', '')
             if isinstance(value, str) and re.fullmatch('[a-fA-F0-9]{40}', value) and value.lower() not in hashes:
                 hashes.append(value.lower())
+            if isinstance(value, str) and re.fullmatch('[a-fA-F0-9]{40}', value):
+                metadata.setdefault(value.lower(), []).append(stream)
+        if selection and selection['infoHash']:
+            hashes = [h for h in hashes if h == selection['infoHash']]
         cache = {}
         for offset in range(0, min(len(hashes), 200), 100):
             page = provider._api('checkcached', {'hash': ','.join(hashes[offset:offset + 100]),
@@ -72,9 +80,16 @@ class ConfirmedSources:
             for file in row.get('files', []):
                 name = file.get('name', '')
                 label = norm(Path(name).name)
-                if not isinstance(name, str) or not label.startswith(title + ' '):
+                if not isinstance(name, str):
+                    continue
+                if selection:
+                    if not selected_matches(selection, source_hash, name, file.get('size')) or not matches_title(name, movie):
+                        continue
+                elif not label.startswith(title + ' '):
                     continue
                 text = name + ' ' + str(row.get('name', ''))
+                if selection:
+                    text += ' ' + ' '.join(source_metadata(s, name) for s in metadata.get(source_hash, []))
                 if re.search(r'(?i)\b(sample|trailer|bonus|featurettes?|commentary|rifftrax)\b', norm(text)):
                     continue
                 quality = re.search(r'(?i)(?<!\d)(1080p|2160p)(?!\d)', text)
@@ -82,31 +97,37 @@ class ConfirmedSources:
                     ('HEVC', r'(?i)(?:hevc|[xh][ .]?265)'),
                     ('AVC', r'(?i)(?:avc|[xh][ .]?264)'),
                     ('AV1', r'(?i)\bav0?1\b')) if re.search(pattern, text)), None)
-                if not quality or not codec:
+                if not quality or (not codec and not selection):
                     continue
+                codec = codec or 'AUTO'
                 try:
                     choice = Choice(imdb, movie['name'], movie['year'], 'Exact owner-selected release',
                                     'torbox', 0, 0, name, quality[1].lower(), codec, file.get('size'),
                                     ROOT + '/' + imdb + '.' + str(movie['year']) + Path(name).suffix.lower()).validate(owner_selected=True)
                 except (ValueError, TypeError):
                     continue
-                found.setdefault((name, choice.size), {'hash': source_hash, 'choice': asdict(choice), 'movie': movie})
+                if not selection and choice.size > CAP:
+                    continue
+                key = (source_hash, name, choice.size) if selection else (name, choice.size)
+                found.setdefault(key, {'hash': source_hash, 'choice': asdict(choice), 'movie': movie})
         return sorted(found.values(), key=lambda item: item['choice']['size'])
 
-    def options(self, principal, imdb):
+    def options(self, principal, imdb, selection=None):
         c = self.c
         movie = c.similar.source.admission(imdb)
         if not c.similar.eligible([movie], principal):
             raise ValueError('This movie is no longer eligible for Movie Night.')
-        candidates = self.choices(imdb, movie)
+        candidates = self.choices(imdb, movie, selection) if selection else self.choices(imdb, movie)
+        if selection and len(candidates) != 1:
+            raise ValueError('The exact selected file is unavailable or ambiguous in the server cache. Refresh streams and choose again.')
         now = int(c.clock())
         output = []
         with closing(c.feedback.connect()) as db, db:
             remaining = self.remaining(db)
             db.execute("DELETE FROM movie_source_offers WHERE expires<? AND state='offered'", (now,))
             # A bounded spread preserves small, medium and large files at both resolutions.
-            selected = []
-            for quality in ('1080p', '2160p'):
+            selected = list(candidates) if selection else []
+            for quality in (() if selection else ('1080p', '2160p')):
                 group = [x for x in candidates if x['choice']['quality'] == quality]
                 indices = sorted(set([0, 1, 2, len(group)//2, len(group)-2, len(group)-1]))
                 selected.extend(group[i] for i in indices if 0 <= i < len(group))
@@ -120,12 +141,15 @@ class ConfirmedSources:
                 output.append(dict(option_id=option, quality=choice['quality'], codec=choice['codec'],
                     size_bytes=choice['size'], size_gb=round(choice['size']/1e9, 2),
                     release=Path(choice['provider_name']).name[:200],
-                    additional_budget_bytes=extra))
+                    additional_budget_bytes=extra,
+                    codec_inspection_required=choice['codec'] == 'AUTO',
+                    file_name=Path(choice['provider_name']).name, source_hash=candidate['hash']))
         return dict(movie={'id': imdb, 'name': movie['name'], 'releaseInfo': str(movie['year'])},
                     source_options=output, confirmation_required=True, expires_epoch=now + LIFETIME,
                     remaining_budget_bytes=remaining,
                     budget_scope='local-automatic-transfers',
-                    explicit_source_confirmation_allowed=True,
+                    explicit_source_confirmation_allowed=True, selected_source_matched=bool(selection),
+                    manual_limit_bytes=OWNER_CAP,
                     instruction='Show sizes, quality and release details, then wait for the owner to choose. The remaining budget is a local automatic-download allowance, separate from disk space or TorBox account limits. A zero automatic allowance still permits the owner to confirm a listed exact file with its displayed additional transfer amount.')
 
     @staticmethod

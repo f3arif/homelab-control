@@ -30,9 +30,9 @@ class DownloadBoundsTests(unittest.TestCase):
     def test_bounded_inventory_accepts_large_qualifying_file_without_small_fallback(self):
         m = {'id': 'tt12345', 'name': 'Fixture One', 'year': 2024}
         files = [dict(id=n, name='Fixture.One.2024.1080p.x264.mkv', size=size,
-                      infected=False, zipped=False) for n, size in enumerate((4_999_999_999,5_000_000_000,15_000_000_000,15_000_000_001))]
+                      infected=False, zipped=False) for n, size in enumerate((4_999_999_999,5_000_000_000,18_000_000_000,18_000_000_001))]
         row = dict(id=1, download_finished=True, download_present=True, files=files)
-        self.assertEqual([5_000_000_000,15_000_000_000], [c.size for c in InventoryChoices.parse(m,[row],complete=False)])
+        self.assertEqual([5_000_000_000,18_000_000_000], [c.size for c in InventoryChoices.parse(m,[row],complete=False)])
 
 
 class StorageTests(unittest.TestCase):

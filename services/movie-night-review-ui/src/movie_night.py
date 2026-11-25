@@ -16,6 +16,7 @@ MIN_BYTES = 5_000_000_000
 CAP = 18_000_000_000
 RESERVE = 50 * 1024**3
 QUOTA = 100_000_000_000
+OWNER_CAP = QUOTA - 1  # Explicit single-file approval must fit the existing worker batch budget.
 ROOT = '/srv/afzmedia/Media/MovieNight/Movies'
 PREFERRED_TAGS = {'obsession', 'relationship tension', 'twists', 'suspense'}
 SEEN_TITLES = {'heretic', 'companion'}
@@ -47,8 +48,11 @@ class Choice:
         if self.provider != 'torbox' or any(type(n) is not int or n < 0 for n in (self.torrent_id, self.file_id)):
             raise ValueError('exact provider file required')
         minimum = 1 if owner_selected is True else MIN_BYTES
-        if type(self.size) is not int or not minimum <= self.size <= CAP:
-            raise ValueError(f'known size between {minimum:,} and {CAP:,} bytes required')
+        maximum = OWNER_CAP if owner_selected is True else CAP
+        if type(self.size) is not int or not minimum <= self.size <= maximum:
+            raise ValueError(f'known size between {minimum:,} and {maximum:,} bytes required')
+        if self.codec == 'AUTO' and owner_selected is not True:
+            raise ValueError('codec inspection requires exact owner-selected file authorization')
         if self.quality not in ('1080p', '2160p'):
             raise ValueError('Movie Night requires 1080p or 2160p')
         for value in (self.title, self.edition, self.provider_name, self.codec):

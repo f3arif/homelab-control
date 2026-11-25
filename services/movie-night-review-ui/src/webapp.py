@@ -447,6 +447,7 @@ def create_app(controller, authorize=None, *, allowed_origin='http://localhost',
         principal=identity(request)
         return JSONResponse({'version':1,'addEnabled':controller.review_enabled,
                              'selectionDownloadEnabled':bool(controller.review_enabled and controller.enabled and controller.auto_downloads and controller.mobile_selections),
+                             'streamSourceDownloadEnabled':bool(controller.confirmed_sources and controller.enabled),
                              'csrfToken':controller.token(principal)},
                             headers={'Cache-Control':'private, no-store'})
     @app.post(prefix+'/api/feedback')
