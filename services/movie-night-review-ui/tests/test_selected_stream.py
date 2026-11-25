@@ -131,8 +131,35 @@ class SelectedStreamTests(sources.SourceTests):
             metadata=json.loads(db.execute('SELECT metadata FROM media WHERE id=?',(self.id,)).fetchone()[0])
         self.assertEqual('AVC',metadata['codec'])
 
+    def test_confirmed_transfer_finishes_after_requesting_client_closes(self):
+        from fastapi.testclient import TestClient
+        self.item['choice']['codec']='AUTO'
+        self.h.worker.run=WorkerAdapter.run.__get__(self.h.worker,WorkerAdapter)
+        self.h.worker.probe=lambda _:dict(format={'duration':'8880'},streams=[dict(codec_type='video',codec_name='h264',width=3840,height=1600)])
+        observer=TestClient(self.h.app)
+        observer.headers['x-fixture']='yes'
+        original=self.h.client
+        self.h.worker.verify_route=lambda imdb,size:observer.head('/movie-night/media/'+imdb).status_code==200
+        self.h.slow=True
+        token=self.offer()
+        response=original.post('/movie-night/api/feedback',json=dict(action='confirm-source',imdb=self.id,optionId=token,confirmed=True),headers=self.h.headers)
+        self.assertEqual(200,response.status_code,response.text)
+        self.c.similar.jobs[response.json()['jobId']]['future'].result(5)
+        answer=original.post('/movie-night/api/feedback',json=dict(action='similar-status',jobId=response.json()['jobId']),headers=self.h.headers)
+        job_id=answer.json()['download']['jobId']
+        self.assertTrue(self.h.entered.wait(2))
+        self.assertFalse(self.c.futures[job_id].done())
+        original.close()
+        self.h.client=observer
+        self.h.block.set()
+        self.assertTrue(self.c.futures[job_id].result(5)['indexed'])
+        self.assertEqual(200,observer.head('/movie-night/media/'+self.id).status_code)
+        self.assertEqual(self.h.body,self.h.index.resolve(self.id).read_bytes())
+
+
 for name in list(vars(sources.SourceTests)):
     if name.startswith('test_') and name not in vars(SelectedStreamTests):
         setattr(SelectedStreamTests,name,None)
 
 if __name__=='__main__':unittest.main(verbosity=2)
+

@@ -1,0 +1,42 @@
+{
+  "project": "Movie Night exact selected-stream server downloads",
+  "runtimeSourceCommit": "4455807a72fd4c3d91b254d367d3b1abd49d9c34",
+  "tests": {
+    "passed": 442,
+    "failures": 0,
+    "errors": 0,
+    "command": "python -m unittest discover -s tests -p 'test_*.py' -q",
+    "runtime": "/home/coolyo/afz-movie-night-runtime-312/bin/python",
+    "criticalProofs": [
+      "Exact hash, filename and byte binding; no source substitution",
+      "Unknown codec accepted only with durable exact-source authorization and post-download validation",
+      "Actual fixture worker finishes and indexes after the requesting TestClient closes; independent observer verifies media",
+      "Automatic 5–18 GB profile and existing 100 GB batch bound preserved",
+      "Existing owner auth/CSRF, tombstones, duplicate/index/delete/storage flows remain covered"
+    ]
+  },
+  "livePreflight": {
+    "imdb": "tt0266915",
+    "title": "Rush Hour 2",
+    "year": 2001,
+    "fileName": "Rush.Hour.2.2001.BluRay.REMUX.1080p.mkv",
+    "bytes": 23916587980,
+    "candidateCount": 1,
+    "codec": "AUTO; inspected after download",
+    "downloadStarted": false
+  },
+  "deployment": {
+    "state": "prepared-not-applied",
+    "runtime": "/home/coolyo/afz-stremio-secondhost-20260918/movie-night-review-service/src",
+    "stage": "/home/coolyo/AFZ/Recovery/movie-night-stream-source-358/runtime-stage",
+    "guard": "All six before hashes, staged after hashes, no active jobs or queued requests; source-only rollback",
+    "guardCounts": {
+      "activeJobs": 0,
+      "jobs": 13,
+      "mobileSelections": 4
+    },
+    "ownerApproval": "AFZ Bridge returned pending_approval for protected Movie Night service stop/apply/start. No runtime source swap or service change occurred.",
+    "rollback": "Guarded Release.swap(True); restart only Movie Night; never restore preference/index DBs or media."
+  },
+  "scope": "Main Android R66; no real movie transfer, no OnePlus or TV operation, no merge"
+}
